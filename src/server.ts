@@ -36,11 +36,3 @@ app.listen(port, () => {
   console.log(`Servidor rodando na porta ${port}`);
 });
 ```
-
-⚠️ **Atenção:** 
-- A **primeira linha** deve começar diretamente com `import express from 'express';` (sem ``` ou texto antes).
-- A **última linha** deve terminar em `});` (sem ``` ou crases depois).
-
-5. Clique em **`Commit changes...`** e confirme no botão verde.
-
-Assim que salvar, volte na aba do Railway e observe a aba **Deployments**.
