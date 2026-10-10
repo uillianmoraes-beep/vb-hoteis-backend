@@ -1,4 +1,3 @@
-<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:system-ui;padding:24px;background:#fff;color:#111}typescript
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -88,7 +87,3 @@ app.get('/produtos', async (req: Request, res: Response) => {
     res.status(500).json({ error: (error as Error).message });
   }
 });
-
-app.listen(Number(port), '0.0.0.0', () => {
-  console.log(`Servidor rodando na porta ${port}`);
-});</style></head><body><div class="preview-root"><h1>Preview</h1><p>Estilos aplicados ao documento de exemplo.</p><button class="btn">Botão</button><div class="card price-card best-offer"><div class="price-name">Plano</div><div class="price-value">R$ 99</div></div></div></body></html>
