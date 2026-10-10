@@ -40,21 +40,21 @@ app.get('/health', async (req: Request, res: Response) => {
 
 app.get('/quartos', async (req: Request, res: Response) => {
   try {
-    const query = `
-      SELECT
-        q.id,
-        q.numero,
-        q.status,
-        q.observacoes,
-        c.nome AS categoria,
-        c.valor_hora,
-        c.valor_adicional_hora,
-        c.valor_pernoite,
-        c.valor_diaria
-      FROM quartos q
-      INNER JOIN categorias_quartos c ON q.categoria_id = c.id
-      ORDER BY q.numero ASC;
-    `;
+    const query = [
+      'SELECT',
+      '  q.id,',
+      '  q.numero,',
+      '  q.status,',
+      '  q.observacoes,',
+      '  c.nome AS categoria,',
+      '  c.valor_hora,',
+      '  c.valor_adicional_hora,',
+      '  c.valor_pernoite,',
+      '  c.valor_diaria',
+      'FROM quartos q',
+      'INNER JOIN categorias_quartos c ON q.categoria_id = c.id',
+      'ORDER BY q.numero ASC;',
+    ].join('\n');
 
     const result = await pool.query(query);
 
@@ -133,4 +133,7 @@ app.get('/produtos', async (req: Request, res: Response) => {
 });
 
 app.listen(port, '0.0.0.0', () => {
-  console.log(`API VB
+  console.log(
+    'API VB Hoteis & Moteis rodando na porta ' + port
+  );
+});
