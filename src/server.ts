@@ -42,19 +42,17 @@ app.get('/quartos', async (req: Request, res: Response) => {
   try {
     const query = [
       'SELECT',
-      '  q.id,',
-      '  q.numero,',
-      '  q.status,',
-      '  q.observacoes,',
-      '  c.nome AS categoria,',
-      '  c.valor_hora,',
-      '  c.valor_adicional_hora,',
-      '  c.valor_pernoite,',
-      '  c.valor_diaria',
-      'FROM quartos q',
-      'INNER JOIN categorias_quartos c ON q.categoria_id = c.id',
-      'ORDER BY q.numero ASC;',
-    ].join('\n');
+      'id,',
+      'estabelecimento_id,',
+      'categoria_id,',
+      'numero,',
+      'andar,',
+      'modalidade_atual,',
+      'modalidade_padrao,',
+      'status',
+      'FROM acomodacoes',
+      'ORDER BY numero ASC;',
+    ].join(' ');
 
     const result = await pool.query(query);
 
@@ -93,20 +91,20 @@ app.patch('/quartos/:id/status', async (req: Request, res: Response) => {
 
   try {
     const result = await pool.query(
-      'UPDATE quartos SET status = $1 WHERE id = $2 RETURNING *;',
+      'UPDATE acomodacoes SET status = $1 WHERE id = $2 RETURNING *;',
       [status, id]
     );
 
     if (result.rowCount === 0) {
       res.status(404).json({
-        error: 'Quarto não encontrado.',
+        error: 'Acomodação não encontrada.',
       });
       return;
     }
 
     res.json({
       message: 'Status atualizado com sucesso!',
-      quarto: result.rows[0],
+      acomodacao: result.rows[0],
     });
   } catch (error) {
     res.status(500).json({
