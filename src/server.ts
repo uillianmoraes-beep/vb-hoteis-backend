@@ -12,17 +12,14 @@ const port = process.env.PORT || 8080;
 app.use(cors());
 app.use(express.json());
 
-// Conexão com o PostgreSQL do Railway
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
-// 1. Rota de Boas-vindas
 app.get('/', (req: Request, res: Response) => {
   res.json({ status: 'ok', message: 'API VB Hoteis & Moteis rodando com sucesso!' });
 });
 
-// 2. Healthcheck
 app.get('/health', async (req: Request, res: Response) => {
   try {
     await pool.query('SELECT 1');
@@ -32,7 +29,6 @@ app.get('/health', async (req: Request, res: Response) => {
   }
 });
 
-// 3. Listar Quartos com Categoria e Tarifas
 app.get('/quartos', async (req: Request, res: Response) => {
   try {
     const query = `
@@ -57,7 +53,6 @@ app.get('/quartos', async (req: Request, res: Response) => {
   }
 });
 
-// 4. Alterar Status do Quarto (disponivel, ocupado, limpeza, manutencao)
 app.patch('/quartos/:id/status', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status } = req.body;
@@ -85,7 +80,6 @@ app.patch('/quartos/:id/status', async (req: Request, res: Response) => {
   }
 });
 
-// 5. Listar Produtos (Frigobar / Bar / Conveniência)
 app.get('/produtos', async (req: Request, res: Response) => {
   try {
     const result = await pool.query('SELECT * FROM produtos ORDER BY nome ASC;');
@@ -98,8 +92,3 @@ app.get('/produtos', async (req: Request, res: Response) => {
 app.listen(Number(port), '0.0.0.0', () => {
   console.log(`Servidor rodando na porta ${port}`);
 });</style></head><body><div class="preview-root"><h1>Preview</h1><p>Estilos aplicados ao documento de exemplo.</p><button class="btn">Botão</button><div class="card price-card best-offer"><div class="price-name">Plano</div><div class="price-value">R$ 99</div></div></div></body></html>
-
-
-
-
-
