@@ -10,4 +10,4 @@ app.get('/', (req, res) => { res.json({ status: 'ok', message: 'API VB Hoteis & 
 
 app.get('/health', async (req, res) => { try { const client = await pool.connect(); await client.query('SELECT 1'); client.release(); res.json({ status: 'healthy', database: 'connected' }); } catch (error: any) { res.status(500).json({ status: 'unhealthy', database: error.message }); } });
 
-app.listen(port, () => { console.log('Servidor rodando na porta ' + port); });
+app.listen(Number(port), '0.0.0.0', () => { console.log('Servidor rodando na porta ' + port); });
