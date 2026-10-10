@@ -6,7 +6,7 @@ import { Pool } from 'pg';
 dotenv.config();
 
 const app = express();
-const port = process.env.PORT || 8080;
+const port = Number(process.env.PORT || 8080);
 
 app.use(cors());
 app.use(express.json());
@@ -16,22 +16,32 @@ const pool = new Pool({
 });
 
 app.get('/', (req: Request, res: Response) => {
-  res.json({ status: 'ok', message: 'API VB Hoteis & Moteis rodando com sucesso!' });
+  res.json({
+    status: 'ok',
+    message: 'API VB Hoteis & Moteis rodando com sucesso!',
+  });
 });
 
 app.get('/health', async (req: Request, res: Response) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ status: 'healthy', database: 'connected' });
+
+    res.json({
+      status: 'healthy',
+      database: 'connected',
+    });
   } catch (error) {
-    res.status(500).json({ status: 'unhealthy', error: (error as Error).message });
+    res.status(500).json({
+      status: 'unhealthy',
+      error: (error as Error).message,
+    });
   }
 });
 
 app.get('/quartos', async (req: Request, res: Response) => {
   try {
     const query = `
-      SELECT 
+      SELECT
         q.id,
         q.numero,
         q.status,
@@ -45,10 +55,17 @@ app.get('/quartos', async (req: Request, res: Response) => {
       INNER JOIN categorias_quartos c ON q.categoria_id = c.id
       ORDER BY q.numero ASC;
     `;
+
     const result = await pool.query(query);
-    res.json({ total: result.rowCount, quartos: result.rows });
+
+    res.json({
+      total: result.rowCount,
+      quartos: result.rows,
+    });
   } catch (error) {
-    res.status(500).json({ error: (error as Error).message });
+    res.status(500).json({
+      error: (error as Error).message,
+    });
   }
 });
 
@@ -56,11 +73,22 @@ app.patch('/quartos/:id/status', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status } = req.body;
 
-  const statusPermitidos = ['disponivel', 'ocupado', 'limpeza', 'manutencao'];
-  if (!statusPermitidos.includes(status)) {
-    return res.status(400).json({ 
-      error: 'Status inválido. Use: disponivel, ocupado, limpeza ou manutencao.' 
+  const statusPermitidos = [
+    'disponivel',
+    'ocupado',
+    'limpeza',
+    'manutencao',
+  ];
+
+  if (
+    typeof status !== 'string' ||
+    !statusPermitidos.includes(status)
+  ) {
+    res.status(400).json({
+      error:
+        'Status inválido. Use: disponivel, ocupado, limpeza ou manutencao.',
     });
+    return;
   }
 
   try {
@@ -70,20 +98,39 @@ app.patch('/quartos/:id/status', async (req: Request, res: Response) => {
     );
 
     if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'Quarto não encontrado.' });
+      res.status(404).json({
+        error: 'Quarto não encontrado.',
+      });
+      return;
     }
 
-    res.json({ message: 'Status atualizado com sucesso!', quarto: result.rows[0] });
+    res.json({
+      message: 'Status atualizado com sucesso!',
+      quarto: result.rows[0],
+    });
   } catch (error) {
-    res.status(500).json({ error: (error as Error).message });
+    res.status(500).json({
+      error: (error as Error).message,
+    });
   }
 });
 
 app.get('/produtos', async (req: Request, res: Response) => {
   try {
-    const result = await pool.query('SELECT * FROM produtos ORDER BY nome ASC;');
-    res.json({ total: result.rowCount, produtos: result.rows });
+    const result = await pool.query(
+      'SELECT * FROM produtos ORDER BY nome ASC;'
+    );
+
+    res.json({
+      total: result.rowCount,
+      produtos: result.rows,
+    });
   } catch (error) {
-    res.status(500).json({ error: (error as Error).message });
+    res.status(500).json({
+      error: (error as Error).message,
+    });
   }
 });
+
+app.listen(port, '0.0.0.0', () => {
+  console.log(`API VB
