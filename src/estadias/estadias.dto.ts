@@ -55,6 +55,8 @@ export class FecharEstadiaDto {
 }
 
 export class CancelarEstadiaDto {
+  /** login e senha de quem libera, quando o perfil não tem a permissão */
+  @IsOptional() @ValidateNested() @Type(() => AutorizacaoDto) autorizacao?: AutorizacaoDto;
   @IsString() @MinLength(3) @MaxLength(300) motivo!: string;
   @IsOptional() @IsIn(['livre', 'limpeza']) destino?: 'livre' | 'limpeza';
 }
@@ -75,6 +77,8 @@ export class LancarItemDto {
 }
 
 export class EstornarItemDto {
+  /** login e senha de quem libera, quando o perfil não tem a permissão */
+  @IsOptional() @ValidateNested() @Type(() => AutorizacaoDto) autorizacao?: AutorizacaoDto;
   @IsString() @MinLength(3) @MaxLength(300) motivo!: string;
 }
 
@@ -92,6 +96,8 @@ export class TrocarCobrancaDto {
 }
 
 export class CorrigirEstadiaDto {
+  /** login e senha de quem libera, quando o perfil não tem a permissão */
+  @IsOptional() @ValidateNested() @Type(() => AutorizacaoDto) autorizacao?: AutorizacaoDto;
   @IsOptional() @IsISO8601() entradaEm?: string;
   @IsOptional() @IsUUID() tabelaId?: string;
   @IsString() @MinLength(3) @MaxLength(300) motivo!: string;

@@ -358,6 +358,8 @@ export class EstadiasService {
     const item = await this.itens.findOne({ where: { id: itemId, estadiaId: e.id } });
     if (!item) throw new NotFoundException('Item não encontrado.');
     if (item.status === 'estornado') throw new BadRequestException('Este item já foi estornado.');
+    const libE = await this.liberarAcao(u, 'estadias.estornar', 'estornar itens', dto.autorizacao);
+    if (libE) dto.motivo = `${dto.motivo.trim()} · liberado por ${libE}`;
     await this.ds.transaction(async (m) => {
       await m.update(EstadiaItem, { id: item.id }, { status: 'estornado', motivoEstorno: dto.motivo.trim(), estornadoPor: u.nome, estornadoEm: new Date() });
       await this.registrar(m, u, e.id, 'estorno', `Estorno: ${item.descricao} · ${brl(centavos(item.total))} · ${dto.motivo.trim()}`);
@@ -433,6 +435,8 @@ export class EstadiasService {
 
   async corrigir(u: UsuarioToken, id: string, dto: CorrigirEstadiaDto) {
     const e = await this.buscarAberta(u, id);
+    const libC = await this.liberarAcao(u, 'estadias.corrigir', 'corrigir a entrada', dto.autorizacao);
+    if (libC) dto.motivo = `${dto.motivo.trim()} · liberado por ${libC}`;
     const motor = await this.tarifas.motor(u.empresaId, e.ambienteId);
     const mudancas: string[] = [];
     const dados: Partial<Estadia> = {};
@@ -459,6 +463,29 @@ export class EstadiasService {
   }
 
   /** Confere o limite do perfil; acima dele, exige login e senha de quem pode liberar. */
+  /**
+   * Ação que o perfil não tem: pede login e senha de alguém que tenha a permissão.
+   * Retorna o nome de quem liberou (ou null se o próprio usuário pode).
+   */
+  private async liberarAcao(u: UsuarioToken, permissao: string, nomeAcao: string, aut?: { login: string; senha: string }) {
+    if (temPermissao(u, permissao)) return null;
+    if (!aut) throw new ForbiddenException(`Seu perfil não pode ${nomeAcao}. Peça para alguém com permissão liberar com login e senha.`);
+    const quem = await this.usuarios
+      .createQueryBuilder('x')
+      .addSelect('x.senhaHash')
+      .leftJoinAndSelect('x.perfil', 'perfil')
+      .where('lower(x.login) = lower(:l)', { l: aut.login.trim() })
+      .andWhere('x.empresaId = :e', { e: u.empresaId })
+      .getOne();
+    if (!quem || !quem.ativo || !(await bcrypt.compare(aut.senha, quem.senhaHash))) {
+      throw new ForbiddenException('Login ou senha de quem libera estão incorretos.');
+    }
+    const perms = quem.perfil?.permissoes ?? [];
+    if (!perms.includes('*') && !perms.includes(permissao)) throw new ForbiddenException(`${quem.nome} também não pode ${nomeAcao}.`);
+    if (quem.id === u.sub) throw new ForbiddenException('A liberação precisa ser de outra pessoa.');
+    return quem.nome;
+  }
+
   private async conferirLimite(u: UsuarioToken, total: number, desconto: number, acrescimo: number, dto: FecharEstadiaDto) {
     const pct = (v: number) => (total > 0 ? (v / total) * 100 : v > 0 ? 100 : 0);
     const precisa = (limites: { descontoPercentual?: number; acrescimoPercentual?: number; cortesia?: boolean } | undefined) => {
@@ -572,6 +599,8 @@ export class EstadiasService {
 
   async cancelar(u: UsuarioToken, id: string, dto: CancelarEstadiaDto) {
     const e = await this.buscarAberta(u, id);
+    const libX = await this.liberarAcao(u, 'estadias.cancelar', 'cancelar entradas', dto.autorizacao);
+    if (libX) dto.motivo = `${dto.motivo.trim()} · liberado por ${libX}`;
     const unidade = await this.unidades.findOneOrFail({ where: { id: e.unidadeId } });
     await this.ds.transaction(async (m) => {
       await m.update(Estadia, { id }, {

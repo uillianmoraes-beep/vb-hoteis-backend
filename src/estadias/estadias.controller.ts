@@ -38,7 +38,7 @@ export class EstadiasController {
 
   @Post(':id/itens/:itemId/estornar')
   @HttpCode(200)
-  @Requer('estadias.estornar')
+  @Requer('estadias.operar') // sem a permissão própria, pede senha de quem libera
   estornar(
     @Usuario() u: UsuarioToken,
     @Param('id', ParseUUIDPipe) id: string,
@@ -85,7 +85,7 @@ export class EstadiasController {
 
   @Post(':id/corrigir')
   @HttpCode(200)
-  @Requer('estadias.corrigir')
+  @Requer('estadias.operar') // sem a permissão própria, pede senha de quem libera
   corrigir(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CorrigirEstadiaDto) {
     return this.service.corrigir(u, id, dto);
   }
@@ -99,7 +99,7 @@ export class EstadiasController {
 
   @Post(':id/cancelar')
   @HttpCode(200)
-  @Requer('estadias.cancelar')
+  @Requer('estadias.operar') // sem a permissão própria, pede senha de quem libera
   cancelar(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CancelarEstadiaDto) {
     return this.service.cancelar(u, id, dto);
   }
