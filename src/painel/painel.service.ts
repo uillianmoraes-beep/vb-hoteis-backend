@@ -117,6 +117,8 @@ export class PainelService {
               trechoInicio: aberta.conta.trechoInicio,
               trechoFim: aberta.conta.trechoFim,
               semPreco: aberta.conta.semPreco,
+              consumo: aberta.conta.consumo / 100,
+              pacote: aberta.conta.pacote,
             }
           : null,
       };

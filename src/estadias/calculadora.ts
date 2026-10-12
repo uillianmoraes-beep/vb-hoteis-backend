@@ -42,6 +42,10 @@ export interface EntradaCalc {
   minutosUso: number;
   /** minutos entre a entrada e o fim do pernoite (só para modalidade pernoite) */
   minutosAteFimPernoite: number | null;
+  /** pacote: cobra no mínimo este período (id) */
+  periodoMinimoId?: string | null;
+  /** consumo já somado, em centavos */
+  consumo?: number;
 }
 
 export interface ResultadoCalc {
@@ -50,6 +54,7 @@ export interface ResultadoCalc {
   horasAdicionais: number;
   valorPessoas: number;
   pessoasExtras: number;
+  consumo: number;
   total: number;
   /** minutos até a cobrança mudar (null = não muda mais) */
   proximaViradaMin: number | null;
@@ -70,9 +75,12 @@ export function hhmmParaMin(h: string | null | undefined): number | null {
 
 export function calcularConta(e: EntradaCalc): ResultadoCalc {
   const tol = Math.max(0, e.regras.toleranciaMin);
-  const horas = e.periodos
+  let horas = e.periodos
     .filter((p) => p.tipo === 'horas' && (p.duracaoMin ?? 0) > 0)
     .sort((a, b) => (a.duracaoMin ?? 0) - (b.duracaoMin ?? 0));
+  // pacote: começa a cobrar a partir do período escolhido
+  const minimo = e.periodoMinimoId ? horas.find((p) => p.id === e.periodoMinimoId) : undefined;
+  if (minimo) horas = horas.filter((p) => (p.duracaoMin ?? 0) >= (minimo.duracaoMin ?? 0));
   const pernoite = e.periodos.find((p) => p.tipo === 'pernoite') ?? null;
   const preco = (id: string) => e.precos.porPeriodo[id] ?? 0;
   const min = Math.max(0, Math.floor(e.minutosUso));
@@ -86,6 +94,7 @@ export function calcularConta(e: EntradaCalc): ResultadoCalc {
     horasAdicionais: 0,
     valorPessoas,
     pessoasExtras,
+    consumo: Math.max(0, e.consumo ?? 0),
     total: 0,
     proximaViradaMin: null,
     proximoNome: null,
@@ -164,7 +173,7 @@ export function calcularConta(e: EntradaCalc): ResultadoCalc {
     }
   }
 
-  r.total = r.valorHospedagem + r.valorPessoas;
+  r.total = r.valorHospedagem + r.valorPessoas + r.consumo;
   return r;
 }
 

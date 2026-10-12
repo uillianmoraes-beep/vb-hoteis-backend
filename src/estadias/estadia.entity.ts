@@ -1,7 +1,7 @@
 import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 
 export type StatusEstadia = 'aberta' | 'conta_entregue' | 'fechada' | 'cancelada';
-export const FORMAS_PAGAMENTO = ['dinheiro', 'pix', 'debito', 'credito', 'faturado', 'cortesia'] as const;
+export const FORMAS_PAGAMENTO = ['dinheiro', 'pix', 'debito', 'credito', 'faturado', 'cortesia', 'misto'] as const;
 export type FormaPagamento = (typeof FORMAS_PAGAMENTO)[number];
 
 @Entity('estadias')
@@ -21,6 +21,9 @@ export class Estadia {
   @Column({ name: 'conta_entregue_em', type: 'timestamptz', nullable: true }) contaEntregueEm!: Date | null;
   /** Minutos em que o tempo ficou parado (conta entregue e depois voltou a contar). */
   @Column({ name: 'pausado_min', type: 'int', default: 0 }) pausadoMin!: number;
+  /** Pacote: cobra no mínimo este período. */
+  @Column({ name: 'periodo_minimo_id', type: 'uuid', nullable: true }) periodoMinimoId!: string | null;
+  @Column({ name: 'valor_consumo', type: 'numeric', precision: 10, scale: 2, nullable: true }) valorConsumo!: string | null;
   @Column({ name: 'saida_em', type: 'timestamptz', nullable: true }) saidaEm!: Date | null;
   @Column({ name: 'periodo_nome', type: 'varchar', length: 60, nullable: true }) periodoNome!: string | null;
   @Column({ name: 'valor_hospedagem', type: 'numeric', precision: 10, scale: 2, nullable: true }) valorHospedagem!: string | null;

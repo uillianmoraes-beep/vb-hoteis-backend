@@ -18,6 +18,7 @@ import { UsuariosModule } from './usuarios/usuarios.module';
 import { PainelModule } from './painel/painel.module';
 import { TarifasModule } from './tarifas/tarifas.module';
 import { EstadiasModule } from './estadias/estadias.module';
+import { ProdutosModule } from './produtos/produtos.module';
 import { SeedModule } from './seed/seed.module';
 
 @Module({
@@ -48,6 +49,7 @@ import { SeedModule } from './seed/seed.module';
     PainelModule,
     TarifasModule,
     EstadiasModule,
+    ProdutosModule,
     SeedModule,
   ],
   providers: [

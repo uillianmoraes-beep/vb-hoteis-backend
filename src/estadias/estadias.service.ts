@@ -3,12 +3,19 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import { Estadia } from './estadia.entity';
+import { EstadiaItem } from './estadia-item.entity';
+import { EstadiaPagamento } from './estadia-pagamento.entity';
+import { EstadiaEvento } from './estadia-evento.entity';
 import { Unidade } from '../unidades/unidade.entity';
 import { UnidadeEvento } from '../unidades/unidade-evento.entity';
 import { UsuarioEntity } from '../usuarios/usuario.entity';
 import { Perfil } from '../perfis/perfil.entity';
+import { Produto } from '../produtos/produto.entity';
 import { FUSO, Motor, TarifasService } from '../tarifas/tarifas.service';
-import { AbrirEstadiaDto, AtualizarEstadiaDto, CancelarEstadiaDto, FecharEstadiaDto } from './estadias.dto';
+import {
+  AbrirEstadiaDto, AtualizarEstadiaDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
+  LancarItemDto, TransferirDto, TrocarCobrancaDto,
+} from './estadias.dto';
 import { StatusUnidade, UsuarioToken, temPermissao } from '../common/permissoes';
 import { calcularConta, centavos, minutosAteHorario, reais, ResultadoCalc } from './calculadora';
 
@@ -16,22 +23,31 @@ export interface ContaCalculada extends ResultadoCalc {
   minutosUso: number;
   tabelaNome: string | null;
   parado: boolean;
+  pacote: string | null;
 }
+
+const ABERTAS = ['aberta', 'conta_entregue'];
+const NOMES_FORMA: Record<string, string> = { dinheiro: 'dinheiro', pix: 'Pix', debito: 'débito', credito: 'crédito', faturado: 'faturado' };
+const brl = (c: number) => `R$ ${reais(c).replace('.', ',')}`;
 
 @Injectable()
 export class EstadiasService {
   constructor(
     @InjectRepository(Estadia) private readonly repo: Repository<Estadia>,
+    @InjectRepository(EstadiaItem) private readonly itens: Repository<EstadiaItem>,
+    @InjectRepository(EstadiaPagamento) private readonly pagamentos: Repository<EstadiaPagamento>,
+    @InjectRepository(EstadiaEvento) private readonly eventos: Repository<EstadiaEvento>,
     @InjectRepository(Unidade) private readonly unidades: Repository<Unidade>,
     @InjectRepository(UsuarioEntity) private readonly usuarios: Repository<UsuarioEntity>,
     @InjectRepository(Perfil) private readonly perfis: Repository<Perfil>,
+    @InjectRepository(Produto) private readonly produtos: Repository<Produto>,
     private readonly tarifas: TarifasService,
     private readonly ds: DataSource,
   ) {}
 
   /* ---------------- cálculo ---------------- */
 
-  calcular(e: Estadia, motor: Motor, agora = new Date()): ContaCalculada {
+  calcular(e: Estadia, motor: Motor, consumo: number, agora = new Date()): ContaCalculada {
     const fim = e.status === 'conta_entregue' && e.contaEntregueEm ? new Date(e.contaEntregueEm) : agora;
     const minutosUso = Math.max(0, Math.floor((fim.getTime() - new Date(e.entradaEm).getTime()) / 60000) - (e.pausadoMin ?? 0));
     const precos = this.tarifas.precosDe(motor, e.tabelaId, e.categoriaId);
@@ -45,22 +61,41 @@ export class EstadiasService {
       pessoas: e.pessoas,
       minutosUso,
       minutosAteFimPernoite: pernoite ? minutosAteHorario(new Date(e.entradaEm), pernoite.pernoiteFim, FUSO) : null,
+      periodoMinimoId: e.modalidade === 'periodo' ? e.periodoMinimoId : null,
+      consumo,
     });
     const tabela = motor.tabelas.find((t) => t.id === e.tabelaId);
-    return { ...r, minutosUso, tabelaNome: tabela?.nome ?? null, parado: e.status === 'conta_entregue' };
+    const pacote = e.periodoMinimoId ? periodos.find((p) => p.id === e.periodoMinimoId)?.nome ?? null : null;
+    return { ...r, minutosUso, tabelaNome: tabela?.nome ?? null, parado: e.status === 'conta_entregue', pacote };
+  }
+
+  private async consumoDe(ids: string[]): Promise<Map<string, number>> {
+    const mapa = new Map<string, number>();
+    if (!ids.length) return mapa;
+    const linhas: { id: string; soma: string }[] = await this.itens
+      .createQueryBuilder('i')
+      .select('i.estadiaId', 'id')
+      .addSelect('COALESCE(SUM(i.total), 0)', 'soma')
+      .where('i.estadiaId IN (:...ids)', { ids })
+      .andWhere(`i.status = 'ativo'`)
+      .groupBy('i.estadiaId')
+      .getRawMany();
+    for (const l of linhas) mapa.set(l.id, centavos(l.soma));
+    return mapa;
   }
 
   /** Contas abertas de várias unidades de uma vez (para o painel). */
   async abertasComConta(empresaId: string, unidadeIds: string[]) {
-    if (!unidadeIds.length) return new Map<string, { estadia: Estadia; conta: ContaCalculada; motor: Motor }>();
-    const abertas = await this.repo.find({ where: { empresaId, unidadeId: In(unidadeIds), status: In(['aberta', 'conta_entregue']) } });
-    const motores = new Map<string, Motor>();
     const resultado = new Map<string, { estadia: Estadia; conta: ContaCalculada; motor: Motor }>();
+    if (!unidadeIds.length) return resultado;
+    const abertas = await this.repo.find({ where: { empresaId, unidadeId: In(unidadeIds), status: In(ABERTAS) } });
+    const consumo = await this.consumoDe(abertas.map((a) => a.id));
+    const motores = new Map<string, Motor>();
     const agora = new Date();
     for (const e of abertas) {
       if (!motores.has(e.ambienteId)) motores.set(e.ambienteId, await this.tarifas.motor(empresaId, e.ambienteId));
       const motor = motores.get(e.ambienteId)!;
-      resultado.set(e.unidadeId, { estadia: e, conta: this.calcular(e, motor, agora), motor });
+      resultado.set(e.unidadeId, { estadia: e, conta: this.calcular(e, motor, consumo.get(e.id) ?? 0, agora), motor });
     }
     return resultado;
   }
@@ -73,8 +108,14 @@ export class EstadiasService {
 
   private async buscar(u: UsuarioToken, id: string) {
     const e = await this.repo.findOne({ where: { id, empresaId: u.empresaId } });
-    if (!e) throw new NotFoundException('Entrada não encontrada.');
-    if (!this.podeVer(u, e.ambienteId)) throw new ForbiddenException('Entrada de outro ambiente.');
+    if (!e) throw new NotFoundException('Conta não encontrada.');
+    if (!this.podeVer(u, e.ambienteId)) throw new ForbiddenException('Conta de outro ambiente.');
+    return e;
+  }
+
+  private async buscarAberta(u: UsuarioToken, id: string) {
+    const e = await this.buscar(u, id);
+    if (!ABERTAS.includes(e.status)) throw new BadRequestException('Esta conta já foi encerrada.');
     return e;
   }
 
@@ -86,14 +127,48 @@ export class EstadiasService {
     });
   }
 
-  private resumo(e: Estadia, conta: ContaCalculada) {
+  private async registrar(m: EntityManager | null, u: UsuarioToken, estadiaId: string, tipo: string, descricao: string) {
+    const dados = { empresaId: u.empresaId, estadiaId, tipo, descricao, usuarioId: u.sub, usuarioNome: u.nome };
+    if (m) await m.insert(EstadiaEvento, dados);
+    else await this.eventos.insert(dados);
+  }
+
+  private formatar(e: Estadia, conta: ContaCalculada) {
     return {
       ...e,
       conta: {
         ...conta,
         valorHospedagem: conta.valorHospedagem / 100,
         valorPessoas: conta.valorPessoas / 100,
+        consumo: conta.consumo / 100,
         total: conta.total / 100,
+      },
+    };
+  }
+
+  /* ---------------- leitura ---------------- */
+
+  async detalhe(u: UsuarioToken, id: string) {
+    const e = await this.buscar(u, id);
+    const motor = await this.tarifas.motor(u.empresaId, e.ambienteId);
+    const consumo = (await this.consumoDe([e.id])).get(e.id) ?? 0;
+    const [itens, pagamentos, eventos, unidade] = await Promise.all([
+      this.itens.find({ where: { estadiaId: e.id }, order: { criadoEm: 'ASC' } }),
+      this.pagamentos.find({ where: { estadiaId: e.id }, order: { criadoEm: 'ASC' } }),
+      this.eventos.find({ where: { estadiaId: e.id }, order: { criadoEm: 'ASC' } }),
+      this.unidades.findOne({ where: { id: e.unidadeId }, relations: { categoria: true } }),
+    ]);
+    const precos = this.tarifas.precosDe(motor, e.tabelaId, e.categoriaId);
+    return {
+      ...this.formatar(e, this.calcular(e, motor, consumo)),
+      unidade: unidade ? { id: unidade.id, codigo: unidade.codigo, categoria: unidade.categoria?.nome ?? null } : null,
+      itens: itens.map((i) => ({ ...i, quantidade: Number(i.quantidade), precoUnitario: Number(i.precoUnitario), total: Number(i.total) })),
+      pagamentos: pagamentos.map((p) => ({ ...p, valor: Number(p.valor), troco: Number(p.troco), valorRecebido: p.valorRecebido ? Number(p.valorRecebido) : null })),
+      eventos,
+      opcoes: {
+        periodos: this.tarifas.periodosDe(motor, precos, e.categoriaId).map((p) => ({ id: p.id, nome: p.nome, tipo: p.tipo, valor: (precos.porPeriodo[p.id] ?? 0) / 100 })),
+        tabelas: motor.tabelas.map((t) => ({ id: t.id, nome: t.nome })),
+        pernoiteDisponivel: this.tarifas.pernoiteDisponivel(motor, new Date()),
       },
     };
   }
@@ -117,6 +192,9 @@ export class EstadiasService {
     if (modalidade === 'pernoite' && !this.tarifas.pernoiteDisponivel(motor, agora)) {
       throw new BadRequestException('Fora do horário de entrada do pernoite.');
     }
+    const minimo = modalidade === 'periodo' && dto.periodoMinimoId
+      ? motor.periodos.find((p) => p.id === dto.periodoMinimoId && p.tipo === 'horas') ?? null
+      : null;
 
     const salva = await this.ds.transaction(async (m) => {
       const e = await m.save(
@@ -127,6 +205,7 @@ export class EstadiasService {
           categoriaId: unidade.categoriaId,
           tabelaId: tabela.id,
           modalidade,
+          periodoMinimoId: minimo?.id ?? null,
           placa: dto.placa ? dto.placa.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) || null : null,
           pessoas: dto.pessoas ?? Math.min(2, unidade.capacidade || 2),
           observacao: dto.observacao ?? null,
@@ -137,28 +216,69 @@ export class EstadiasService {
         }),
       );
       await this.mudarUnidade(m, u, unidade, 'ocupada', `Entrada${e.placa ? ` · ${e.placa}` : ''}`);
+      await this.registrar(m, u, e.id, 'entrada',
+        `Entrada na ${unidade.codigo}${e.placa ? `, placa ${e.placa}` : ''}, ${e.pessoas} pessoa(s), tabela ${tabela.nome}`
+        + (modalidade === 'pernoite' ? ', pernoite' : minimo ? `, pacote ${minimo.nome}` : ''));
       return e;
     });
-    return this.resumo(salva, this.calcular(salva, motor));
-  }
-
-  async detalhe(u: UsuarioToken, id: string) {
-    const e = await this.buscar(u, id);
-    const motor = await this.tarifas.motor(u.empresaId, e.ambienteId);
-    return this.resumo(e, this.calcular(e, motor));
+    return this.detalhe(u, salva.id);
   }
 
   async atualizar(u: UsuarioToken, id: string, dto: AtualizarEstadiaDto) {
-    const e = await this.buscar(u, id);
-    if (!['aberta', 'conta_entregue'].includes(e.status)) throw new BadRequestException('Esta entrada já foi encerrada.');
+    const e = await this.buscarAberta(u, id);
+    const mudancas: string[] = [];
+    const placa = dto.placa !== undefined ? dto.placa.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) || null : undefined;
+    if (placa !== undefined && placa !== e.placa) mudancas.push(`placa ${e.placa ?? '—'} → ${placa ?? '—'}`);
+    if (dto.pessoas !== undefined && dto.pessoas !== e.pessoas) mudancas.push(`pessoas ${e.pessoas} → ${dto.pessoas}`);
+    if (dto.observacao !== undefined && (dto.observacao || null) !== e.observacao) mudancas.push('observação alterada');
     await this.repo.update(
       { id },
       {
-        ...(dto.placa !== undefined && { placa: dto.placa.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) || null }),
+        ...(placa !== undefined && { placa }),
         ...(dto.pessoas !== undefined && { pessoas: dto.pessoas }),
         ...(dto.observacao !== undefined && { observacao: dto.observacao || null }),
       },
     );
+    if (mudancas.length) await this.registrar(null, u, id, 'ajuste', mudancas.join(' · '));
+    return this.detalhe(u, id);
+  }
+
+  async lancarItem(u: UsuarioToken, id: string, dto: LancarItemDto) {
+    const e = await this.buscarAberta(u, id);
+    let descricao = dto.descricao?.trim() ?? '';
+    let preco = dto.precoUnitario;
+    let produtoId: string | null = null;
+    if (dto.produtoId) {
+      const p = await this.produtos.findOne({ where: { id: dto.produtoId, empresaId: u.empresaId } });
+      if (!p) throw new BadRequestException('Produto não encontrado.');
+      produtoId = p.id;
+      descricao = p.nome;
+      if (preco === undefined) preco = Number(p.preco);
+    }
+    if (!descricao) throw new BadRequestException('Escolha um produto ou escreva a descrição do item.');
+    if (preco === undefined) throw new BadRequestException('Informe o preço do item.');
+    const totalC = Math.round(centavos(preco) * dto.quantidade);
+    await this.ds.transaction(async (m) => {
+      await m.insert(EstadiaItem, {
+        empresaId: u.empresaId, estadiaId: e.id, produtoId, descricao,
+        quantidade: String(dto.quantidade), precoUnitario: preco!.toFixed(2), total: reais(totalC),
+        status: 'ativo', usuarioId: u.sub, usuarioNome: u.nome,
+      });
+      const qtd = Number.isInteger(dto.quantidade) ? dto.quantidade : dto.quantidade.toFixed(3);
+      await this.registrar(m, u, e.id, 'consumo', `${qtd}× ${descricao} · ${brl(totalC)}`);
+    });
+    return this.detalhe(u, id);
+  }
+
+  async estornarItem(u: UsuarioToken, id: string, itemId: string, dto: EstornarItemDto) {
+    const e = await this.buscarAberta(u, id);
+    const item = await this.itens.findOne({ where: { id: itemId, estadiaId: e.id } });
+    if (!item) throw new NotFoundException('Item não encontrado.');
+    if (item.status === 'estornado') throw new BadRequestException('Este item já foi estornado.');
+    await this.ds.transaction(async (m) => {
+      await m.update(EstadiaItem, { id: item.id }, { status: 'estornado', motivoEstorno: dto.motivo.trim(), estornadoPor: u.nome, estornadoEm: new Date() });
+      await this.registrar(m, u, e.id, 'estorno', `Estorno: ${item.descricao} · ${brl(centavos(item.total))} · ${dto.motivo.trim()}`);
+    });
     return this.detalhe(u, id);
   }
 
@@ -169,6 +289,7 @@ export class EstadiasService {
     await this.ds.transaction(async (m) => {
       await m.update(Estadia, { id }, { status: 'conta_entregue', contaEntregueEm: new Date() });
       await this.mudarUnidade(m, u, unidade, 'conta_entregue', 'Conta entregue');
+      await this.registrar(m, u, id, 'conta_entregue', 'Conta entregue (tempo parado)');
     });
     return this.detalhe(u, id);
   }
@@ -181,6 +302,75 @@ export class EstadiasService {
     await this.ds.transaction(async (m) => {
       await m.update(Estadia, { id }, { status: 'aberta', contaEntregueEm: null, pausadoMin: (e.pausadoMin ?? 0) + parado });
       await this.mudarUnidade(m, u, unidade, 'ocupada', 'Voltou a contar o tempo');
+      await this.registrar(m, u, id, 'voltar', `Voltou a contar (ficou ${parado} min parado)`);
+    });
+    return this.detalhe(u, id);
+  }
+
+  async transferir(u: UsuarioToken, id: string, dto: TransferirDto) {
+    const e = await this.buscarAberta(u, id);
+    const origem = await this.unidades.findOneOrFail({ where: { id: e.unidadeId } });
+    const destino = await this.unidades.findOne({ where: { id: dto.unidadeId, empresaId: u.empresaId, ativo: true } });
+    if (!destino) throw new NotFoundException('Unidade de destino não encontrada.');
+    if (destino.id === origem.id) throw new BadRequestException('Escolha uma unidade diferente.');
+    if (!this.podeVer(u, destino.ambienteId)) throw new ForbiddenException('Unidade de outro ambiente.');
+    if (!['livre', 'reservada'].includes(destino.status)) throw new BadRequestException(`A ${destino.codigo} não está livre.`);
+    if (destino.ambienteId !== origem.ambienteId) throw new BadRequestException('Transferência só dentro do mesmo ambiente.');
+
+    const novaCategoria = dto.manterPreco ? e.categoriaId : destino.categoriaId;
+    await this.ds.transaction(async (m) => {
+      await m.update(Estadia, { id }, { unidadeId: destino.id, categoriaId: novaCategoria });
+      await this.mudarUnidade(m, u, destino, e.status === 'conta_entregue' ? 'conta_entregue' : 'ocupada', `Transferida da ${origem.codigo}`);
+      await this.mudarUnidade(m, u, origem, 'limpeza', `Transferida para ${destino.codigo}: ${dto.motivo.trim()}`);
+      await this.registrar(m, u, id, 'transferencia',
+        `Transferida da ${origem.codigo} para ${destino.codigo} · ${dto.manterPreco ? 'manteve o preço da entrada' : 'passou a cobrar pela categoria nova'} · ${dto.motivo.trim()}`);
+    });
+    return this.detalhe(u, id);
+  }
+
+  async trocarCobranca(u: UsuarioToken, id: string, dto: TrocarCobrancaDto) {
+    const e = await this.buscarAberta(u, id);
+    const motor = await this.tarifas.motor(u.empresaId, e.ambienteId);
+    if (dto.modalidade === 'pernoite' && !motor.pernoite) throw new BadRequestException('Este ambiente não tem pernoite.');
+    let minimoId: string | null = null;
+    let minimoNome = '';
+    if (dto.modalidade === 'periodo' && dto.periodoMinimoId) {
+      const p = motor.periodos.find((x) => x.id === dto.periodoMinimoId && x.tipo === 'horas');
+      if (!p) throw new BadRequestException('Período inválido.');
+      minimoId = p.id;
+      minimoNome = p.nome;
+    }
+    await this.ds.transaction(async (m) => {
+      await m.update(Estadia, { id }, { modalidade: dto.modalidade, periodoMinimoId: minimoId });
+      await this.registrar(m, u, id, 'cobranca',
+        dto.modalidade === 'pernoite' ? 'Cobrança trocada para pernoite' : minimoId ? `Cobrança trocada para pacote ${minimoNome}` : 'Cobrança trocada para por período (automático)');
+    });
+    return this.detalhe(u, id);
+  }
+
+  async corrigir(u: UsuarioToken, id: string, dto: CorrigirEstadiaDto) {
+    const e = await this.buscarAberta(u, id);
+    const motor = await this.tarifas.motor(u.empresaId, e.ambienteId);
+    const mudancas: string[] = [];
+    const dados: Partial<Estadia> = {};
+    if (dto.entradaEm) {
+      const nova = new Date(dto.entradaEm);
+      if (Number.isNaN(nova.getTime())) throw new BadRequestException('Hora de entrada inválida.');
+      if (nova.getTime() > Date.now()) throw new BadRequestException('A hora de entrada não pode ser no futuro.');
+      if (Date.now() - nova.getTime() > 3 * 24 * 60 * 60000) throw new BadRequestException('Correção limitada a 3 dias.');
+      dados.entradaEm = nova;
+      mudancas.push(`entrada ${new Date(e.entradaEm).toLocaleString('pt-BR', { timeZone: FUSO })} → ${nova.toLocaleString('pt-BR', { timeZone: FUSO })}`);
+    }
+    if (dto.tabelaId && dto.tabelaId !== e.tabelaId) {
+      const t = motor.tabelas.find((x) => x.id === dto.tabelaId);
+      if (!t) throw new BadRequestException('Tabela inválida.');
+      dados.tabelaId = t.id;
+      mudancas.push(`tabela ${motor.tabelas.find((x) => x.id === e.tabelaId)?.nome ?? '—'} → ${t.nome}`);
+    }
+    if (!mudancas.length) throw new BadRequestException('Nada para corrigir.');
+    await this.ds.transaction(async (m) => {
+      await m.update(Estadia, { id }, dados);
+      await this.registrar(m, u, id, 'correcao', `Correção: ${mudancas.join(' · ')} · motivo: ${dto.motivo.trim()}`);
     });
     return this.detalhe(u, id);
   }
@@ -221,76 +411,89 @@ export class EstadiasService {
   }
 
   async fechar(u: UsuarioToken, id: string, dto: FecharEstadiaDto) {
-    const e = await this.buscar(u, id);
-    if (!['aberta', 'conta_entregue'].includes(e.status)) throw new BadRequestException('Esta entrada já foi encerrada.');
+    const e = await this.buscarAberta(u, id);
     const motor = await this.tarifas.motor(u.empresaId, e.ambienteId);
-    const conta = this.calcular(e, motor);
+    const consumo = (await this.consumoDe([e.id])).get(e.id) ?? 0;
+    const conta = this.calcular(e, motor, consumo);
     const desconto = centavos(dto.desconto ?? 0);
     const acrescimo = centavos(dto.acrescimo ?? 0);
     if (desconto > conta.total + acrescimo) throw new BadRequestException('O desconto é maior que a conta.');
     if ((desconto > 0 || acrescimo > 0) && !dto.motivo?.trim()) throw new BadRequestException('Informe o motivo do desconto ou acréscimo.');
     const autorizadoPor = await this.conferirLimite(u, conta.total, desconto, acrescimo, dto);
     const total = conta.total - desconto + acrescimo;
-    const forma = total === 0 && desconto > 0 ? 'cortesia' : dto.formaPagamento;
 
-    // troco (só em dinheiro)
-    let recebido: number | null = null;
-    let troco = 0;
-    let trocoDestino: 'cliente' | 'gorjeta' | null = null;
-    let gorjetaPara: string | null = null;
-    if (forma === 'dinheiro' && dto.valorRecebido !== undefined && dto.valorRecebido !== null) {
-      recebido = centavos(dto.valorRecebido);
-      if (recebido < total) throw new BadRequestException('O valor recebido é menor que o total da conta.');
-      troco = recebido - total;
-      if (troco > 0) {
-        trocoDestino = dto.trocoDestino ?? 'cliente';
-        if (trocoDestino === 'gorjeta') {
-          gorjetaPara = dto.gorjetaPara?.trim() || 'Casa';
-        }
+    // pagamentos: precisam somar exatamente o total
+    const pags = (dto.pagamentos ?? []).map((p) => {
+      const valor = centavos(p.valor);
+      let recebido: number | null = null;
+      let troco = 0;
+      if (p.forma === 'dinheiro' && p.valorRecebido !== undefined && p.valorRecebido !== null) {
+        recebido = centavos(p.valorRecebido);
+        if (recebido < valor) throw new BadRequestException('Em dinheiro, o valor recebido é menor que o valor do pagamento.');
+        troco = recebido - valor;
       }
+      const trocoDestino = troco > 0 ? p.trocoDestino ?? 'cliente' : null;
+      return { forma: p.forma, valor, recebido, troco, trocoDestino, gorjetaPara: trocoDestino === 'gorjeta' ? p.gorjetaPara?.trim() || 'Casa' : null };
+    });
+    const pago = pags.reduce((s, p) => s + p.valor, 0);
+    if (total > 0 && pago !== total) {
+      throw new BadRequestException(`Os pagamentos somam ${brl(pago)}, mas a conta é ${brl(total)}.`);
     }
+    if (total === 0 && pags.length) throw new BadRequestException('Conta zerada não recebe pagamento.');
+    const formas = [...new Set(pags.map((p) => p.forma))];
+    const forma = total === 0 ? 'cortesia' : formas.length === 1 ? formas[0] : 'misto';
+    const trocoTotal = pags.reduce((s, p) => s + p.troco, 0);
+    const gorjeta = pags.find((p) => p.trocoDestino === 'gorjeta');
 
     const unidade = await this.unidades.findOneOrFail({ where: { id: e.unidadeId } });
     await this.ds.transaction(async (m) => {
+      for (const p of pags) {
+        await m.insert(EstadiaPagamento, {
+          empresaId: u.empresaId, estadiaId: e.id, forma: p.forma, valor: reais(p.valor),
+          valorRecebido: p.recebido !== null ? reais(p.recebido) : null, troco: reais(p.troco),
+          trocoDestino: p.trocoDestino, gorjetaPara: p.gorjetaPara, usuarioId: u.sub, usuarioNome: u.nome,
+        });
+      }
       await m.update(Estadia, { id }, {
         status: 'fechada',
         saidaEm: new Date(),
         periodoNome: conta.periodoNome,
         valorHospedagem: reais(conta.valorHospedagem),
         valorPessoas: reais(conta.valorPessoas),
+        valorConsumo: reais(conta.consumo),
         desconto: reais(desconto),
         acrescimo: reais(acrescimo),
         valorTotal: reais(total),
         formaPagamento: forma,
-        valorRecebido: recebido !== null ? reais(recebido) : null,
-        troco: reais(troco),
-        trocoDestino,
-        gorjetaPara,
+        valorRecebido: pags.length === 1 && pags[0].recebido !== null ? reais(pags[0].recebido) : null,
+        troco: reais(trocoTotal),
+        trocoDestino: trocoTotal > 0 ? (gorjeta ? 'gorjeta' : 'cliente') : null,
+        gorjetaPara: gorjeta?.gorjetaPara ?? null,
         motivoAjuste: dto.motivo?.trim() || null,
         autorizadoPor,
         usuarioSaidaId: u.sub,
         usuarioSaidaNome: u.nome,
       });
-      const extra = troco > 0 ? (trocoDestino === 'gorjeta' ? ` · gorjeta R$ ${reais(troco).replace('.', ',')} (${gorjetaPara})` : ` · troco R$ ${reais(troco).replace('.', ',')}`) : '';
-      await this.mudarUnidade(m, u, unidade, 'limpeza', `Saída · R$ ${reais(total).replace('.', ',')}${extra}`);
+      const resumoPag = pags.length
+        ? pags.map((p) => `${NOMES_FORMA[p.forma] ?? p.forma} ${brl(p.valor)}${p.troco ? ` (${p.trocoDestino === 'gorjeta' ? `gorjeta ${brl(p.troco)} p/ ${p.gorjetaPara}` : `troco ${brl(p.troco)}`})` : ''}`).join(' + ')
+        : 'cortesia';
+      await this.registrar(m, u, id, 'fechamento',
+        `Fechada: ${brl(total)} · ${resumoPag}${desconto ? ` · desconto ${brl(desconto)}` : ''}${acrescimo ? ` · acréscimo ${brl(acrescimo)}` : ''}${autorizadoPor ? ` · liberado por ${autorizadoPor}` : ''}`);
+      await this.mudarUnidade(m, u, unidade, 'limpeza', `Saída · ${brl(total)}`);
     });
     return this.detalhe(u, id);
   }
 
   async cancelar(u: UsuarioToken, id: string, dto: CancelarEstadiaDto) {
-    const e = await this.buscar(u, id);
-    if (!['aberta', 'conta_entregue'].includes(e.status)) throw new BadRequestException('Esta entrada já foi encerrada.');
+    const e = await this.buscarAberta(u, id);
     const unidade = await this.unidades.findOneOrFail({ where: { id: e.unidadeId } });
     await this.ds.transaction(async (m) => {
       await m.update(Estadia, { id }, {
         status: 'cancelada', saidaEm: new Date(), motivoAjuste: dto.motivo.trim(), usuarioSaidaId: u.sub, usuarioSaidaNome: u.nome,
       });
+      await this.registrar(m, u, id, 'cancelamento', `Entrada cancelada: ${dto.motivo.trim()}`);
       await this.mudarUnidade(m, u, unidade, dto.destino ?? 'livre', `Entrada cancelada: ${dto.motivo.trim()}`);
     });
     return { ok: true };
-  }
-
-  async temAberta(unidadeId: string) {
-    return this.repo.exists({ where: { unidadeId, status: In(['aberta', 'conta_entregue']) } });
   }
 }

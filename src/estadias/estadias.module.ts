@@ -1,6 +1,10 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Estadia } from './estadia.entity';
+import { EstadiaItem } from './estadia-item.entity';
+import { EstadiaPagamento } from './estadia-pagamento.entity';
+import { EstadiaEvento } from './estadia-evento.entity';
+import { Produto } from '../produtos/produto.entity';
 import { Unidade } from '../unidades/unidade.entity';
 import { UsuarioEntity } from '../usuarios/usuario.entity';
 import { Perfil } from '../perfis/perfil.entity';
@@ -9,7 +13,7 @@ import { EstadiasService } from './estadias.service';
 import { EstadiasController } from './estadias.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Estadia, Unidade, UsuarioEntity, Perfil]), TarifasModule],
+  imports: [TypeOrmModule.forFeature([Estadia, EstadiaItem, EstadiaPagamento, EstadiaEvento, Unidade, UsuarioEntity, Perfil, Produto]), TarifasModule],
   providers: [EstadiasService],
   controllers: [EstadiasController],
   exports: [EstadiasService],

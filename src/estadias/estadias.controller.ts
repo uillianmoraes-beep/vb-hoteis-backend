@@ -1,6 +1,9 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { EstadiasService } from './estadias.service';
-import { AbrirEstadiaDto, AtualizarEstadiaDto, CancelarEstadiaDto, FecharEstadiaDto } from './estadias.dto';
+import {
+  AbrirEstadiaDto, AtualizarEstadiaDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
+  LancarItemDto, TransferirDto, TrocarCobrancaDto,
+} from './estadias.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
@@ -27,6 +30,24 @@ export class EstadiasController {
     return this.service.atualizar(u, id, dto);
   }
 
+  @Post(':id/itens')
+  @Requer('estadias.operar')
+  lancar(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: LancarItemDto) {
+    return this.service.lancarItem(u, id, dto);
+  }
+
+  @Post(':id/itens/:itemId/estornar')
+  @HttpCode(200)
+  @Requer('estadias.estornar')
+  estornar(
+    @Usuario() u: UsuarioToken,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Body() dto: EstornarItemDto,
+  ) {
+    return this.service.estornarItem(u, id, itemId, dto);
+  }
+
   @Post(':id/entregar-conta')
   @HttpCode(200)
   @Requer('estadias.operar')
@@ -39,6 +60,27 @@ export class EstadiasController {
   @Requer('estadias.operar')
   voltar(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.voltarAContar(u, id);
+  }
+
+  @Post(':id/transferir')
+  @HttpCode(200)
+  @Requer('estadias.operar')
+  transferir(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: TransferirDto) {
+    return this.service.transferir(u, id, dto);
+  }
+
+  @Post(':id/cobranca')
+  @HttpCode(200)
+  @Requer('estadias.operar')
+  cobranca(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: TrocarCobrancaDto) {
+    return this.service.trocarCobranca(u, id, dto);
+  }
+
+  @Post(':id/corrigir')
+  @HttpCode(200)
+  @Requer('estadias.corrigir')
+  corrigir(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CorrigirEstadiaDto) {
+    return this.service.corrigir(u, id, dto);
   }
 
   @Post(':id/fechar')
