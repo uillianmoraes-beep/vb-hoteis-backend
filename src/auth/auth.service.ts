@@ -6,6 +6,7 @@ import * as bcrypt from 'bcryptjs';
 import { UsuarioEntity } from '../usuarios/usuario.entity';
 import { Empresa } from '../empresas/empresa.entity';
 import { UsuarioToken } from '../common/permissoes';
+import { CaixaService } from '../caixa/caixa.service';
 
 @Injectable()
 export class AuthService {
@@ -13,6 +14,7 @@ export class AuthService {
     @InjectRepository(UsuarioEntity) private readonly usuarios: Repository<UsuarioEntity>,
     @InjectRepository(Empresa) private readonly empresas: Repository<Empresa>,
     private readonly jwt: JwtService,
+    private readonly caixa: CaixaService,
   ) {}
 
   private buscarComSenha(where: string, valor: string) {
@@ -45,6 +47,8 @@ export class AuthService {
       ambientesIds: usuario.ambientesIds,
     };
     await this.usuarios.update({ id: usuario.id }, { ultimoAcesso: new Date() });
+    // troca de turno: abre o caixa no nome de quem entrou, com o fundo deixado pelo anterior
+    const caixasAbertos = await this.caixa.abrirNoLogin(payload).catch(() => []);
 
     return {
       token: await this.jwt.signAsync({ ...payload }),
@@ -57,6 +61,7 @@ export class AuthService {
         ambientesIds: usuario.ambientesIds,
       },
       empresa: { id: empresa.id, nome: empresa.nome, vocabulario: empresa.vocabulario, aparencia: empresa.aparencia, modulos: empresa.modulos ?? {} },
+      caixasAbertos,
     };
   }
 

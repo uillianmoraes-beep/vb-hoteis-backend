@@ -174,6 +174,32 @@ export class CaixaService {
     return this.atual(u, salvo.ambienteId);
   }
 
+  /**
+   * Troca de turno: quando a recepcionista entra com o login dela e o caixa do ambiente
+   * está fechado, o turno dela abre sozinho com o fundo que o anterior deixou.
+   * Só para perfis com o caixa principal marcado (o administrador geral não abre caixa ao entrar).
+   * Ambiente que nunca teve caixa continua sendo aberto à mão na primeira vez.
+   */
+  async abrirNoLogin(u: UsuarioToken) {
+    if (!u.permissoes.includes('caixa.principal') || !(await this.moduloLigado(u.empresaId))) return [];
+    const ambs = await this.ambientes.find({ where: { empresaId: u.empresaId } });
+    const abertos: { ambiente: string; numero: number; trocoInicial: number }[] = [];
+    for (const a of ambs.filter((x) => this.podeVerAmbiente(u, x.id))) {
+      const aberto = await this.turnos.findOne({ where: { empresaId: u.empresaId, ambienteId: a.id, status: 'aberto' } });
+      if (aberto) continue;
+      const ultimo = await this.turnos.findOne({ where: { empresaId: u.empresaId, ambienteId: a.id, status: 'fechado' }, order: { fechadoEm: 'DESC' } });
+      if (!ultimo) continue;
+      const troco = Number(ultimo.fundoProximo ?? 0);
+      try {
+        const r = await this.abrir(u, { ambienteId: a.id, trocoInicial: troco });
+        if (r.turno) abertos.push({ ambiente: a.nome, numero: r.turno.numero, trocoInicial: troco });
+      } catch {
+        /* outro computador abriu ao mesmo tempo: segue */
+      }
+    }
+    return abertos;
+  }
+
   private async turnoAberto(u: UsuarioToken, id: string) {
     const t = await this.turnos.findOne({ where: { id, empresaId: u.empresaId } });
     if (!t) throw new NotFoundException('Turno não encontrado.');
