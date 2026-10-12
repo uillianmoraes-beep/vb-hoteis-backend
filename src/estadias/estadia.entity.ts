@@ -44,6 +44,12 @@ export class Estadia {
   @Column({ name: 'usuario_entrada_nome', type: 'varchar', length: 120, nullable: true }) usuarioEntradaNome!: string | null;
   @Column({ name: 'usuario_saida_id', type: 'uuid', nullable: true }) usuarioSaidaId!: string | null;
   @Column({ name: 'usuario_saida_nome', type: 'varchar', length: 120, nullable: true }) usuarioSaidaNome!: string | null;
+  /** nao | pendente | emitida | erro | cancelada */
+  @Column({ name: 'nota_status', type: 'varchar', length: 12, default: 'nao' }) notaStatus!: string;
+  @Column({ name: 'nota_documento', type: 'varchar', length: 14, nullable: true }) notaDocumento!: string | null;
+  @Column({ name: 'nota_nome', type: 'varchar', length: 120, nullable: true }) notaNome!: string | null;
+  @Column({ name: 'nota_email', type: 'varchar', length: 160, nullable: true }) notaEmail!: string | null;
+  @Column({ name: 'nota_solicitada_em', type: 'timestamptz', nullable: true }) notaSolicitadaEm!: Date | null;
   @CreateDateColumn({ name: 'criado_em', type: 'timestamptz' }) criadoEm!: Date;
   @UpdateDateColumn({ name: 'atualizado_em', type: 'timestamptz' }) atualizadoEm!: Date;
 }

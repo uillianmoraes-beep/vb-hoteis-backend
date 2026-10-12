@@ -30,6 +30,32 @@ const ABERTAS = ['aberta', 'conta_entregue'];
 const NOMES_FORMA: Record<string, string> = { dinheiro: 'dinheiro', pix: 'Pix', debito: 'débito', credito: 'crédito', faturado: 'faturado' };
 const brl = (c: number) => `R$ ${reais(c).replace('.', ',')}`;
 
+/** Confere dígitos de CPF/CNPJ. Retorna só números ou lança erro. */
+export function documentoFiscal(bruto?: string): string | null {
+  const d = (bruto ?? '').replace(/\D/g, '');
+  if (!d) return null;
+  const todosIguais = /^(\d)\1+$/.test(d);
+  if (d.length === 11 && !todosIguais) {
+    const dv = (n: number) => {
+      let s = 0;
+      for (let i = 0; i < n; i++) s += Number(d[i]) * (n + 1 - i);
+      const r = (s * 10) % 11;
+      return r === 10 ? 0 : r;
+    };
+    if (dv(9) === Number(d[9]) && dv(10) === Number(d[10])) return d;
+  }
+  if (d.length === 14 && !todosIguais) {
+    const dv = (n: number) => {
+      const pesos = n === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+      const s = pesos.reduce((acc, p, i) => acc + Number(d[i]) * p, 0);
+      const r = s % 11;
+      return r < 2 ? 0 : 11 - r;
+    };
+    if (dv(12) === Number(d[12]) && dv(13) === Number(d[13])) return d;
+  }
+  throw new BadRequestException('CPF/CNPJ inválido. Confira os números ou deixe em branco.');
+}
+
 @Injectable()
 export class EstadiasService {
   constructor(
@@ -412,6 +438,8 @@ export class EstadiasService {
 
   async fechar(u: UsuarioToken, id: string, dto: FecharEstadiaDto) {
     const e = await this.buscarAberta(u, id);
+    if (!dto.nota) throw new BadRequestException('Pergunte ao cliente se ele quer nota fiscal.');
+    const notaDoc = dto.nota.emitir ? documentoFiscal(dto.nota.documento) : null;
     const motor = await this.tarifas.motor(u.empresaId, e.ambienteId);
     const consumo = (await this.consumoDe([e.id])).get(e.id) ?? 0;
     const conta = this.calcular(e, motor, consumo);
@@ -473,7 +501,16 @@ export class EstadiasService {
         autorizadoPor,
         usuarioSaidaId: u.sub,
         usuarioSaidaNome: u.nome,
+        notaStatus: dto.nota.emitir ? 'pendente' : 'nao',
+        notaDocumento: dto.nota.emitir ? notaDoc : null,
+        notaNome: dto.nota.emitir ? dto.nota.nome?.trim() || null : null,
+        notaEmail: dto.nota.emitir ? dto.nota.email?.trim() || null : null,
+        notaSolicitadaEm: dto.nota.emitir ? new Date() : null,
       });
+      await this.registrar(m, u, id, 'nota',
+        dto.nota.emitir
+          ? `Cliente pediu nota fiscal${notaDoc ? ` · ${notaDoc.length === 11 ? 'CPF' : 'CNPJ'} final ${notaDoc.slice(-4)}` : ' · sem CPF'}`
+          : 'Cliente não quis nota fiscal');
       const resumoPag = pags.length
         ? pags.map((p) => `${NOMES_FORMA[p.forma] ?? p.forma} ${brl(p.valor)}${p.troco ? ` (${p.trocoDestino === 'gorjeta' ? `gorjeta ${brl(p.troco)} p/ ${p.gorjetaPara}` : `troco ${brl(p.troco)}`})` : ''}`).join(' + ')
         : 'cortesia';

@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import {
-  ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsISO8601, IsNumber, IsOptional, IsString, IsUUID,
+  ArrayMaxSize, IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsISO8601, IsNumber, IsOptional, IsString, IsUUID,
   Max, MaxLength, Min, MinLength, ValidateNested,
 } from 'class-validator';
 
@@ -31,6 +31,15 @@ export class PagamentoDto {
   @IsOptional() @IsString() @MaxLength(120) gorjetaPara?: string;
 }
 
+export class NotaFiscalDto {
+  /** o cliente quer nota? (a recepção sempre pergunta) */
+  @IsBoolean() emitir!: boolean;
+  /** CPF (11) ou CNPJ (14), só números; vazio = consumidor não identificado */
+  @IsOptional() @IsString() @MaxLength(18) documento?: string;
+  @IsOptional() @IsString() @MaxLength(120) nome?: string;
+  @IsOptional() @IsEmail() @MaxLength(160) email?: string;
+}
+
 export class FecharEstadiaDto {
   /** pagamentos que somam o total (pode dividir em várias formas) */
   @IsArray() @ArrayMaxSize(10) @ValidateNested({ each: true }) @Type(() => PagamentoDto) pagamentos!: PagamentoDto[];
@@ -39,6 +48,8 @@ export class FecharEstadiaDto {
   @IsOptional() @IsString() @MaxLength(300) motivo?: string;
   /** login e senha de quem libera quando passa do limite do perfil */
   @IsOptional() @ValidateNested() @Type(() => AutorizacaoDto) autorizacao?: AutorizacaoDto;
+  /** escolha do cliente sobre a nota fiscal */
+  @ValidateNested() @Type(() => NotaFiscalDto) nota!: NotaFiscalDto;
 }
 
 export class CancelarEstadiaDto {
