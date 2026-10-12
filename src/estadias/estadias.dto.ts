@@ -9,6 +9,8 @@ export class AbrirEstadiaDto {
   @IsOptional() @IsString() @MaxLength(10) placa?: string;
   @IsOptional() @IsInt() @Min(1) @Max(20) pessoas?: number;
   @IsOptional() @IsIn(['periodo', 'pernoite']) modalidade?: 'periodo' | 'pernoite';
+  /** portaria: cliente que paga na entrada (moto, a pé) */
+  @IsOptional() @IsArray() @ArrayMaxSize(5) @ValidateNested({ each: true }) @Type(() => PagamentoDto) adiantamento?: PagamentoDto[];
   /** pacote: cobra no mínimo este período */
   @IsOptional() @IsUUID() periodoMinimoId?: string;
   @IsOptional() @IsString() @MaxLength(500) observacao?: string;
@@ -104,4 +106,8 @@ export class MarcarNotasDto {
 
 export class DesfazerNotaDto {
   @IsString() @MinLength(3) @MaxLength(300) motivo!: string;
+}
+
+export class AdiantamentoDto {
+  @IsArray() @ArrayMaxSize(5) @ValidateNested({ each: true }) @Type(() => PagamentoDto) pagamentos!: PagamentoDto[];
 }

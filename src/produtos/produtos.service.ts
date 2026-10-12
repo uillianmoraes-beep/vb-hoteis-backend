@@ -48,6 +48,7 @@ export class ProdutosService {
         tipo: dto.tipo ?? 'produto',
         preco: dto.preco.toFixed(2),
         fiscal: limparFiscal(dto.fiscal),
+        frigobar: !!dto.frigobar,
       }),
     );
   }
@@ -61,6 +62,7 @@ export class ProdutosService {
     if (dto.tipo !== undefined) p.tipo = dto.tipo;
     if (dto.preco !== undefined) p.preco = dto.preco.toFixed(2);
     if (dto.ativo !== undefined) p.ativo = dto.ativo;
+    if (dto.frigobar !== undefined) p.frigobar = dto.frigobar;
     if (dto.fiscal !== undefined) p.fiscal = limparFiscal(dto.fiscal);
     return this.repo.save(p);
   }

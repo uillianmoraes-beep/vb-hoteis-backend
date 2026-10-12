@@ -9,6 +9,7 @@ export const PERMISSOES = {
   'unidades.desbloquear': 'Desbloquear unidade',
   'unidades.gerenciar': 'Cadastrar e editar unidades',
   'estadias.operar': 'Dar entrada, entregar e fechar contas',
+  'estadias.entrada': 'Dar entrada e receber na entrada (portaria)',
   'estadias.cancelar': 'Cancelar uma entrada já feita',
   'tarifas.gerenciar': 'Configurar períodos, preços e regras de cobrança',
   'estadias.corrigir': 'Corrigir hora de entrada e tabela de uma conta',

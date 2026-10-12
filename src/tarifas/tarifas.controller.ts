@@ -10,7 +10,7 @@ export class TarifasController {
   constructor(private readonly service: TarifasService) {}
 
   @Get('previa/:unidadeId')
-  @Requer('estadias.operar', 'tarifas.gerenciar')
+  @Requer('estadias.operar', 'estadias.entrada', 'tarifas.gerenciar')
   previa(@Usuario() u: UsuarioToken, @Param('unidadeId', ParseUUIDPipe) unidadeId: string) {
     return this.service.previa(u, unidadeId);
   }

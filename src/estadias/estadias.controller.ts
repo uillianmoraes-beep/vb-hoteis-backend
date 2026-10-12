@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { EstadiasService } from './estadias.service';
 import {
-  AbrirEstadiaDto, AtualizarEstadiaDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
+  AbrirEstadiaDto, AdiantamentoDto, AtualizarEstadiaDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
   LancarItemDto, TransferirDto, TrocarCobrancaDto,
 } from './estadias.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
@@ -13,7 +13,7 @@ export class EstadiasController {
   constructor(private readonly service: EstadiasService) {}
 
   @Post()
-  @Requer('estadias.operar')
+  @Requer('estadias.entrada', 'estadias.operar')
   abrir(@Usuario() u: UsuarioToken, @Body() dto: AbrirEstadiaDto) {
     return this.service.abrir(u, dto);
   }
@@ -46,6 +46,13 @@ export class EstadiasController {
     @Body() dto: EstornarItemDto,
   ) {
     return this.service.estornarItem(u, id, itemId, dto);
+  }
+
+  @Post(':id/adiantamento')
+  @HttpCode(200)
+  @Requer('estadias.entrada', 'estadias.operar')
+  adiantar(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: AdiantamentoDto) {
+    return this.service.adiantamento(u, id, dto);
   }
 
   @Post(':id/entregar-conta')

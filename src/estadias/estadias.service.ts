@@ -15,7 +15,7 @@ import { Empresa } from '../empresas/empresa.entity';
 import { moduloAtivo } from '../common/modulos';
 import { FUSO, Motor, TarifasService } from '../tarifas/tarifas.service';
 import {
-  AbrirEstadiaDto, AtualizarEstadiaDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
+  AbrirEstadiaDto, AdiantamentoDto, PagamentoDto, AtualizarEstadiaDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
   LancarItemDto, TransferirDto, TrocarCobrancaDto,
 } from './estadias.dto';
 import { StatusUnidade, UsuarioToken, temPermissao } from '../common/permissoes';
@@ -193,6 +193,7 @@ export class EstadiasService {
       unidade: unidade ? { id: unidade.id, codigo: unidade.codigo, categoria: unidade.categoria?.nome ?? null } : null,
       itens: itens.map((i) => ({ ...i, quantidade: Number(i.quantidade), precoUnitario: Number(i.precoUnitario), total: Number(i.total) })),
       pagamentos: pagamentos.map((p) => ({ ...p, valor: Number(p.valor), troco: Number(p.troco), valorRecebido: p.valorRecebido ? Number(p.valorRecebido) : null })),
+      adiantado: ABERTAS.includes(e.status) ? Math.round(pagamentos.reduce((s, p) => s + Number(p.valor), 0) * 100) / 100 : 0,
       eventos,
       opcoes: {
         periodos: this.tarifas.periodosDe(motor, precos, e.categoriaId).map((p) => ({ id: p.id, nome: p.nome, tipo: p.tipo, valor: (precos.porPeriodo[p.id] ?? 0) / 100 })),
@@ -203,6 +204,48 @@ export class EstadiasService {
   }
 
   /* ---------------- operações ---------------- */
+
+  /** Converte os pagamentos do formulário (reais) em centavos, com troco no dinheiro. */
+  private lerPagamentos(lista: PagamentoDto[]) {
+    return lista.map((p) => {
+      const valor = centavos(p.valor);
+      let recebido: number | null = null;
+      let troco = 0;
+      if (p.forma === 'dinheiro' && p.valorRecebido !== undefined && p.valorRecebido !== null) {
+        recebido = centavos(p.valorRecebido);
+        if (recebido < valor) throw new BadRequestException('Em dinheiro, o valor recebido é menor que o valor do pagamento.');
+        troco = recebido - valor;
+      }
+      const trocoDestino = troco > 0 ? p.trocoDestino ?? 'cliente' : null;
+      return { forma: p.forma, valor, recebido, troco, trocoDestino, gorjetaPara: trocoDestino === 'gorjeta' ? p.gorjetaPara?.trim() || 'Casa' : null };
+    });
+  }
+
+  private async gravarAdiantamento(m: EntityManager, u: UsuarioToken, estadiaId: string, lista: PagamentoDto[], momento: 'entrada' | 'adiantamento') {
+    const pags = this.lerPagamentos(lista).filter((p) => p.valor > 0);
+    if (!pags.length) return 0;
+    for (const p of pags) {
+      await m.insert(EstadiaPagamento, {
+        empresaId: u.empresaId, estadiaId, forma: p.forma, valor: reais(p.valor),
+        valorRecebido: p.recebido !== null ? reais(p.recebido) : null, troco: reais(p.troco),
+        trocoDestino: p.trocoDestino, gorjetaPara: p.gorjetaPara, usuarioId: u.sub, usuarioNome: u.nome, momento,
+      });
+    }
+    const soma = pags.reduce((s, p) => s + p.valor, 0);
+    await this.registrar(m, u, estadiaId, 'adiantamento',
+      `${momento === 'entrada' ? 'Pago na entrada' : 'Recebido antecipado'}: ${pags.map((p) => `${NOMES_FORMA[p.forma] ?? p.forma} ${brl(p.valor)}${p.troco ? ` (troco ${brl(p.troco)})` : ''}`).join(' + ')}`);
+    return soma;
+  }
+
+  /** Receber parte da conta antes do fechamento (ex.: portaria). */
+  async adiantamento(u: UsuarioToken, id: string, dto: AdiantamentoDto) {
+    await this.buscarAberta(u, id);
+    await this.ds.transaction(async (m) => {
+      const soma = await this.gravarAdiantamento(m, u, id, dto.pagamentos, 'adiantamento');
+      if (!soma) throw new BadRequestException('Informe o valor recebido.');
+    });
+    return this.detalhe(u, id);
+  }
 
   async abrir(u: UsuarioToken, dto: AbrirEstadiaDto) {
     const unidade = await this.unidades.findOne({ where: { id: dto.unidadeId, empresaId: u.empresaId, ativo: true } });
@@ -245,6 +288,7 @@ export class EstadiasService {
         }),
       );
       await this.mudarUnidade(m, u, unidade, 'ocupada', `Entrada${e.placa ? ` · ${e.placa}` : ''}`);
+      if (dto.adiantamento?.length) await this.gravarAdiantamento(m, u, e.id, dto.adiantamento, 'entrada');
       await this.registrar(m, u, e.id, 'entrada',
         `Entrada na ${unidade.codigo}${e.placa ? `, placa ${e.placa}` : ''}, ${e.pessoas} pessoa(s), tabela ${tabela.nome}`
         + (modalidade === 'pernoite' ? ', pernoite' : minimo ? `, pacote ${minimo.nome}` : ''));
@@ -453,26 +497,20 @@ export class EstadiasService {
     const autorizadoPor = await this.conferirLimite(u, conta.total, desconto, acrescimo, dto);
     const total = conta.total - desconto + acrescimo;
 
-    // pagamentos: precisam somar exatamente o total
-    const pags = (dto.pagamentos ?? []).map((p) => {
-      const valor = centavos(p.valor);
-      let recebido: number | null = null;
-      let troco = 0;
-      if (p.forma === 'dinheiro' && p.valorRecebido !== undefined && p.valorRecebido !== null) {
-        recebido = centavos(p.valorRecebido);
-        if (recebido < valor) throw new BadRequestException('Em dinheiro, o valor recebido é menor que o valor do pagamento.');
-        troco = recebido - valor;
-      }
-      const trocoDestino = troco > 0 ? p.trocoDestino ?? 'cliente' : null;
-      return { forma: p.forma, valor, recebido, troco, trocoDestino, gorjetaPara: trocoDestino === 'gorjeta' ? p.gorjetaPara?.trim() || 'Casa' : null };
-    });
+    // pagamentos: com o que já foi pago na entrada, precisam somar exatamente o total
+    const pags = this.lerPagamentos(dto.pagamentos ?? []);
+    const anteriores = await this.pagamentos.find({ where: { estadiaId: e.id } });
+    const adiantado = anteriores.reduce((s, p) => s + centavos(Number(p.valor)), 0);
+    const restante = total - adiantado;
     const pago = pags.reduce((s, p) => s + p.valor, 0);
-    if (total > 0 && pago !== total) {
-      throw new BadRequestException(`Os pagamentos somam ${brl(pago)}, mas a conta é ${brl(total)}.`);
+    if (restante > 0 && pago !== restante) {
+      throw new BadRequestException(adiantado
+        ? `Já foram pagos ${brl(adiantado)} na entrada; falta ${brl(restante)}, mas os pagamentos somam ${brl(pago)}.`
+        : `Os pagamentos somam ${brl(pago)}, mas a conta é ${brl(total)}.`);
     }
-    if (total === 0 && pags.length) throw new BadRequestException('Conta zerada não recebe pagamento.');
-    const formas = [...new Set(pags.map((p) => p.forma))];
-    const forma = total === 0 ? 'cortesia' : formas.length === 1 ? formas[0] : 'misto';
+    if (restante <= 0 && pags.length) throw new BadRequestException(restante < 0 ? `A conta já está paga (sobram ${brl(-restante)} para devolver ao cliente).` : 'A conta já está paga.');
+    const formas = [...new Set([...anteriores.map((p) => p.forma), ...pags.map((p) => p.forma)])];
+    const forma = total === 0 && !formas.length ? 'cortesia' : formas.length === 1 ? formas[0] : 'misto';
     const trocoTotal = pags.reduce((s, p) => s + p.troco, 0);
     const gorjeta = pags.find((p) => p.trocoDestino === 'gorjeta');
 
@@ -482,9 +520,10 @@ export class EstadiasService {
         await m.insert(EstadiaPagamento, {
           empresaId: u.empresaId, estadiaId: e.id, forma: p.forma, valor: reais(p.valor),
           valorRecebido: p.recebido !== null ? reais(p.recebido) : null, troco: reais(p.troco),
-          trocoDestino: p.trocoDestino, gorjetaPara: p.gorjetaPara, usuarioId: u.sub, usuarioNome: u.nome,
+          trocoDestino: p.trocoDestino, gorjetaPara: p.gorjetaPara, usuarioId: u.sub, usuarioNome: u.nome, momento: 'fechamento',
         });
       }
+      if (restante < 0) await this.registrar(m, u, id, 'devolucao', `Pago a mais na entrada: devolver ${brl(-restante)} ao cliente`);
       await m.update(Estadia, { id }, {
         status: 'fechada',
         saidaEm: new Date(),

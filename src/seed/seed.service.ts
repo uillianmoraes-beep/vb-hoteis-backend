@@ -77,11 +77,12 @@ export class SeedService implements OnApplicationBootstrap {
         { nome: 'Gerente', descricao: 'Gestão do dia a dia', permissoes: todas.filter((p) => p !== 'empresa.editar'),
           limites: { descontoPercentual: 100, acrescimoPercentual: 100, cortesia: true, ajusteDiaria: true } },
         { nome: 'Recepção', descricao: 'Recepção / telefonista',
-          permissoes: ['painel.ver', 'unidades.status', 'unidades.bloquear', 'estadias.operar'],
+          permissoes: ['painel.ver', 'unidades.status', 'unidades.bloquear', 'estadias.operar', 'estadias.entrada'],
           limites: { descontoPercentual: 10, acrescimoPercentual: 10, cortesia: false, ajusteDiaria: true } },
         { nome: 'Supervisor da limpeza', descricao: 'Distribui e revisa a limpeza',
           permissoes: ['painel.ver', 'unidades.status', 'unidades.bloquear', 'unidades.desbloquear'],
           limites: {} },
+        { nome: 'Portaria', descricao: 'Dá entrada nas suítes e recebe na entrada', permissoes: ['painel.ver', 'estadias.entrada'], limites: {} },
         { nome: 'Revisora', descricao: 'Vistoria e libera as unidades', permissoes: ['painel.ver', 'unidades.status'], limites: {} },
         { nome: 'Camareira', descricao: 'Limpeza das unidades', permissoes: ['painel.ver', 'unidades.status'], limites: {} },
       ];
