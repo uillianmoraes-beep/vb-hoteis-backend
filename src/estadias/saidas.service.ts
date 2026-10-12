@@ -4,6 +4,7 @@ import { In, Repository } from 'typeorm';
 import { Estadia } from './estadia.entity';
 import { EstadiaEvento } from './estadia-evento.entity';
 import { Unidade } from '../unidades/unidade.entity';
+import { Ambiente } from '../ambientes/ambiente.entity';
 import { UsuarioToken } from '../common/permissoes';
 import { RegistrarSaidaDto } from './estadias.dto';
 
@@ -17,12 +18,17 @@ export class SaidasService {
     @InjectRepository(Estadia) private readonly repo: Repository<Estadia>,
     @InjectRepository(EstadiaEvento) private readonly eventos: Repository<EstadiaEvento>,
     @InjectRepository(Unidade) private readonly unidades: Repository<Unidade>,
+    @InjectRepository(Ambiente) private readonly ambientes: Repository<Ambiente>,
   ) {}
 
   async registrar(u: UsuarioToken, dto: RegistrarSaidaDto) {
     const e = await this.repo.findOne({ where: { empresaId: u.empresaId, numero: dto.numero } });
     if (!e) throw new NotFoundException(`Ticket nº ${dto.numero} não encontrado.`);
     if (u.ambientesIds?.length && !u.ambientesIds.includes(e.ambienteId)) throw new NotFoundException(`Ticket nº ${dto.numero} não encontrado.`);
+    if (dto.ambienteId && e.ambienteId !== dto.ambienteId) {
+      const amb = await this.ambientes.findOne({ where: { id: e.ambienteId } });
+      throw new BadRequestException(`Este ticket é do ${amb?.nome ?? 'outro ambiente'}. Registre na saída do ${amb?.nome ?? 'ambiente certo'}.`);
+    }
     const unidade = await this.unidades.findOne({ where: { id: e.unidadeId } });
     if (dto.unidade && unidade && dto.unidade.replace(/^0+/, '') !== unidade.codigo.replace(/^0+/, '')) {
       throw new BadRequestException(`Este ticket é da suíte ${unidade.codigo}, não da ${dto.unidade}. Confira o ticket.`);
@@ -40,7 +46,7 @@ export class SaidasService {
     return { numero: e.numero, unidade: unidade?.codigo ?? '', placa: e.placa, situacao, hora: agora };
   }
 
-  async listar(u: UsuarioToken, filtro: { de?: string; ate?: string }) {
+  async listar(u: UsuarioToken, filtro: { de?: string; ate?: string; ambienteId?: string }) {
     const ate = filtro.ate ? new Date(`${filtro.ate}T23:59:59.999-03:00`) : new Date();
     const de = filtro.de ? new Date(`${filtro.de}T00:00:00-03:00`) : new Date(ate.getTime() - DIA);
     if (Number.isNaN(de.getTime()) || Number.isNaN(ate.getTime())) throw new BadRequestException('Período inválido.');
@@ -48,6 +54,7 @@ export class SaidasService {
       .where('e.empresaId = :emp', { emp: u.empresaId })
       .andWhere('e.saidaPortariaEm BETWEEN :de AND :ate', { de, ate });
     if (u.ambientesIds?.length) qb.andWhere('e.ambienteId IN (:...amb)', { amb: u.ambientesIds });
+    if (filtro.ambienteId) qb.andWhere('e.ambienteId = :a', { a: filtro.ambienteId });
     const lista: Estadia[] = await qb.orderBy('e.saidaPortariaEm', 'DESC').limit(2000).getMany();
     const unidades = lista.length ? await this.unidades.find({ where: { id: In([...new Set(lista.map((e) => e.unidadeId))]) } }) : [];
     const cod = new Map(unidades.map((x) => [x.id, x.codigo]));

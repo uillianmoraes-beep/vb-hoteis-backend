@@ -18,7 +18,7 @@ export class SaidasController {
   /** ?de=AAAA-MM-DD&ate=AAAA-MM-DD (padrão: últimas 24 h) */
   @Get()
   @Requer('saida.registrar', 'estadias.corrigir')
-  listar(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string) {
-    return this.service.listar(u, { de, ate });
+  listar(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string, @Query('ambienteId') ambienteId?: string) {
+    return this.service.listar(u, { de, ate, ambienteId });
   }
 }

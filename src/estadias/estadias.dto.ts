@@ -123,4 +123,6 @@ export class RegistrarSaidaDto {
   @IsInt() @Min(1) numero!: number;
   /** suíte informada no ticket (conferência opcional) */
   @IsOptional() @IsString() @MaxLength(20) unidade?: string;
+  /** portão de qual ambiente (hotel e motel têm saídas separadas) */
+  @IsOptional() @IsUUID() ambienteId?: string;
 }

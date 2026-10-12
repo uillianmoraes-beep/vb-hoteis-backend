@@ -8,6 +8,7 @@ import { Produto } from '../produtos/produto.entity';
 import { Unidade } from '../unidades/unidade.entity';
 import { UsuarioEntity } from '../usuarios/usuario.entity';
 import { Perfil } from '../perfis/perfil.entity';
+import { Ambiente } from '../ambientes/ambiente.entity';
 import { Empresa } from '../empresas/empresa.entity';
 import { TarifasModule } from '../tarifas/tarifas.module';
 import { EstadiasService } from './estadias.service';
@@ -18,7 +19,7 @@ import { SaidasService } from './saidas.service';
 import { SaidasController } from './saidas.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Estadia, EstadiaItem, EstadiaPagamento, EstadiaEvento, Unidade, UsuarioEntity, Perfil, Produto, Empresa]), TarifasModule],
+  imports: [TypeOrmModule.forFeature([Estadia, EstadiaItem, EstadiaPagamento, EstadiaEvento, Unidade, UsuarioEntity, Perfil, Produto, Empresa, Ambiente]), TarifasModule],
   providers: [EstadiasService, NotasService, SaidasService],
   controllers: [EstadiasController, NotasController, SaidasController],
   exports: [EstadiasService],
