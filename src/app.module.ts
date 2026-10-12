@@ -20,6 +20,7 @@ import { TarifasModule } from './tarifas/tarifas.module';
 import { EstadiasModule } from './estadias/estadias.module';
 import { ProdutosModule } from './produtos/produtos.module';
 import { SeedModule } from './seed/seed.module';
+import { LicencaModule } from './licenca/licenca.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { SeedModule } from './seed/seed.module';
     EstadiasModule,
     ProdutosModule,
     SeedModule,
+    LicencaModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },

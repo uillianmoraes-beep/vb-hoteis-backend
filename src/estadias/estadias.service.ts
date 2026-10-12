@@ -11,6 +11,8 @@ import { UnidadeEvento } from '../unidades/unidade-evento.entity';
 import { UsuarioEntity } from '../usuarios/usuario.entity';
 import { Perfil } from '../perfis/perfil.entity';
 import { Produto } from '../produtos/produto.entity';
+import { Empresa } from '../empresas/empresa.entity';
+import { moduloAtivo } from '../common/modulos';
 import { FUSO, Motor, TarifasService } from '../tarifas/tarifas.service';
 import {
   AbrirEstadiaDto, AtualizarEstadiaDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
@@ -67,6 +69,7 @@ export class EstadiasService {
     @InjectRepository(UsuarioEntity) private readonly usuarios: Repository<UsuarioEntity>,
     @InjectRepository(Perfil) private readonly perfis: Repository<Perfil>,
     @InjectRepository(Produto) private readonly produtos: Repository<Produto>,
+    @InjectRepository(Empresa) private readonly empresas: Repository<Empresa>,
     private readonly tarifas: TarifasService,
     private readonly ds: DataSource,
   ) {}
@@ -438,8 +441,8 @@ export class EstadiasService {
 
   async fechar(u: UsuarioToken, id: string, dto: FecharEstadiaDto) {
     const e = await this.buscarAberta(u, id);
-    if (!dto.nota) throw new BadRequestException('Pergunte ao cliente se ele quer nota fiscal.');
-    const notaDoc = dto.nota.emitir ? documentoFiscal(dto.nota.documento) : null;
+    const notaDoc = dto.nota?.emitir ? documentoFiscal(dto.nota.documento) : null;
+    const controlaNotas = moduloAtivo((await this.empresas.findOne({ where: { id: u.empresaId } }))?.modulos, 'notas');
     const motor = await this.tarifas.motor(u.empresaId, e.ambienteId);
     const consumo = (await this.consumoDe([e.id])).get(e.id) ?? 0;
     const conta = this.calcular(e, motor, consumo);
@@ -501,16 +504,13 @@ export class EstadiasService {
         autorizadoPor,
         usuarioSaidaId: u.sub,
         usuarioSaidaNome: u.nome,
-        notaStatus: dto.nota.emitir ? 'pendente' : 'nao',
-        notaDocumento: dto.nota.emitir ? notaDoc : null,
-        notaNome: dto.nota.emitir ? dto.nota.nome?.trim() || null : null,
-        notaEmail: dto.nota.emitir ? dto.nota.email?.trim() || null : null,
-        notaSolicitadaEm: dto.nota.emitir ? new Date() : null,
+        // toda conta paga entra em "notas para emitir"
+        notaStatus: controlaNotas && total > 0 ? 'pendente' : 'nao',
+        notaDocumento: notaDoc,
+        notaNome: dto.nota?.nome?.trim() || null,
+        notaEmail: dto.nota?.email?.trim() || null,
+        notaSolicitadaEm: controlaNotas && total > 0 ? new Date() : null,
       });
-      await this.registrar(m, u, id, 'nota',
-        dto.nota.emitir
-          ? `Cliente pediu nota fiscal${notaDoc ? ` · ${notaDoc.length === 11 ? 'CPF' : 'CNPJ'} final ${notaDoc.slice(-4)}` : ' · sem CPF'}`
-          : 'Cliente não quis nota fiscal');
       const resumoPag = pags.length
         ? pags.map((p) => `${NOMES_FORMA[p.forma] ?? p.forma} ${brl(p.valor)}${p.troco ? ` (${p.trocoDestino === 'gorjeta' ? `gorjeta ${brl(p.troco)} p/ ${p.gorjetaPara}` : `troco ${brl(p.troco)}`})` : ''}`).join(' + ')
         : 'cortesia';

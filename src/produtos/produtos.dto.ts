@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsObject, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 export class CriarProdutoDto {
   @IsString() @MaxLength(120) nome!: string;
@@ -6,6 +6,7 @@ export class CriarProdutoDto {
   @IsOptional() @IsString() @MaxLength(60) grupo?: string;
   @IsOptional() @IsIn(['produto', 'servico']) tipo?: 'produto' | 'servico';
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(1_000_000) preco!: number;
+  @IsOptional() @IsObject() fiscal?: Record<string, unknown>;
 }
 
 export class AtualizarProdutoDto {
@@ -15,4 +16,5 @@ export class AtualizarProdutoDto {
   @IsOptional() @IsIn(['produto', 'servico']) tipo?: 'produto' | 'servico';
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(1_000_000) preco?: number;
   @IsOptional() @IsBoolean() ativo?: boolean;
+  @IsOptional() @IsObject() fiscal?: Record<string, unknown>;
 }

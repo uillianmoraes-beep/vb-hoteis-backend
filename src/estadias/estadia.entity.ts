@@ -50,6 +50,9 @@ export class Estadia {
   @Column({ name: 'nota_nome', type: 'varchar', length: 120, nullable: true }) notaNome!: string | null;
   @Column({ name: 'nota_email', type: 'varchar', length: 160, nullable: true }) notaEmail!: string | null;
   @Column({ name: 'nota_solicitada_em', type: 'timestamptz', nullable: true }) notaSolicitadaEm!: Date | null;
+  @Column({ name: 'nota_numero', type: 'varchar', length: 30, nullable: true }) notaNumero!: string | null;
+  @Column({ name: 'nota_emitida_em', type: 'timestamptz', nullable: true }) notaEmitidaEm!: Date | null;
+  @Column({ name: 'nota_emitida_por', type: 'varchar', length: 120, nullable: true }) notaEmitidaPor!: string | null;
   @CreateDateColumn({ name: 'criado_em', type: 'timestamptz' }) criadoEm!: Date;
   @UpdateDateColumn({ name: 'atualizado_em', type: 'timestamptz' }) atualizadoEm!: Date;
 }

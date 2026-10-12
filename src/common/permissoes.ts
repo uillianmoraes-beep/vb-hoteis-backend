@@ -14,6 +14,7 @@ export const PERMISSOES = {
   'estadias.corrigir': 'Corrigir hora de entrada e tabela de uma conta',
   'estadias.estornar': 'Estornar item lançado na conta',
   'produtos.gerenciar': 'Cadastrar produtos e serviços',
+  'notas.gerenciar': 'Relatórios de notas fiscais e desfazer emissão',
   'categorias.gerenciar': 'Cadastrar e editar categorias',
   'ambientes.gerenciar': 'Cadastrar e editar ambientes',
   'motivos.gerenciar': 'Cadastrar motivos de bloqueio',

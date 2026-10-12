@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Produto } from './produto.entity';
 import { AtualizarProdutoDto, CriarProdutoDto } from './produtos.dto';
+import { limparFiscal } from '../common/fiscal';
 
 @Injectable()
 export class ProdutosService {
@@ -46,6 +47,7 @@ export class ProdutosService {
         grupo: dto.grupo?.trim() || null,
         tipo: dto.tipo ?? 'produto',
         preco: dto.preco.toFixed(2),
+        fiscal: limparFiscal(dto.fiscal),
       }),
     );
   }
@@ -59,6 +61,7 @@ export class ProdutosService {
     if (dto.tipo !== undefined) p.tipo = dto.tipo;
     if (dto.preco !== undefined) p.preco = dto.preco.toFixed(2);
     if (dto.ativo !== undefined) p.ativo = dto.ativo;
+    if (dto.fiscal !== undefined) p.fiscal = limparFiscal(dto.fiscal);
     return this.repo.save(p);
   }
 

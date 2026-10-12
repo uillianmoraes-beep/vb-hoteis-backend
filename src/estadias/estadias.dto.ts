@@ -48,8 +48,8 @@ export class FecharEstadiaDto {
   @IsOptional() @IsString() @MaxLength(300) motivo?: string;
   /** login e senha de quem libera quando passa do limite do perfil */
   @IsOptional() @ValidateNested() @Type(() => AutorizacaoDto) autorizacao?: AutorizacaoDto;
-  /** escolha do cliente sobre a nota fiscal */
-  @ValidateNested() @Type(() => NotaFiscalDto) nota!: NotaFiscalDto;
+  /** hotel (com cadastro do hóspede): dados para a nota. No motel não vai. */
+  @IsOptional() @ValidateNested() @Type(() => NotaFiscalDto) nota?: NotaFiscalDto;
 }
 
 export class CancelarEstadiaDto {
@@ -95,3 +95,13 @@ export class CorrigirEstadiaDto {
   @IsString() @MinLength(3) @MaxLength(300) motivo!: string;
 }
 
+
+export class MarcarNotasDto {
+  @IsArray() @ArrayMaxSize(500) @IsUUID('4', { each: true }) ids!: string[];
+  /** número da nota (opcional; em lote costuma ficar vazio) */
+  @IsOptional() @IsString() @MaxLength(30) numero?: string;
+}
+
+export class DesfazerNotaDto {
+  @IsString() @MinLength(3) @MaxLength(300) motivo!: string;
+}

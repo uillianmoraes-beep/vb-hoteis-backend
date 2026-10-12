@@ -53,7 +53,7 @@ export class AuthService {
         permissoes: payload.permissoes,
         ambientesIds: usuario.ambientesIds,
       },
-      empresa: { id: empresa.id, nome: empresa.nome, vocabulario: empresa.vocabulario, aparencia: empresa.aparencia },
+      empresa: { id: empresa.id, nome: empresa.nome, vocabulario: empresa.vocabulario, aparencia: empresa.aparencia, modulos: empresa.modulos ?? {} },
     };
   }
 
@@ -70,7 +70,7 @@ export class AuthService {
         permissoes: usuario.perfil?.permissoes ?? [],
         ambientesIds: usuario.ambientesIds,
       },
-      empresa: empresa ? { id: empresa.id, nome: empresa.nome, vocabulario: empresa.vocabulario, aparencia: empresa.aparencia } : null,
+      empresa: empresa ? { id: empresa.id, nome: empresa.nome, vocabulario: empresa.vocabulario, aparencia: empresa.aparencia, modulos: empresa.modulos ?? {} } : null,
     };
   }
 
