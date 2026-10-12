@@ -24,8 +24,45 @@ export interface DadosFiscais {
   cnae?: string;
   aliquotaIss?: number;
   issRetido?: boolean;
+  // reforma tributária (IBS / CBS)
+  cstIbsCbs?: string; // 3 dígitos
+  cClassTrib?: string; // 6 dígitos
+  aliquotaIbs?: number;
+  aliquotaIbsUf?: number;
+  aliquotaIbsMun?: number;
+  aliquotaCbs?: number;
+  reducaoIbsUf?: number;
+  reducaoIbsMun?: number;
+  reducaoCbs?: number;
+  // ICMS complementos
+  aliquotaFcp?: number;
+  reducaoBc?: number;
+  codBeneficio?: string; // cBenef
   // comum
   observacao?: string;
+}
+
+export const DOCUMENTOS_FISCAIS = ['nfce', 'nfe', 'nfs', 'devolucao'] as const;
+export type DocumentoFiscal = (typeof DOCUMENTOS_FISCAIS)[number];
+
+/**
+ * Tributação que vale para um item: regra padrão do documento → regra do CFOP
+ * do item (ou do CFOP padrão) → o que estiver preenchido no próprio item.
+ * Campo vazio no produto = usa o da configuração.
+ */
+export function tributacaoEfetiva(
+  item: DadosFiscais,
+  regras: { documento: string; cfop: string | null; dados: DadosFiscais; ativo: boolean }[],
+  documento: DocumentoFiscal,
+): DadosFiscais {
+  const doDoc = regras.filter((r) => r.ativo && r.documento === documento);
+  const padrao = doDoc.find((r) => !r.cfop)?.dados ?? {};
+  const cfop = item.cfop || padrao.cfop;
+  const porCfop = cfop ? doDoc.find((r) => r.cfop === cfop)?.dados ?? {} : {};
+  const out: Record<string, unknown> = { ...padrao, ...porCfop };
+  for (const [k, v] of Object.entries(item)) if (v !== undefined && v !== null && v !== '') out[k] = v;
+  if (cfop) out.cfop = cfop;
+  return out as DadosFiscais;
 }
 
 const DIGITOS: Record<string, [number, number, string]> = {
@@ -37,9 +74,14 @@ const DIGITOS: Record<string, [number, number, string]> = {
   cstPis: [2, 2, 'CST do PIS tem 2 números'],
   cstCofins: [2, 2, 'CST da COFINS tem 2 números'],
   cnae: [7, 7, 'CNAE tem 7 números'],
+  cstIbsCbs: [3, 3, 'CST do IBS/CBS tem 3 números'],
+  cClassTrib: [6, 6, 'cClassTrib tem 6 números'],
 };
-const TEXTOS: Record<string, number> = { unidade: 6, codigoServico: 10, codigoMunicipal: 20, observacao: 300 };
-const ALIQUOTAS = ['aliquotaIcms', 'aliquotaPis', 'aliquotaCofins', 'aliquotaIss'];
+const TEXTOS: Record<string, number> = { codBeneficio: 10, unidade: 6, codigoServico: 10, codigoMunicipal: 20, observacao: 300 };
+const ALIQUOTAS = [
+  'aliquotaIcms', 'aliquotaPis', 'aliquotaCofins', 'aliquotaIss', 'aliquotaIbs', 'aliquotaIbsUf', 'aliquotaIbsMun', 'aliquotaCbs',
+  'reducaoIbsUf', 'reducaoIbsMun', 'reducaoCbs', 'aliquotaFcp', 'reducaoBc',
+];
 
 export function limparFiscal(bruto: unknown): DadosFiscais {
   if (bruto === null || bruto === undefined) return {};

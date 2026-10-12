@@ -21,6 +21,7 @@ import { EstadiasModule } from './estadias/estadias.module';
 import { ProdutosModule } from './produtos/produtos.module';
 import { SeedModule } from './seed/seed.module';
 import { LicencaModule } from './licenca/licenca.module';
+import { FiscalModule } from './fiscal/fiscal.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { LicencaModule } from './licenca/licenca.module';
     ProdutosModule,
     SeedModule,
     LicencaModule,
+    FiscalModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },
