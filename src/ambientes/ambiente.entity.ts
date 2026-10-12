@@ -18,6 +18,8 @@ export class Ambiente {
   @Column({ type: 'int', default: 0 }) ordem!: number;
   /** Regras de cobrança do ambiente: tolerância, o que acontece depois do último período etc. */
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) regras!: RegrasAmbiente;
+  /** entrada e saída pelo mesmo portão (saída registrada no painel da portaria) */
+  @Column({ name: 'portao_unico', default: false }) portaoUnico!: boolean;
   @Column({ default: true }) ativo!: boolean;
   @CreateDateColumn({ name: 'criado_em', type: 'timestamptz' }) criadoEm!: Date;
   @UpdateDateColumn({ name: 'atualizado_em', type: 'timestamptz' }) atualizadoEm!: Date;

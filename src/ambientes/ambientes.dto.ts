@@ -6,6 +6,7 @@ export class CriarAmbienteDto {
   @IsIn(TIPOS_AMBIENTE as unknown as string[]) tipo!: TipoAmbiente;
   @IsOptional() @IsString() @MaxLength(9) cor?: string;
   @IsOptional() @IsInt() ordem?: number;
+  @IsOptional() @IsBoolean() portaoUnico?: boolean;
 }
 
 export class AtualizarAmbienteDto {
@@ -14,4 +15,5 @@ export class AtualizarAmbienteDto {
   @IsOptional() @IsString() @MaxLength(9) cor?: string;
   @IsOptional() @IsInt() ordem?: number;
   @IsOptional() @IsBoolean() ativo?: boolean;
+  @IsOptional() @IsBoolean() portaoUnico?: boolean;
 }
