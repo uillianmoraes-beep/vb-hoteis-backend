@@ -13,4 +13,10 @@ export class PainelController {
   montar(@Usuario() u: UsuarioToken, @Query('ambienteId') ambienteId?: string) {
     return this.service.montar(u, ambienteId);
   }
+
+  @Get('atividades')
+  @Requer('painel.ver')
+  atividades(@Usuario() u: UsuarioToken, @Query('limite') limite?: string) {
+    return this.service.atividades(u, limite ? Number(limite) : 20);
+  }
 }

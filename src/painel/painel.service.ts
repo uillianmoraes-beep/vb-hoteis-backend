@@ -98,4 +98,31 @@ export class PainelService {
 
     return { geradoEm: new Date(agora).toISOString(), ambientes, resumo, alertas, unidades };
   }
+
+  /** Últimas mudanças de status (quem fez, em qual unidade, quando). */
+  async atividades(u: UsuarioToken, limite = 20) {
+    const restrito = u.ambientesIds && u.ambientesIds.length ? u.ambientesIds : null;
+    const qb = this.unidades.manager
+      .createQueryBuilder()
+      .select([
+        'e.id AS id',
+        'e.status_anterior AS "statusAnterior"',
+        'e.status_novo AS "statusNovo"',
+        'e.observacao AS observacao',
+        'e.usuario_nome AS "usuarioNome"',
+        'e.criado_em AS "criadoEm"',
+        'un.id AS "unidadeId"',
+        'un.codigo AS codigo',
+        'un.tipo AS tipo',
+        'm.nome AS "motivoNome"',
+      ])
+      .from('unidade_eventos', 'e')
+      .innerJoin('unidades', 'un', 'un.id = e.unidade_id')
+      .leftJoin('motivos_bloqueio', 'm', 'm.id = e.motivo_bloqueio_id')
+      .where('e.empresa_id = :empresaId', { empresaId: u.empresaId })
+      .orderBy('e.criado_em', 'DESC')
+      .limit(Math.min(Math.max(limite, 1), 100));
+    if (restrito) qb.andWhere('un.ambiente_id IN (:...restrito)', { restrito });
+    return qb.getRawMany();
+  }
 }

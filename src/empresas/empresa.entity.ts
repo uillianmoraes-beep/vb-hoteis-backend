@@ -7,6 +7,8 @@ export class Empresa {
   @Column({ type: 'varchar', length: 18, nullable: true }) cnpj!: string | null;
   /** Termos renomeados pelo estabelecimento, ex.: { "suite": "cabine", "recepcao": "telefonista" } */
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) vocabulario!: Record<string, string>;
+  /** Tema e cores dos status escolhidos pela empresa, ex.: { "tema": "dia", "cores": { "livre": "#16A34A" } } */
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) aparencia!: { tema?: string; cores?: Record<string, string> };
   @Column({ default: true }) ativo!: boolean;
   @CreateDateColumn({ name: 'criado_em', type: 'timestamptz' }) criadoEm!: Date;
   @UpdateDateColumn({ name: 'atualizado_em', type: 'timestamptz' }) atualizadoEm!: Date;

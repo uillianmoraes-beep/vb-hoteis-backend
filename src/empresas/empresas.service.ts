@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Empresa } from './empresa.entity';
 import { AtualizarEmpresaDto } from './empresas.dto';
+import { STATUS_UNIDADE } from '../common/permissoes';
 
 @Injectable()
 export class EmpresasService {
@@ -16,7 +17,21 @@ export class EmpresasService {
 
   async atualizar(id: string, dto: AtualizarEmpresaDto): Promise<Empresa> {
     const empresa = await this.buscar(id);
-    Object.assign(empresa, dto);
+    const { aparencia, ...resto } = dto;
+    Object.assign(empresa, resto);
+    if (aparencia) empresa.aparencia = this.limparAparencia(aparencia);
     return this.repo.save(empresa);
+  }
+
+  /** Aceita só nome de tema simples e cores hexadecimais dos status conhecidos. */
+  private limparAparencia(a: { tema?: string; cores?: Record<string, string> }) {
+    const tema = typeof a.tema === 'string' && /^[a-z0-9-]{1,30}$/.test(a.tema) ? a.tema : 'dia';
+    const cores: Record<string, string> = {};
+    for (const [st, cor] of Object.entries(a.cores ?? {})) {
+      if ((STATUS_UNIDADE as readonly string[]).includes(st) && typeof cor === 'string' && /^#[0-9a-fA-F]{6}$/.test(cor)) {
+        cores[st] = cor.toUpperCase();
+      }
+    }
+    return { tema, cores };
   }
 }
