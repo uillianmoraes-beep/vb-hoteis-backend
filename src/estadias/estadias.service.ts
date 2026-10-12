@@ -233,6 +233,23 @@ export class EstadiasService {
     const total = conta.total - desconto + acrescimo;
     const forma = total === 0 && desconto > 0 ? 'cortesia' : dto.formaPagamento;
 
+    // troco (só em dinheiro)
+    let recebido: number | null = null;
+    let troco = 0;
+    let trocoDestino: 'cliente' | 'gorjeta' | null = null;
+    let gorjetaPara: string | null = null;
+    if (forma === 'dinheiro' && dto.valorRecebido !== undefined && dto.valorRecebido !== null) {
+      recebido = centavos(dto.valorRecebido);
+      if (recebido < total) throw new BadRequestException('O valor recebido é menor que o total da conta.');
+      troco = recebido - total;
+      if (troco > 0) {
+        trocoDestino = dto.trocoDestino ?? 'cliente';
+        if (trocoDestino === 'gorjeta') {
+          gorjetaPara = dto.gorjetaPara?.trim() || 'Casa';
+        }
+      }
+    }
+
     const unidade = await this.unidades.findOneOrFail({ where: { id: e.unidadeId } });
     await this.ds.transaction(async (m) => {
       await m.update(Estadia, { id }, {
@@ -245,12 +262,17 @@ export class EstadiasService {
         acrescimo: reais(acrescimo),
         valorTotal: reais(total),
         formaPagamento: forma,
+        valorRecebido: recebido !== null ? reais(recebido) : null,
+        troco: reais(troco),
+        trocoDestino,
+        gorjetaPara,
         motivoAjuste: dto.motivo?.trim() || null,
         autorizadoPor,
         usuarioSaidaId: u.sub,
         usuarioSaidaNome: u.nome,
       });
-      await this.mudarUnidade(m, u, unidade, 'limpeza', `Saída · R$ ${reais(total).replace('.', ',')}`);
+      const extra = troco > 0 ? (trocoDestino === 'gorjeta' ? ` · gorjeta R$ ${reais(troco).replace('.', ',')} (${gorjetaPara})` : ` · troco R$ ${reais(troco).replace('.', ',')}`) : '';
+      await this.mudarUnidade(m, u, unidade, 'limpeza', `Saída · R$ ${reais(total).replace('.', ',')}${extra}`);
     });
     return this.detalhe(u, id);
   }

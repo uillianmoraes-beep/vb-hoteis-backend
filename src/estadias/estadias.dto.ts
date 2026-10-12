@@ -20,6 +20,11 @@ export class FecharEstadiaDto {
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) desconto?: number;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) acrescimo?: number;
   @IsOptional() @IsString() @MaxLength(300) motivo?: string;
+  /** Dinheiro: valor que o cliente entregou */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) valorRecebido?: number;
+  @IsOptional() @IsIn(['cliente', 'gorjeta']) trocoDestino?: 'cliente' | 'gorjeta';
+  /** Para quem fica a gorjeta (garçom, camareira, recepção, casa…) */
+  @IsOptional() @IsString() @MaxLength(120) gorjetaPara?: string;
   /** login e senha de quem libera quando passa do limite do perfil */
   @IsOptional() @ValidateNested() @Type(() => AutorizacaoDto) autorizacao?: AutorizacaoDto;
 }
