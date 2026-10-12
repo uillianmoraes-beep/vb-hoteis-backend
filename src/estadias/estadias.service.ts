@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 import { Estadia, FormaPagamento } from './estadia.entity';
 import { EstadiaItem } from './estadia-item.entity';
 import { EstadiaPagamento } from './estadia-pagamento.entity';
@@ -179,6 +180,10 @@ export class EstadiasService {
 
   async detalhe(u: UsuarioToken, id: string) {
     const e = await this.buscar(u, id);
+    if (!e.avaliacaoToken) {
+      e.avaliacaoToken = randomBytes(9).toString('base64url');
+      await this.repo.update({ id: e.id }, { avaliacaoToken: e.avaliacaoToken });
+    }
     const motor = await this.tarifas.motor(u.empresaId, e.ambienteId);
     const consumo = (await this.consumoDe([e.id])).get(e.id) ?? 0;
     const [itens, pagamentos, eventos, unidade] = await Promise.all([

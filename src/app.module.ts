@@ -22,6 +22,7 @@ import { ProdutosModule } from './produtos/produtos.module';
 import { SeedModule } from './seed/seed.module';
 import { LicencaModule } from './licenca/licenca.module';
 import { FiscalModule } from './fiscal/fiscal.module';
+import { AvaliacoesModule } from './avaliacoes/avaliacoes.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { FiscalModule } from './fiscal/fiscal.module';
     SeedModule,
     LicencaModule,
     FiscalModule,
+    AvaliacoesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },

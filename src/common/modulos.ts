@@ -10,6 +10,7 @@ export const MODULOS = {
   hotel: 'Hotel / pousada (reservas e cadastro de hóspedes)',
   restaurante: 'Restaurante / bar (mesas e comandas)',
   manutencao: 'Integração VB Manutenção',
+  satisfacao: 'Pesquisa de satisfação (QR code na conta + relatório)',
 } as const;
 
 export type Modulo = keyof typeof MODULOS;
