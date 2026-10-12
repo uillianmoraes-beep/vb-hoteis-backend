@@ -274,8 +274,13 @@ export class EstadiasService {
       : null;
 
     const salva = await this.ds.transaction(async (m) => {
+      // número do uso: contador da empresa (trava a linha até o fim da transação)
+      const r = await m.query('UPDATE empresas SET ultimo_uso = ultimo_uso + 1 WHERE id = $1 RETURNING ultimo_uso', [u.empresaId]);
+      const linha = Array.isArray(r?.[0]) ? r[0][0] : r?.[0];
+      const numero = linha ? Number(linha.ultimo_uso) : null;
       const e = await m.save(
         m.create(Estadia, {
+          numero,
           empresaId: u.empresaId,
           ambienteId: unidade.ambienteId,
           unidadeId: unidade.id,
@@ -295,7 +300,7 @@ export class EstadiasService {
       await this.mudarUnidade(m, u, unidade, 'ocupada', `Entrada${e.placa ? ` · ${e.placa}` : ''}`);
       if (dto.adiantamento?.length) await this.gravarAdiantamento(m, u, e.id, dto.adiantamento, 'entrada');
       await this.registrar(m, u, e.id, 'entrada',
-        `Entrada na ${unidade.codigo}${e.placa ? `, placa ${e.placa}` : ''}, ${e.pessoas} pessoa(s), tabela ${tabela.nome}`
+        `Uso nº ${e.numero ?? '—'} · entrada na ${unidade.codigo}${e.placa ? `, placa ${e.placa}` : ''}, ${e.pessoas} pessoa(s), tabela ${tabela.nome}`
         + (modalidade === 'pernoite' ? ', pernoite' : minimo ? `, pacote ${minimo.nome}` : ''));
       return e;
     });

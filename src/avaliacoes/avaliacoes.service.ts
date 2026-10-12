@@ -72,6 +72,8 @@ export class AvaliacoesService {
     if (u.ambientesIds?.length) qb.andWhere('a.ambienteId IN (:...amb)', { amb: u.ambientesIds });
     const lista: Avaliacao[] = await qb.orderBy('a.criadoEm', 'DESC').limit(5000).getMany();
 
+    const usos = lista.length ? await this.estadias.find({ where: { id: In(lista.map((a) => a.estadiaId)) }, select: { id: true, numero: true } }) : [];
+    const numUso = new Map(usos.map((x) => [x.id, x.numero]));
     const unidades = lista.length ? await this.unidades.find({ where: { id: In([...new Set(lista.map((a) => a.unidadeId).filter((x): x is string => !!x))]) } }) : [];
     const cod = new Map(unidades.map((x) => [x.id, x.codigo]));
     const media = (vals: (number | null)[]) => {
@@ -98,7 +100,7 @@ export class AvaliacoesService {
         .map(([codigo, l]) => ({ codigo, total: l.length, geral: media(l.map((a) => Number(a.geral))), ...Object.fromEntries(CRITERIOS.map((c) => [c, media(l.map((a) => a[c]))])) }))
         .sort((a, b) => (a.geral ?? 9) - (b.geral ?? 9)),
       comentarios: lista.filter((a) => a.comentario).slice(0, 200).map((a) => ({
-        id: a.id, data: a.criadoEm, unidade: cod.get(a.unidadeId ?? '') ?? '—', geral: Number(a.geral), voltaria: a.voltaria, comentario: a.comentario,
+        id: a.id, uso: numUso.get(a.estadiaId) ?? null, data: a.criadoEm, unidade: cod.get(a.unidadeId ?? '') ?? '—', geral: Number(a.geral), voltaria: a.voltaria, comentario: a.comentario,
       })),
     };
   }

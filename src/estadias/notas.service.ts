@@ -64,6 +64,7 @@ export class NotasService {
     const n = (v: string | null | undefined) => Number(v ?? 0);
     const itens = lista.map((e) => ({
       id: e.id,
+      numero: e.numero,
       codigo: cod.get(e.unidadeId) ?? '—',
       entradaEm: e.entradaEm,
       saidaEm: e.saidaEm,
