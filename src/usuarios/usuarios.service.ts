@@ -70,6 +70,7 @@ export class UsuariosService {
         ...(dto.perfilId !== undefined && { perfilId: dto.perfilId }),
         ...(dto.ativo !== undefined && { ativo: dto.ativo }),
         ...(dto.acessoCelular !== undefined && { acessoCelular: dto.acessoCelular }),
+        ...(dto.recebeGorjeta !== undefined && { recebeGorjeta: dto.recebeGorjeta }),
         ...(dto.ambientesIds !== undefined && {
           ambientesIds: dto.ambientesIds && dto.ambientesIds.length ? dto.ambientesIds : null,
         }),

@@ -10,6 +10,7 @@ import { Unidade } from '../unidades/unidade.entity';
 import { Ambiente } from '../ambientes/ambiente.entity';
 import { Empresa } from '../empresas/empresa.entity';
 import { UsuarioEntity } from '../usuarios/usuario.entity';
+import { Gorjeta } from '../gorjetas/gorjeta.entity';
 import { moduloAtivo } from '../common/modulos';
 import { UsuarioToken, temPermissao } from '../common/permissoes';
 
@@ -29,6 +30,7 @@ export class CaixaService {
     @InjectRepository(Ambiente) private readonly ambientes: Repository<Ambiente>,
     @InjectRepository(Empresa) private readonly empresas: Repository<Empresa>,
     @InjectRepository(UsuarioEntity) private readonly usuarios: Repository<UsuarioEntity>,
+    @InjectRepository(Gorjeta) private readonly gorjetasRepo: Repository<Gorjeta>,
     private readonly ds: DataSource,
   ) {}
 
@@ -73,28 +75,36 @@ export class CaixaService {
   async resumo(t: CaixaTurno) {
     const pags = await this.pagamentos.find({ where: { turnoId: t.id } });
     const movs = await this.movimentos.find({ where: { turnoId: t.id }, order: { criadoEm: 'ASC' } });
+    const gorjs = await this.gorjetasRepo.find({ where: { turnoId: t.id } });
     const recebido: Record<string, number> = Object.fromEntries(FORMAS.map((f) => [f, 0]));
-    const gorjetas = new Map<string, number>();
-    for (const p of pags) {
-      recebido[p.forma] = (recebido[p.forma] ?? 0) + c(p.valor);
-      if (p.trocoDestino === 'gorjeta' && c(p.troco) > 0) {
-        const quem = p.gorjetaPara || 'Casa';
-        gorjetas.set(quem, (gorjetas.get(quem) ?? 0) + c(p.troco));
-      }
-    }
+    for (const p of pags) recebido[p.forma] = (recebido[p.forma] ?? 0) + c(p.valor);
     const somaMov = (tipo: string, forma?: string) => movs.filter((m) => m.tipo === tipo && (!forma || m.forma === forma)).reduce((s, m) => s + c(m.valor), 0);
-    const totalGorjetas = [...gorjetas.values()].reduce((s, v) => s + v, 0);
     const esperado: Valores = {};
     for (const f of FORMAS) esperado[f] = recebido[f] ?? 0;
-    // na gaveta: troco inicial + dinheiro recebido + gorjetas deixadas (a repassar) + reforços − sangrias − despesas
-    esperado.dinheiro = c(t.trocoInicial) + (recebido.dinheiro ?? 0) + totalGorjetas + somaMov('reforco') - somaMov('sangria') - somaMov('despesa', 'dinheiro');
-    const contas = new Set(pags.map((p) => p.estadiaId)).size;
+    // gorjeta a mais no cartão/pix entra na maquininha daquela forma
+    for (const g of gorjs) if (g.origem === 'adicional') esperado[g.forma] = (esperado[g.forma] ?? 0) + c(g.valor);
+    const gorjDinheiro = gorjs.filter((g) => g.forma === 'dinheiro');
+    const pagasNaHora = gorjDinheiro.filter((g) => g.status === 'paga_na_hora').reduce((s, g) => s + c(g.valor), 0);
+    // na gaveta: troco inicial + dinheiro das contas + gorjetas em dinheiro − as já pagas na hora + reforços − sangrias − despesas
+    esperado.dinheiro = c(t.trocoInicial) + (recebido.dinheiro ?? 0) + gorjDinheiro.reduce((s, g) => s + c(g.valor), 0) - pagasNaHora
+      + somaMov('reforco') - somaMov('sangria') - somaMov('despesa', 'dinheiro');
+    const porPessoa = new Map<string, { para: string; valor: number; naHora: number; aRepassar: number; casa: number }>();
+    for (const g of gorjs) {
+      const a = porPessoa.get(g.beneficiarioNome) ?? { para: g.beneficiarioNome, valor: 0, naHora: 0, aRepassar: 0, casa: 0 };
+      a.valor += c(g.valor);
+      if (g.status === 'paga_na_hora') a.naHora += c(g.valor);
+      else if (g.status === 'casa') a.casa += c(g.valor);
+      else a.aRepassar += c(g.valorLiquido);
+      porPessoa.set(g.beneficiarioNome, a);
+    }
+    const totalGorjetas = gorjs.reduce((s, g) => s + c(g.valor), 0);
     return {
       recebido: Object.fromEntries(Object.entries(recebido).map(([k, v]) => [k, r(v)])),
       totalRecebido: r(Object.values(recebido).reduce((s, v) => s + v, 0)),
-      contas,
-      gorjetas: [...gorjetas.entries()].map(([para, v]) => ({ para, valor: r(v) })).sort((a, b) => b.valor - a.valor),
+      contas: new Set(pags.map((p) => p.estadiaId)).size,
+      gorjetas: [...porPessoa.values()].map((a) => ({ para: a.para, valor: r(a.valor), naHora: r(a.naHora), aRepassar: r(a.aRepassar), casa: r(a.casa) })).sort((x, y) => y.valor - x.valor),
       totalGorjetas: r(totalGorjetas),
+      gorjetasPagasNaHora: r(pagasNaHora),
       sangrias: r(somaMov('sangria')),
       reforcos: r(somaMov('reforco')),
       despesas: r(somaMov('despesa')),

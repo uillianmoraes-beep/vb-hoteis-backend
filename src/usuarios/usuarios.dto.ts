@@ -10,6 +10,7 @@ export class CriarUsuarioDto {
   @IsUUID() perfilId!: string;
   @IsOptional() @IsArray() @ArrayUnique() @IsUUID('all', { each: true }) ambientesIds?: string[];
   @IsOptional() @IsBoolean() acessoCelular?: boolean;
+  @IsOptional() @IsBoolean() recebeGorjeta?: boolean;
 }
 
 export class AtualizarUsuarioDto {
@@ -19,6 +20,7 @@ export class AtualizarUsuarioDto {
   @IsOptional() @IsArray() @ArrayUnique() @IsUUID('all', { each: true }) ambientesIds?: string[] | null;
   @IsOptional() @IsBoolean() ativo?: boolean;
   @IsOptional() @IsBoolean() acessoCelular?: boolean;
+  @IsOptional() @IsBoolean() recebeGorjeta?: boolean;
 }
 
 export class TrocarSenhaDto {

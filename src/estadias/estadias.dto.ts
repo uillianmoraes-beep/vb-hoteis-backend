@@ -31,6 +31,10 @@ export class PagamentoDto {
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) valorRecebido?: number;
   @IsOptional() @IsIn(['cliente', 'gorjeta']) trocoDestino?: 'cliente' | 'gorjeta';
   @IsOptional() @IsString() @MaxLength(120) gorjetaPara?: string;
+  /** quem recebe a gorjeta (usuário marcado como recebe gorjeta) */
+  @IsOptional() @IsUUID() gorjetaUsuarioId?: string;
+  /** gorjeta a mais no cartão/pix (o cliente passa o valor da conta + este) */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100_000) gorjetaAdicional?: number;
 }
 
 export class NotaFiscalDto {

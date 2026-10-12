@@ -16,6 +16,7 @@ import { Empresa } from '../empresas/empresa.entity';
 import { moduloAtivo } from '../common/modulos';
 import { FUSO, Motor, TarifasService } from '../tarifas/tarifas.service';
 import { CaixaService } from '../caixa/caixa.service';
+import { GorjetasService } from '../gorjetas/gorjetas.service';
 import {
   AbrirEstadiaDto, AdiantamentoDto, PagamentoDto, AtualizarEstadiaDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
   LancarItemDto, TransferirDto, TrocarCobrancaDto,
@@ -74,6 +75,7 @@ export class EstadiasService {
     @InjectRepository(Empresa) private readonly empresas: Repository<Empresa>,
     private readonly tarifas: TarifasService,
     private readonly caixa: CaixaService,
+    private readonly gorjetas: GorjetasService,
     private readonly ds: DataSource,
   ) {}
 
@@ -224,7 +226,10 @@ export class EstadiasService {
         troco = recebido - valor;
       }
       const trocoDestino = troco > 0 ? p.trocoDestino ?? 'cliente' : null;
-      return { forma: p.forma, valor, recebido, troco, trocoDestino, gorjetaPara: trocoDestino === 'gorjeta' ? p.gorjetaPara?.trim() || 'Casa' : null };
+      return {
+        forma: p.forma, valor, recebido, troco, trocoDestino, gorjetaPara: trocoDestino === 'gorjeta' ? p.gorjetaPara?.trim() || 'Casa' : null,
+        gorjetaUsuarioId: p.gorjetaUsuarioId ?? null, gorjetaAdicional: centavos(p.gorjetaAdicional ?? 0),
+      };
     });
   }
 
@@ -563,6 +568,15 @@ export class EstadiasService {
           valorRecebido: p.recebido !== null ? reais(p.recebido) : null, troco: reais(p.troco),
           trocoDestino: p.trocoDestino, gorjetaPara: p.gorjetaPara, usuarioId: u.sub, usuarioNome: u.nome, momento: 'fechamento', turnoId,
         });
+      }
+      // gorjetas identificadas: troco deixado e valor a mais no cartão/pix
+      const itensGorjeta = pags.flatMap((p) => [
+        ...(p.trocoDestino === 'gorjeta' && p.troco > 0 ? [{ origem: 'troco' as const, forma: 'dinheiro', valorCent: p.troco, beneficiarioId: p.gorjetaUsuarioId, nome: p.gorjetaPara }] : []),
+        ...(p.gorjetaAdicional > 0 ? [{ origem: 'adicional' as const, forma: p.forma, valorCent: p.gorjetaAdicional, beneficiarioId: p.gorjetaUsuarioId, nome: p.gorjetaPara }] : []),
+      ]);
+      const gs = await this.gorjetas.registrar(m, u, { estadiaId: e.id, turnoId, itens: itensGorjeta });
+      if (gs.length) {
+        await this.registrar(m, u, id, 'gorjeta', `Gorjeta: ${gs.map((g) => `${g.beneficiarioNome} ${brl(Math.round(Number(g.valor) * 100))} (${g.status === 'paga_na_hora' ? 'paga na hora' : g.status === 'casa' ? 'casa' : 'a repassar'})`).join(' · ')}`);
       }
       if (restante < 0) await this.registrar(m, u, id, 'devolucao', `Pago a mais na entrada: devolver ${brl(-restante)} ao cliente`);
       await m.update(Estadia, { id }, {
