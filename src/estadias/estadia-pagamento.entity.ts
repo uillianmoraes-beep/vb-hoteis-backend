@@ -14,6 +14,8 @@ export class EstadiaPagamento {
   @Column({ name: 'gorjeta_para', type: 'varchar', length: 120, nullable: true }) gorjetaPara!: string | null;
   /** entrada (portaria) | adiantamento | fechamento */
   @Column({ type: 'varchar', length: 12, default: 'fechamento' }) momento!: string;
+  /** turno do caixa em que o dinheiro entrou */
+  @Column({ name: 'turno_id', type: 'uuid', nullable: true }) turnoId!: string | null;
   @Column({ name: 'usuario_id', type: 'uuid', nullable: true }) usuarioId!: string | null;
   @Column({ name: 'usuario_nome', type: 'varchar', length: 120, nullable: true }) usuarioNome!: string | null;
   @CreateDateColumn({ name: 'criado_em', type: 'timestamptz' }) criadoEm!: Date;

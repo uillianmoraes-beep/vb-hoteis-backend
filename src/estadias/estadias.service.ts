@@ -15,6 +15,7 @@ import { Produto } from '../produtos/produto.entity';
 import { Empresa } from '../empresas/empresa.entity';
 import { moduloAtivo } from '../common/modulos';
 import { FUSO, Motor, TarifasService } from '../tarifas/tarifas.service';
+import { CaixaService } from '../caixa/caixa.service';
 import {
   AbrirEstadiaDto, AdiantamentoDto, PagamentoDto, AtualizarEstadiaDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
   LancarItemDto, TransferirDto, TrocarCobrancaDto,
@@ -72,6 +73,7 @@ export class EstadiasService {
     @InjectRepository(Produto) private readonly produtos: Repository<Produto>,
     @InjectRepository(Empresa) private readonly empresas: Repository<Empresa>,
     private readonly tarifas: TarifasService,
+    private readonly caixa: CaixaService,
     private readonly ds: DataSource,
   ) {}
 
@@ -226,14 +228,15 @@ export class EstadiasService {
     });
   }
 
-  private async gravarAdiantamento(m: EntityManager, u: UsuarioToken, estadiaId: string, lista: PagamentoDto[], momento: 'entrada' | 'adiantamento') {
+  private async gravarAdiantamento(m: EntityManager, u: UsuarioToken, estadiaId: string, lista: PagamentoDto[], momento: 'entrada' | 'adiantamento', ambienteId: string) {
     const pags = this.lerPagamentos(lista).filter((p) => p.valor > 0);
     if (!pags.length) return 0;
+    const turnoId = await this.caixa.turnoParaRecebimento(u.empresaId, ambienteId);
     for (const p of pags) {
       await m.insert(EstadiaPagamento, {
         empresaId: u.empresaId, estadiaId, forma: p.forma, valor: reais(p.valor),
         valorRecebido: p.recebido !== null ? reais(p.recebido) : null, troco: reais(p.troco),
-        trocoDestino: p.trocoDestino, gorjetaPara: p.gorjetaPara, usuarioId: u.sub, usuarioNome: u.nome, momento,
+        trocoDestino: p.trocoDestino, gorjetaPara: p.gorjetaPara, usuarioId: u.sub, usuarioNome: u.nome, momento, turnoId,
       });
     }
     const soma = pags.reduce((s, p) => s + p.valor, 0);
@@ -244,9 +247,9 @@ export class EstadiasService {
 
   /** Receber parte da conta antes do fechamento (ex.: portaria). */
   async adiantamento(u: UsuarioToken, id: string, dto: AdiantamentoDto) {
-    await this.buscarAberta(u, id);
+    const e = await this.buscarAberta(u, id);
     await this.ds.transaction(async (m) => {
-      const soma = await this.gravarAdiantamento(m, u, id, dto.pagamentos, 'adiantamento');
+      const soma = await this.gravarAdiantamento(m, u, id, dto.pagamentos, 'adiantamento', e.ambienteId);
       if (!soma) throw new BadRequestException('Informe o valor recebido.');
     });
     return this.detalhe(u, id);
@@ -298,7 +301,7 @@ export class EstadiasService {
         }),
       );
       await this.mudarUnidade(m, u, unidade, 'ocupada', `Entrada${e.placa ? ` · ${e.placa}` : ''}`);
-      if (dto.adiantamento?.length) await this.gravarAdiantamento(m, u, e.id, dto.adiantamento, 'entrada');
+      if (dto.adiantamento?.length) await this.gravarAdiantamento(m, u, e.id, dto.adiantamento, 'entrada', unidade.ambienteId);
       await this.registrar(m, u, e.id, 'entrada',
         `Uso nº ${e.numero ?? '—'} · entrada na ${unidade.codigo}${e.placa ? `, placa ${e.placa}` : ''}, ${e.pessoas} pessoa(s), tabela ${tabela.nome}`
         + (modalidade === 'pernoite' ? ', pernoite' : minimo ? `, pacote ${minimo.nome}` : ''));
@@ -552,12 +555,13 @@ export class EstadiasService {
     const gorjeta = pags.find((p) => p.trocoDestino === 'gorjeta');
 
     const unidade = await this.unidades.findOneOrFail({ where: { id: e.unidadeId } });
+    const turnoId = pags.length ? await this.caixa.turnoParaRecebimento(u.empresaId, e.ambienteId) : null;
     await this.ds.transaction(async (m) => {
       for (const p of pags) {
         await m.insert(EstadiaPagamento, {
           empresaId: u.empresaId, estadiaId: e.id, forma: p.forma, valor: reais(p.valor),
           valorRecebido: p.recebido !== null ? reais(p.recebido) : null, troco: reais(p.troco),
-          trocoDestino: p.trocoDestino, gorjetaPara: p.gorjetaPara, usuarioId: u.sub, usuarioNome: u.nome, momento: 'fechamento',
+          trocoDestino: p.trocoDestino, gorjetaPara: p.gorjetaPara, usuarioId: u.sub, usuarioNome: u.nome, momento: 'fechamento', turnoId,
         });
       }
       if (restante < 0) await this.registrar(m, u, id, 'devolucao', `Pago a mais na entrada: devolver ${brl(-restante)} ao cliente`);
