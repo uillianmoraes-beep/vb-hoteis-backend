@@ -22,6 +22,16 @@ export class FecharTurnoDto {
   /** valores contados por forma: { dinheiro, pix, debito, credito, faturado } */
   @IsObject() contado!: Record<string, number>;
   @IsOptional() @IsString() @MaxLength(500) observacao?: string;
+  /** dinheiro que fica na gaveta para o próximo turno (o resto é entregue à gerência) */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(1_000_000) fundoProximo?: number;
+}
+
+export class ResgatarPenhoraDto {
+  @IsIn(['dinheiro', 'pix', 'debito', 'credito']) forma!: 'dinheiro' | 'pix' | 'debito' | 'credito';
+}
+
+export class BaixarPenhoraDto {
+  @IsString() @MinLength(3) @MaxLength(300) motivo!: string;
 }
 
 export class LancamentoAdmDto {

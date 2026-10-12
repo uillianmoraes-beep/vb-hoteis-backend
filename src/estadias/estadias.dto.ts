@@ -21,7 +21,7 @@ export class AutorizacaoDto {
   @IsString() @MinLength(1) @MaxLength(72) senha!: string;
 }
 
-export const FORMAS_RECEBIMENTO = ['dinheiro', 'pix', 'debito', 'credito', 'faturado'] as const;
+export const FORMAS_RECEBIMENTO = ['dinheiro', 'pix', 'debito', 'credito', 'faturado', 'penhora'] as const;
 
 export class PagamentoDto {
   @IsIn(FORMAS_RECEBIMENTO as unknown as string[]) forma!: (typeof FORMAS_RECEBIMENTO)[number];
@@ -35,6 +35,10 @@ export class PagamentoDto {
   @IsOptional() @IsUUID() gorjetaUsuarioId?: string;
   /** gorjeta a mais no cartão/pix (o cliente passa o valor da conta + este) */
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100_000) gorjetaAdicional?: number;
+  /** penhora: o objeto que o cliente deixou (ex.: celular, relógio, documento) */
+  @IsOptional() @IsString() @MaxLength(200) penhoraItem?: string;
+  /** penhora: nome ou telefone para contato (opcional) */
+  @IsOptional() @IsString() @MaxLength(120) penhoraContato?: string;
 }
 
 export class NotaFiscalDto {
@@ -116,6 +120,12 @@ export class MarcarNotasDto {
 
 export class DesfazerNotaDto {
   @IsString() @MinLength(3) @MaxLength(300) motivo!: string;
+}
+
+export class MudarFormaDto {
+  @IsIn(['dinheiro', 'pix', 'debito', 'credito']) forma!: 'dinheiro' | 'pix' | 'debito' | 'credito';
+  @IsString() @MinLength(3) @MaxLength(300) motivo!: string;
+  @IsOptional() @ValidateNested() @Type(() => AutorizacaoDto) autorizacao?: AutorizacaoDto;
 }
 
 export class AdiantamentoDto {

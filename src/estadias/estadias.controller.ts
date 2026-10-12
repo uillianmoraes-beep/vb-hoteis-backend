@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post } fr
 import { EstadiasService } from './estadias.service';
 import {
   AbrirEstadiaDto, AdiantamentoDto, AtualizarEstadiaDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
-  LancarItemDto, TransferirDto, TrocarCobrancaDto,
+  LancarItemDto, MudarFormaDto, TransferirDto, TrocarCobrancaDto,
 } from './estadias.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
@@ -88,6 +88,14 @@ export class EstadiasController {
   @Requer('estadias.operar') // sem a permissão própria, pede senha de quem libera
   corrigir(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CorrigirEstadiaDto) {
     return this.service.corrigir(u, id, dto);
+  }
+
+  /** Corrige a forma de um pagamento já lançado (ex.: registrou débito, mas foi pix). */
+  @Post('pagamentos/:pagamentoId/forma')
+  @HttpCode(200)
+  @Requer('estadias.operar', 'caixa.principal', 'caixa.relatorios')
+  mudarForma(@Usuario() u: UsuarioToken, @Param('pagamentoId', ParseUUIDPipe) pagamentoId: string, @Body() dto: MudarFormaDto) {
+    return this.service.mudarForma(u, pagamentoId, dto);
   }
 
   @Post(':id/fechar')

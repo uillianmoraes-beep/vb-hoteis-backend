@@ -10,11 +10,13 @@ import { UsuarioEntity } from '../usuarios/usuario.entity';
 import { Gorjeta } from '../gorjetas/gorjeta.entity';
 import { CaixaService } from './caixa.service';
 import { CaixaController } from './caixa.controller';
+import { PenhorasController } from './penhoras.controller';
+import { Penhora } from './penhora.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([CaixaTurno, CaixaMovimento, EstadiaPagamento, Estadia, Unidade, Ambiente, Empresa, UsuarioEntity, Gorjeta])],
+  imports: [TypeOrmModule.forFeature([CaixaTurno, CaixaMovimento, EstadiaPagamento, Estadia, Unidade, Ambiente, Empresa, UsuarioEntity, Gorjeta, Penhora])],
   providers: [CaixaService],
-  controllers: [CaixaController],
+  controllers: [CaixaController, PenhorasController],
   exports: [CaixaService],
 })
 export class CaixaModule {}

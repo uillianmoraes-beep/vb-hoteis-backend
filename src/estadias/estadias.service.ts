@@ -17,9 +17,12 @@ import { moduloAtivo } from '../common/modulos';
 import { FUSO, Motor, TarifasService } from '../tarifas/tarifas.service';
 import { CaixaService } from '../caixa/caixa.service';
 import { GorjetasService } from '../gorjetas/gorjetas.service';
+import { Penhora } from '../caixa/penhora.entity';
+import { CaixaMovimento, CaixaTurno } from '../caixa/caixa.entity';
+import { Gorjeta } from '../gorjetas/gorjeta.entity';
 import {
   AbrirEstadiaDto, AdiantamentoDto, PagamentoDto, AtualizarEstadiaDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
-  LancarItemDto, TransferirDto, TrocarCobrancaDto,
+  LancarItemDto, MudarFormaDto, TransferirDto, TrocarCobrancaDto,
 } from './estadias.dto';
 import { StatusUnidade, UsuarioToken, temPermissao } from '../common/permissoes';
 import { calcularConta, centavos, minutosAteHorario, reais, ResultadoCalc } from './calculadora';
@@ -32,7 +35,7 @@ export interface ContaCalculada extends ResultadoCalc {
 }
 
 const ABERTAS = ['aberta', 'conta_entregue'];
-const NOMES_FORMA: Record<string, string> = { dinheiro: 'dinheiro', pix: 'Pix', debito: 'débito', credito: 'crédito', faturado: 'faturado' };
+const NOMES_FORMA: Record<string, string> = { dinheiro: 'dinheiro', pix: 'Pix', debito: 'débito', credito: 'crédito', faturado: 'faturado', penhora: 'penhora' };
 const brl = (c: number) => `R$ ${reais(c).replace('.', ',')}`;
 
 /** Confere dígitos de CPF/CNPJ. Retorna só números ou lança erro. */
@@ -229,6 +232,7 @@ export class EstadiasService {
       return {
         forma: p.forma, valor, recebido, troco, trocoDestino, gorjetaPara: trocoDestino === 'gorjeta' ? p.gorjetaPara?.trim() || 'Casa' : null,
         gorjetaUsuarioId: p.gorjetaUsuarioId ?? null, gorjetaAdicional: centavos(p.gorjetaAdicional ?? 0),
+        penhoraItem: p.forma === 'penhora' ? p.penhoraItem?.trim() || '' : '', penhoraContato: p.forma === 'penhora' ? p.penhoraContato?.trim() || null : null,
       };
     });
   }
@@ -236,6 +240,7 @@ export class EstadiasService {
   private async gravarAdiantamento(m: EntityManager, u: UsuarioToken, estadiaId: string, lista: PagamentoDto[], momento: 'entrada' | 'adiantamento', ambienteId: string) {
     const pags = this.lerPagamentos(lista).filter((p) => p.valor > 0);
     if (!pags.length) return 0;
+    if (pags.some((p) => p.forma === 'penhora')) throw new BadRequestException('Penhora só no fechamento da conta.');
     const turnoId = await this.caixa.turnoParaRecebimento(u.empresaId, ambienteId);
     for (const p of pags) {
       await m.insert(EstadiaPagamento, {
@@ -544,6 +549,7 @@ export class EstadiasService {
 
     // pagamentos: com o que já foi pago na entrada, precisam somar exatamente o total
     const pags = this.lerPagamentos(dto.pagamentos ?? []);
+    if (pags.some((p) => p.forma === 'penhora' && p.penhoraItem.length < 2)) throw new BadRequestException('Na penhora, diga qual objeto o cliente deixou (ex.: celular, relógio).');
     const anteriores = await this.pagamentos.find({ where: { estadiaId: e.id } });
     const adiantado = anteriores.reduce((s, p) => s + centavos(Number(p.valor)), 0);
     const restante = total - adiantado;
@@ -563,11 +569,18 @@ export class EstadiasService {
     const turnoId = pags.length ? await this.caixa.turnoParaRecebimento(u.empresaId, e.ambienteId) : null;
     await this.ds.transaction(async (m) => {
       for (const p of pags) {
-        await m.insert(EstadiaPagamento, {
+        const ins = await m.insert(EstadiaPagamento, {
           empresaId: u.empresaId, estadiaId: e.id, forma: p.forma, valor: reais(p.valor),
           valorRecebido: p.recebido !== null ? reais(p.recebido) : null, troco: reais(p.troco),
           trocoDestino: p.trocoDestino, gorjetaPara: p.gorjetaPara, usuarioId: u.sub, usuarioNome: u.nome, momento: 'fechamento', turnoId,
         });
+        if (p.forma === 'penhora') {
+          await m.insert(Penhora, {
+            empresaId: u.empresaId, ambienteId: e.ambienteId, estadiaId: e.id, pagamentoId: ins.identifiers?.[0]?.id ?? null, turnoId,
+            valor: reais(p.valor), item: p.penhoraItem, contato: p.penhoraContato, status: 'aberta', usuarioNome: u.nome,
+          });
+          await this.registrar(m, u, id, 'penhora', `Penhora: ${p.penhoraItem} garante ${brl(p.valor)}${p.penhoraContato ? ` · contato ${p.penhoraContato}` : ''}`);
+        }
       }
       // gorjetas identificadas: troco deixado e valor a mais no cartão/pix
       const itensGorjeta = pags.flatMap((p) => [
@@ -613,6 +626,43 @@ export class EstadiasService {
       await this.mudarUnidade(m, u, unidade, 'limpeza', `Saída · ${brl(total)}`);
     });
     return this.detalhe(u, id);
+  }
+
+  /**
+   * Corrige a forma de pagamento lançada errado. Com o caixa do turno ainda aberto, só muda
+   * (o resumo do caixa recalcula). Com o turno já fechado, lança a correção no caixa ADM
+   * (sai da forma errada e entra na certa) para a conciliação bater com o banco.
+   */
+  async mudarForma(u: UsuarioToken, pagamentoId: string, dto: MudarFormaDto) {
+    const p = await this.pagamentos.findOne({ where: { id: pagamentoId, empresaId: u.empresaId } });
+    if (!p) throw new NotFoundException('Pagamento não encontrado.');
+    const formas = ['dinheiro', 'pix', 'debito', 'credito'];
+    if (!formas.includes(p.forma)) throw new BadRequestException(`Pagamento em ${NOMES_FORMA[p.forma] ?? p.forma} não pode ter a forma trocada.`);
+    if (p.forma === dto.forma) throw new BadRequestException('O pagamento já está nessa forma.');
+    if (Number(p.troco) > 0) throw new BadRequestException('Este pagamento teve troco em dinheiro; para trocar a forma, estorne e lance de novo.');
+    const autorizadoPor = await this.liberarAcao(u, 'pagamentos.corrigir', 'mudar a forma de pagamento', dto.autorizacao);
+    const e = await this.repo.findOne({ where: { id: p.estadiaId, empresaId: u.empresaId } });
+    if (!e) throw new NotFoundException('Conta não encontrada.');
+    const turno = p.turnoId ? await this.ds.getRepository(CaixaTurno).findOne({ where: { id: p.turnoId } }) : null;
+    const de = p.forma;
+    await this.ds.transaction(async (m) => {
+      await m.update(EstadiaPagamento, { id: p.id }, { forma: dto.forma, valorRecebido: null });
+      // gorjeta passada junto no cartão/pix acompanha a forma
+      await m.update(Gorjeta, { estadiaId: e.id, origem: 'adicional', forma: de }, { forma: dto.forma });
+      if (turno?.status === 'fechado') {
+        const desc = `Correção de forma · uso ${e.numero ?? '—'} · turno ${turno.numero}: ${NOMES_FORMA[de]} → ${NOMES_FORMA[dto.forma]}`;
+        const base = { empresaId: u.empresaId, turnoId: turno.id, caixa: 'adm' as const, valor: p.valor, usuarioId: u.sub, usuarioNome: u.nome, autorizadoPor };
+        // dinheiro já foi conferido na gaveta (a diferença ficou no fechamento); só eletrônicos são corrigidos no ADM
+        if (de !== 'dinheiro') await m.insert(CaixaMovimento, { ...base, tipo: 'saida', forma: de, descricao: desc });
+        if (dto.forma !== 'dinheiro') await m.insert(CaixaMovimento, { ...base, tipo: 'entrada', forma: dto.forma, descricao: desc });
+      }
+      const todas: EstadiaPagamento[] = await m.find(EstadiaPagamento, { where: { estadiaId: e.id } });
+      const lista = [...new Set(todas.map((x) => x.forma))];
+      if (e.status === 'fechada') await m.update(Estadia, { id: e.id }, { formaPagamento: (lista.length === 1 ? lista[0] : 'misto') as FormaPagamento });
+      await this.registrar(m, u, e.id, 'correcao',
+        `Forma de pagamento corrigida: ${brl(centavos(Number(p.valor)))} de ${NOMES_FORMA[de]} para ${NOMES_FORMA[dto.forma]} · ${dto.motivo.trim()}${autorizadoPor ? ` · liberado por ${autorizadoPor}` : ''}`);
+    });
+    return { ok: true, turnoFechado: turno?.status === 'fechado' };
   }
 
   async cancelar(u: UsuarioToken, id: string, dto: CancelarEstadiaDto) {

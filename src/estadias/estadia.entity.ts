@@ -1,7 +1,7 @@
 import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 
 export type StatusEstadia = 'aberta' | 'conta_entregue' | 'fechada' | 'cancelada';
-export const FORMAS_PAGAMENTO = ['dinheiro', 'pix', 'debito', 'credito', 'faturado', 'cortesia', 'misto'] as const;
+export const FORMAS_PAGAMENTO = ['dinheiro', 'pix', 'debito', 'credito', 'faturado', 'penhora', 'cortesia', 'misto'] as const;
 export type FormaPagamento = (typeof FORMAS_PAGAMENTO)[number];
 
 @Entity('estadias')

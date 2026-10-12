@@ -20,6 +20,10 @@ export class CaixaTurno {
   @Column({ type: 'jsonb', nullable: true }) contado!: Valores | null;
   @Column({ type: 'numeric', precision: 10, scale: 2, nullable: true }) diferenca!: string | null;
   @Column({ type: 'text', nullable: true }) observacao!: string | null;
+  /** dinheiro que ficou na gaveta para o próximo turno */
+  @Column({ name: 'fundo_proximo', type: 'numeric', precision: 10, scale: 2, nullable: true }) fundoProximo!: string | null;
+  /** dinheiro retirado/entregue à gerência no fechamento (vai para o caixa ADM) */
+  @Column({ type: 'numeric', precision: 10, scale: 2, nullable: true }) retirado!: string | null;
 }
 
 @Entity('caixa_movimentos')

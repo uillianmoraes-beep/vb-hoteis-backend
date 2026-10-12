@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import { CaixaMovimento, CaixaTurno, Valores } from './caixa.entity';
-import { AbrirTurnoDto, FecharTurnoDto, LancamentoAdmDto, MovimentoDto } from './caixa.dto';
+import { AbrirTurnoDto, BaixarPenhoraDto, FecharTurnoDto, LancamentoAdmDto, MovimentoDto, ResgatarPenhoraDto } from './caixa.dto';
 import { EstadiaPagamento } from '../estadias/estadia-pagamento.entity';
 import { Estadia } from '../estadias/estadia.entity';
 import { Unidade } from '../unidades/unidade.entity';
@@ -11,10 +11,14 @@ import { Ambiente } from '../ambientes/ambiente.entity';
 import { Empresa } from '../empresas/empresa.entity';
 import { UsuarioEntity } from '../usuarios/usuario.entity';
 import { Gorjeta } from '../gorjetas/gorjeta.entity';
+import { Penhora } from './penhora.entity';
 import { moduloAtivo } from '../common/modulos';
 import { UsuarioToken, temPermissao } from '../common/permissoes';
 
-const FORMAS = ['dinheiro', 'pix', 'debito', 'credito', 'faturado'] as const;
+const FORMAS = ['dinheiro', 'pix', 'debito', 'credito', 'faturado', 'penhora'] as const;
+/** formas que são dinheiro de verdade (penhora é objeto; faturado é a receber) */
+const NAO_DINHEIRO = ['penhora', 'faturado'];
+const brl = (cent: number) => `R$ ${(cent / 100).toFixed(2).replace('.', ',')}`;
 const DIA = 86_400_000;
 const c = (v: number | string | null | undefined) => Math.round(Number(v ?? 0) * 100);
 const r = (cent: number) => Math.round(cent) / 100;
@@ -31,6 +35,7 @@ export class CaixaService {
     @InjectRepository(Empresa) private readonly empresas: Repository<Empresa>,
     @InjectRepository(UsuarioEntity) private readonly usuarios: Repository<UsuarioEntity>,
     @InjectRepository(Gorjeta) private readonly gorjetasRepo: Repository<Gorjeta>,
+    @InjectRepository(Penhora) private readonly penhoras: Repository<Penhora>,
     private readonly ds: DataSource,
   ) {}
 
@@ -74,20 +79,27 @@ export class CaixaService {
   /** Totais do turno: recebido por forma, gorjetas, movimentos e o esperado na gaveta. */
   async resumo(t: CaixaTurno) {
     const pags = await this.pagamentos.find({ where: { turnoId: t.id } });
-    const movs = await this.movimentos.find({ where: { turnoId: t.id }, order: { criadoEm: 'ASC' } });
+    const movs = await this.movimentos.find({ where: { turnoId: t.id, caixa: 'principal' }, order: { criadoEm: 'ASC' } });
     const gorjs = await this.gorjetasRepo.find({ where: { turnoId: t.id } });
+    const penhs = await this.penhoras.find({ where: { turnoId: t.id }, order: { criadoEm: 'ASC' } });
     const recebido: Record<string, number> = Object.fromEntries(FORMAS.map((f) => [f, 0]));
     for (const p of pags) recebido[p.forma] = (recebido[p.forma] ?? 0) + c(p.valor);
     const somaMov = (tipo: string, forma?: string) => movs.filter((m) => m.tipo === tipo && (!forma || m.forma === forma)).reduce((s, m) => s + c(m.valor), 0);
     const esperado: Valores = {};
     for (const f of FORMAS) esperado[f] = recebido[f] ?? 0;
+    // penhora paga neste turno: o dinheiro entra na forma em que o cliente pagou
+    const resgates: Record<string, number> = {};
+    for (const m of movs.filter((x) => x.tipo === 'resgate')) {
+      resgates[m.forma] = (resgates[m.forma] ?? 0) + c(m.valor);
+      if (m.forma !== 'dinheiro') esperado[m.forma] = (esperado[m.forma] ?? 0) + c(m.valor);
+    }
     // gorjeta a mais no cartão/pix entra na maquininha daquela forma
     for (const g of gorjs) if (g.origem === 'adicional') esperado[g.forma] = (esperado[g.forma] ?? 0) + c(g.valor);
     const gorjDinheiro = gorjs.filter((g) => g.forma === 'dinheiro');
     const pagasNaHora = gorjDinheiro.filter((g) => g.status === 'paga_na_hora').reduce((s, g) => s + c(g.valor), 0);
     // na gaveta: troco inicial + dinheiro das contas + gorjetas em dinheiro − as já pagas na hora + reforços − sangrias − despesas
     esperado.dinheiro = c(t.trocoInicial) + (recebido.dinheiro ?? 0) + gorjDinheiro.reduce((s, g) => s + c(g.valor), 0) - pagasNaHora
-      + somaMov('reforco') - somaMov('sangria') - somaMov('despesa', 'dinheiro');
+      + somaMov('reforco') - somaMov('sangria') - somaMov('despesa', 'dinheiro') + (resgates.dinheiro ?? 0);
     const porPessoa = new Map<string, { para: string; valor: number; naHora: number; aRepassar: number; casa: number }>();
     for (const g of gorjs) {
       const a = porPessoa.get(g.beneficiarioNome) ?? { para: g.beneficiarioNome, valor: 0, naHora: 0, aRepassar: 0, casa: 0 };
@@ -98,9 +110,17 @@ export class CaixaService {
       porPessoa.set(g.beneficiarioNome, a);
     }
     const totalGorjetas = gorjs.reduce((s, g) => s + c(g.valor), 0);
+    const totalResgates = Object.values(resgates).reduce((s, v) => s + v, 0);
+    const totalDinheiroReal = Object.entries(recebido).filter(([k]) => !NAO_DINHEIRO.includes(k)).reduce((s, [, v]) => s + v, 0);
     return {
       recebido: Object.fromEntries(Object.entries(recebido).map(([k, v]) => [k, r(v)])),
-      totalRecebido: r(Object.values(recebido).reduce((s, v) => s + v, 0)),
+      /** só o que entrou de fato (sem penhora e faturado) */
+      totalRecebido: r(totalDinheiroReal),
+      /** tudo o que passou pelo caixa: todas as formas + penhoras pagas */
+      totalMovimentado: r(Object.values(recebido).reduce((s, v) => s + v, 0) + totalResgates),
+      resgates: Object.fromEntries(Object.entries(resgates).map(([k, v]) => [k, r(v)])),
+      totalResgates: r(totalResgates),
+      penhoras: penhs.map((x) => ({ id: x.id, item: x.item, valor: Number(x.valor), status: x.status, contato: x.contato, criadoEm: x.criadoEm })),
       contas: new Set(pags.map((p) => p.estadiaId)).size,
       gorjetas: [...porPessoa.values()].map((a) => ({ para: a.para, valor: r(a.valor), naHora: r(a.naHora), aRepassar: r(a.aRepassar), casa: r(a.casa) })).sort((x, y) => y.valor - x.valor),
       totalGorjetas: r(totalGorjetas),
@@ -122,13 +142,16 @@ export class CaixaService {
     await this.exigirModulo(u);
     if (!this.podeVerAmbiente(u, ambienteId)) throw new ForbiddenException('Ambiente não liberado para você.');
     const t = await this.turnos.findOne({ where: { empresaId: u.empresaId, ambienteId, status: 'aberto' } });
-    if (!t) return { turno: null, ambiente: await this.ambienteNome(ambienteId) };
+    if (!t) {
+      const ultimo = await this.turnos.findOne({ where: { empresaId: u.empresaId, ambienteId, status: 'fechado' }, order: { fechadoEm: 'DESC' } });
+      return { turno: null, ambiente: await this.ambienteNome(ambienteId), sugestaoTroco: ultimo?.fundoProximo !== null && ultimo?.fundoProximo !== undefined ? Number(ultimo.fundoProximo) : null };
+    }
     const res = await this.resumo(t);
     const verTudo = temPermissao(u, 'caixa.relatorios');
     return {
       ambiente: await this.ambienteNome(ambienteId),
       turno: { ...t, trocoInicial: Number(t.trocoInicial) },
-      resumo: verTudo ? res : { ...res, esperado: null, recebido: null, totalRecebido: null, gorjetas: res.gorjetas, totalGorjetas: res.totalGorjetas },
+      resumo: verTudo ? res : { ...res, esperado: null, recebido: null, totalRecebido: null, totalMovimentado: null, resgates: null, totalResgates: null },
       cego: !verTudo,
     };
   }
@@ -199,9 +222,27 @@ export class CaixaService {
     const dif: Valores = {};
     for (const f of FORMAS) dif[f] = r(c(contado[f]) - c(res.esperado[f]));
     const diferenca = r(FORMAS.reduce((s, f) => s + c(dif[f]), 0));
-    await this.turnos.update({ id: t.id }, {
-      status: 'fechado', fechadoPorId: u.sub, fechadoPor: u.nome, fechadoEm: new Date(),
-      esperado: res.esperado, contado, diferenca: diferenca.toFixed(2), observacao: dto.observacao?.trim() || null,
+    // o que fica de fundo para o próximo turno e o que é entregue à gerência
+    const fundo = dto.fundoProximo === undefined || dto.fundoProximo === null ? c(contado.dinheiro) : c(dto.fundoProximo);
+    if (fundo < 0 || fundo > c(contado.dinheiro)) throw new BadRequestException('O fundo que fica no caixa não pode ser maior que o dinheiro contado.');
+    const retirado = c(contado.dinheiro) - fundo;
+    const amb = await this.ambienteNome(t.ambienteId);
+    await this.ds.transaction(async (m) => {
+      await m.update(CaixaTurno, { id: t.id }, {
+        status: 'fechado', fechadoPorId: u.sub, fechadoPor: u.nome, fechadoEm: new Date(),
+        esperado: res.esperado, contado, diferenca: diferenca.toFixed(2), observacao: dto.observacao?.trim() || null,
+        fundoProximo: r(fundo).toFixed(2), retirado: r(retirado).toFixed(2),
+      });
+      // tudo o que foi recebido vai para o caixa ADM, por forma (conciliação bancária):
+      // dinheiro = o que foi retirado da gaveta; pix/débito/crédito = o que o sistema registrou
+      const entradas: [string, number][] = [['dinheiro', retirado], ...(['pix', 'debito', 'credito'] as const).map((f) => [f, c(res.esperado[f])] as [string, number])];
+      for (const [forma, cent] of entradas) {
+        if (cent <= 0) continue;
+        await m.insert(CaixaMovimento, {
+          empresaId: u.empresaId, turnoId: t.id, caixa: 'adm', tipo: 'entrada', forma, valor: r(cent).toFixed(2),
+          descricao: `${forma === 'dinheiro' ? 'Dinheiro retirado no' : 'Recebido no'} fechamento · turno ${t.numero} (${amb})`, usuarioId: u.sub, usuarioNome: u.nome, autorizadoPor: null,
+        });
+      }
     });
     return this.detalhe(u, t.id, true);
   }
@@ -222,7 +263,10 @@ export class CaixaService {
     const mapE = new Map(ests.map((e) => [e.id, e]));
     const mapU = new Map(unis.map((x) => [x.id, x.codigo]));
     return {
-      turno: { ...t, trocoInicial: Number(t.trocoInicial), diferenca: t.diferenca === null ? null : Number(t.diferenca) },
+      turno: {
+        ...t, trocoInicial: Number(t.trocoInicial), diferenca: t.diferenca === null ? null : Number(t.diferenca),
+        fundoProximo: t.fundoProximo === null ? null : Number(t.fundoProximo), retirado: t.retirado === null ? null : Number(t.retirado),
+      },
       ambiente: await this.ambienteNome(t.ambienteId),
       resumo: res,
       recebimentos: pags.map((p) => {
@@ -251,10 +295,71 @@ export class CaixaService {
       saida.push({
         id: t.id, numero: t.numero, ambiente: nome.get(t.ambienteId) ?? '', status: t.status, abertoPor: t.abertoPor, abertoEm: t.abertoEm,
         fechadoPor: t.fechadoPor, fechadoEm: t.fechadoEm, totalRecebido: res.totalRecebido, recebido: res.recebido, contas: res.contas,
-        totalGorjetas: res.totalGorjetas, sangrias: res.sangrias, diferenca: t.diferenca === null ? null : Number(t.diferenca),
+        totalGorjetas: res.totalGorjetas, sangrias: res.sangrias, totalMovimentado: res.totalMovimentado, diferenca: t.diferenca === null ? null : Number(t.diferenca),
       });
     }
     return saida;
+  }
+
+  /* ---------------- penhoras ---------------- */
+
+  async listarPenhoras(u: UsuarioToken, filtro: { status?: string; de?: string; ate?: string }) {
+    const qb = this.penhoras.createQueryBuilder('p').where('p.empresaId = :e', { e: u.empresaId });
+    if (u.ambientesIds?.length) qb.andWhere('p.ambienteId IN (:...amb)', { amb: u.ambientesIds });
+    if (filtro.status === 'aberta' || !filtro.status) qb.andWhere(`p.status = 'aberta'`);
+    else {
+      const ate = filtro.ate ? new Date(`${filtro.ate}T23:59:59.999-03:00`) : new Date();
+      const de = filtro.de ? new Date(`${filtro.de}T00:00:00-03:00`) : new Date(ate.getTime() - 90 * DIA);
+      qb.andWhere('p.criadoEm BETWEEN :de AND :ate', { de, ate });
+    }
+    const lista: Penhora[] = await qb.orderBy('p.criadoEm', 'DESC').limit(1000).getMany();
+    const ests = lista.some((p) => p.estadiaId) ? await this.estadias.find({ where: { id: In(lista.filter((p) => p.estadiaId).map((p) => p.estadiaId!)) } }) : [];
+    const unis = ests.length ? await this.unidades.find({ where: { id: In([...new Set(ests.map((e) => e.unidadeId))]) } }) : [];
+    const mapE = new Map(ests.map((e) => [e.id, e]));
+    const mapU = new Map(unis.map((x) => [x.id, x.codigo]));
+    const ambs = new Map((await this.ambientes.find({ where: { empresaId: u.empresaId } })).map((a) => [a.id, a.nome]));
+    return lista.map((p) => {
+      const e = p.estadiaId ? mapE.get(p.estadiaId) : undefined;
+      return {
+        ...p, valor: Number(p.valor), ambiente: ambs.get(p.ambienteId) ?? '', uso: e?.numero ?? null, unidade: e ? mapU.get(e.unidadeId) ?? '—' : '—',
+        placa: e?.placa ?? null,
+      };
+    });
+  }
+
+  private async penhoraAberta(u: UsuarioToken, id: string) {
+    const p = await this.penhoras.findOne({ where: { id, empresaId: u.empresaId } });
+    if (!p) throw new NotFoundException('Penhora não encontrada.');
+    if (!this.podeVerAmbiente(u, p.ambienteId)) throw new ForbiddenException('Ambiente não liberado para você.');
+    if (p.status !== 'aberta') throw new BadRequestException('Esta penhora já foi resolvida.');
+    return p;
+  }
+
+  /** O cliente voltou e pagou: o dinheiro entra no caixa aberto e o objeto é devolvido. */
+  async resgatarPenhora(u: UsuarioToken, id: string, dto: ResgatarPenhoraDto) {
+    const p = await this.penhoraAberta(u, id);
+    const turnoId = await this.turnoParaRecebimento(u.empresaId, p.ambienteId);
+    await this.ds.transaction(async (m) => {
+      if (turnoId) {
+        await m.insert(CaixaMovimento, {
+          empresaId: u.empresaId, turnoId, caixa: 'principal', tipo: 'resgate', forma: dto.forma, valor: p.valor,
+          descricao: `Penhora paga: ${p.item}`, usuarioId: u.sub, usuarioNome: u.nome, autorizadoPor: null,
+        });
+      }
+      await m.update(Penhora, { id: p.id }, { status: 'resgatada', resolvidaEm: new Date(), resolvidaPor: u.nome, formaResgate: dto.forma, turnoResgateId: turnoId });
+      if (p.estadiaId) {
+        await m.query(`INSERT INTO estadia_eventos (empresa_id, estadia_id, tipo, descricao, usuario_id, usuario_nome) VALUES ($1, $2, 'penhora', $3, $4, $5)`,
+          [u.empresaId, p.estadiaId, `Penhora paga (${dto.forma}) ${brl(c(p.valor))}: ${p.item} devolvido`, u.sub, u.nome]);
+      }
+    });
+    return this.listarPenhoras(u, { status: 'aberta' });
+  }
+
+  /** Cliente não voltou: o objeto fica com a casa (ou foi devolvido sem pagar). */
+  async baixarPenhora(u: UsuarioToken, id: string, dto: BaixarPenhoraDto) {
+    const p = await this.penhoraAberta(u, id);
+    await this.penhoras.update({ id: p.id }, { status: 'baixada', resolvidaEm: new Date(), resolvidaPor: u.nome, motivoBaixa: dto.motivo.trim() });
+    return this.listarPenhoras(u, { status: 'aberta' });
   }
 
   /* ---------------- caixa ADM ---------------- */
@@ -272,6 +377,11 @@ export class CaixaService {
       saldo: r(todos.reduce((s, m) => s + sinal(m), 0)),
       saldoPorForma: Object.fromEntries(Object.entries(saldoPorForma).map(([k, v]) => [k, r(v)])),
       entradas: r(periodo.filter((m) => m.tipo !== 'saida').reduce((s, m) => s + c(m.valor), 0)),
+      /** conciliação: entradas e saídas do período por forma */
+      porForma: Object.fromEntries([...new Set(periodo.map((m) => m.forma))].map((f) => {
+        const doF = periodo.filter((m) => m.forma === f);
+        return [f, { entradas: r(doF.filter((m) => m.tipo !== 'saida').reduce((s, m) => s + c(m.valor), 0)), saidas: r(doF.filter((m) => m.tipo === 'saida').reduce((s, m) => s + c(m.valor), 0)) }];
+      })),
       saidas: r(periodo.filter((m) => m.tipo === 'saida').reduce((s, m) => s + c(m.valor), 0)),
       lancamentos: periodo.map((m) => ({ ...m, valor: Number(m.valor) })),
     };
