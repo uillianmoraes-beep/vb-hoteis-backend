@@ -14,11 +14,13 @@ import { EstadiasService } from './estadias.service';
 import { EstadiasController } from './estadias.controller';
 import { NotasService } from './notas.service';
 import { NotasController } from './notas.controller';
+import { SaidasService } from './saidas.service';
+import { SaidasController } from './saidas.controller';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Estadia, EstadiaItem, EstadiaPagamento, EstadiaEvento, Unidade, UsuarioEntity, Perfil, Produto, Empresa]), TarifasModule],
-  providers: [EstadiasService, NotasService],
-  controllers: [EstadiasController, NotasController],
+  providers: [EstadiasService, NotasService, SaidasService],
+  controllers: [EstadiasController, NotasController, SaidasController],
   exports: [EstadiasService],
 })
 export class EstadiasModule {}

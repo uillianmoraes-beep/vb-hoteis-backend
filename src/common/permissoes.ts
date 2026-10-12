@@ -11,6 +11,7 @@ export const PERMISSOES = {
   'governanca.operar': 'Tela da governança (limpeza, vistoria, camareiras)',
   'estadias.operar': 'Dar entrada, entregar e fechar contas',
   'estadias.entrada': 'Dar entrada e receber na entrada (portaria)',
+  'saida.registrar': 'Portão de saída: conferir o ticket de liberação',
   'estadias.cancelar': 'Cancelar uma entrada já feita',
   'tarifas.gerenciar': 'Configurar períodos, preços e regras de cobrança',
   'estadias.corrigir': 'Corrigir hora de entrada e tabela de uma conta',
@@ -32,7 +33,7 @@ export type Permissao = keyof typeof PERMISSOES;
 export const GRUPOS_PERMISSAO: { grupo: string; permissoes: Permissao[] }[] = [
   { grupo: 'Recepção e painel', permissoes: ['painel.ver', 'unidades.status', 'unidades.bloquear', 'unidades.desbloquear'] },
   { grupo: 'Contas (telefonista)', permissoes: ['estadias.operar', 'estadias.cancelar', 'estadias.corrigir', 'estadias.estornar'] },
-  { grupo: 'Portaria', permissoes: ['estadias.entrada'] },
+  { grupo: 'Portaria e saída', permissoes: ['estadias.entrada', 'saida.registrar'] },
   { grupo: 'Governança (limpeza)', permissoes: ['governanca.operar'] },
   { grupo: 'Tarifas e produtos', permissoes: ['tarifas.gerenciar', 'produtos.gerenciar'] },
   { grupo: 'Notas fiscais', permissoes: ['notas.gerenciar'] },

@@ -19,7 +19,7 @@ const ALERTA_MINUTOS: Partial<Record<StatusUnidade, number>> = {
 export interface AlertaPainel {
   unidadeId: string;
   codigo: string;
-  tipo: 'limpeza_demorada' | 'vistoria_aguardando' | 'conta_aguardando' | 'bloqueada' | 'vira_periodo';
+  tipo: 'limpeza_demorada' | 'vistoria_aguardando' | 'conta_aguardando' | 'bloqueada' | 'vira_periodo' | 'saiu_sem_fechar';
   mensagem: string;
   minutos: number;
   urgencia: number;
@@ -74,6 +74,10 @@ export class PainelService {
           mensagem: `Conta entregue há ${minutos} min`, urgencia: 3 });
       }
       const aberta = contas.get(x.id);
+      if (aberta?.estadia.saidaPortariaEm && aberta.estadia.status === 'conta_entregue') {
+        alertas.push({ unidadeId: x.id, codigo: x.codigo, tipo: 'saiu_sem_fechar', minutos,
+          mensagem: 'Cliente já saiu pelo portão: feche a conta', urgencia: 4 });
+      }
       if (aberta && aberta.estadia.status === 'aberta' && aberta.conta.proximaViradaMin !== null
         && aberta.conta.proximaViradaMin <= aberta.motor.regras.alertaViradaMin) {
         alertas.push({ unidadeId: x.id, codigo: x.codigo, tipo: 'vira_periodo', minutos: aberta.conta.proximaViradaMin,

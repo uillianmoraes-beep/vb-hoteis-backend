@@ -50,6 +50,11 @@ export class Estadia {
   @Column({ name: 'nota_nome', type: 'varchar', length: 120, nullable: true }) notaNome!: string | null;
   @Column({ name: 'nota_email', type: 'varchar', length: 160, nullable: true }) notaEmail!: string | null;
   @Column({ name: 'nota_solicitada_em', type: 'timestamptz', nullable: true }) notaSolicitadaEm!: Date | null;
+  /** saída no portão (ticket de liberação conferido) */
+  @Column({ name: 'saida_portaria_em', type: 'timestamptz', nullable: true }) saidaPortariaEm!: Date | null;
+  @Column({ name: 'saida_portaria_por', type: 'varchar', length: 120, nullable: true }) saidaPortariaPor!: string | null;
+  /** paga | pendente (saiu com a conta entregue, ainda sem fechar) */
+  @Column({ name: 'saida_portaria_situacao', type: 'varchar', length: 12, nullable: true }) saidaPortariaSituacao!: string | null;
   /** número do uso / comanda (sequência da empresa) */
   @Column({ type: 'int', nullable: true }) numero!: number | null;
   /** código do QR de satisfação impresso na conta */

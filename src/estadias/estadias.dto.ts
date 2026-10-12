@@ -111,3 +111,10 @@ export class DesfazerNotaDto {
 export class AdiantamentoDto {
   @IsArray() @ArrayMaxSize(5) @ValidateNested({ each: true }) @Type(() => PagamentoDto) pagamentos!: PagamentoDto[];
 }
+
+export class RegistrarSaidaDto {
+  /** número do uso impresso no ticket de liberação */
+  @IsInt() @Min(1) numero!: number;
+  /** suíte informada no ticket (conferência opcional) */
+  @IsOptional() @IsString() @MaxLength(20) unidade?: string;
+}
