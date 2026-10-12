@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { CaixaMovimento, CaixaTurno } from './caixa.entities';
+import { CaixaMovimento, CaixaTurno } from './caixa.entity';
 import { EstadiaPagamento } from '../estadias/estadia-pagamento.entity';
 import { Estadia } from '../estadias/estadia.entity';
 import { Unidade } from '../unidades/unidade.entity';

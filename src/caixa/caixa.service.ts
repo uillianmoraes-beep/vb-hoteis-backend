@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
-import { CaixaMovimento, CaixaTurno, Valores } from './caixa.entities';
+import { CaixaMovimento, CaixaTurno, Valores } from './caixa.entity';
 import { AbrirTurnoDto, FecharTurnoDto, LancamentoAdmDto, MovimentoDto } from './caixa.dto';
 import { EstadiaPagamento } from '../estadias/estadia-pagamento.entity';
 import { Estadia } from '../estadias/estadia.entity';
