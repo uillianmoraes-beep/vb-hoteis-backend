@@ -37,6 +37,8 @@ export class CaixaMovimento {
   @Column({ type: 'varchar', length: 20, default: 'dinheiro' }) forma!: string;
   @Column({ type: 'numeric', precision: 10, scale: 2 }) valor!: string;
   @Column({ type: 'varchar', length: 300, nullable: true }) descricao!: string | null;
+  /** fornecedor, passagem, padaria… (lista configurável da empresa) */
+  @Column({ type: 'varchar', length: 60, nullable: true }) categoria!: string | null;
   @Column({ name: 'usuario_id', type: 'uuid', nullable: true }) usuarioId!: string | null;
   @Column({ name: 'usuario_nome', type: 'varchar', length: 120, nullable: true }) usuarioNome!: string | null;
   @Column({ name: 'autorizado_por', type: 'varchar', length: 120, nullable: true }) autorizadoPor!: string | null;

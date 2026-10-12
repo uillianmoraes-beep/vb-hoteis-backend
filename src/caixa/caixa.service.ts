@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import { CaixaMovimento, CaixaTurno, Valores } from './caixa.entity';
-import { AbrirTurnoDto, BaixarPenhoraDto, FecharTurnoDto, LancamentoAdmDto, MovimentoDto, ResgatarPenhoraDto } from './caixa.dto';
+import { AbrirTurnoDto, BaixarPenhoraDto, ConfigCaixaDto, FecharTurnoDto, LancamentoAdmDto, MovimentoDto, ResgatarPenhoraDto } from './caixa.dto';
 import { EstadiaPagamento } from '../estadias/estadia-pagamento.entity';
 import { Estadia } from '../estadias/estadia.entity';
 import { Unidade } from '../unidades/unidade.entity';
@@ -187,16 +187,19 @@ export class CaixaService {
     const t = await this.turnoAberto(u, id);
     let autorizadoPor: string | null = null;
     if (dto.tipo === 'sangria') autorizadoPor = await this.liberar(u, 'caixa.sangria', 'fazer sangria', dto.autorizacao);
-    if (dto.tipo === 'despesa' && !dto.descricao?.trim()) throw new BadRequestException('Diga do que foi a despesa.');
+    const categoria = dto.categoria?.trim() || null;
+    if (dto.tipo === 'despesa' && !dto.descricao?.trim() && !categoria) throw new BadRequestException('Diga do que foi a saída.');
     if (dto.tipo !== 'reforco') {
       const res = await this.resumo(t);
       if (c(dto.valor) > c(res.esperado.dinheiro)) throw new BadRequestException(`Não tem esse valor em dinheiro no caixa (saldo do sistema: R$ ${res.esperado.dinheiro.toFixed(2).replace('.', ',')}).`);
     }
+    let movimentoId = '';
     await this.ds.transaction(async (m) => {
-      await m.insert(CaixaMovimento, {
+      const ins = await m.insert(CaixaMovimento, {
         empresaId: u.empresaId, turnoId: t.id, caixa: 'principal', tipo: dto.tipo, forma: 'dinheiro', valor: dto.valor.toFixed(2),
-        descricao: dto.descricao?.trim() || null, usuarioId: u.sub, usuarioNome: u.nome, autorizadoPor,
+        descricao: dto.descricao?.trim() || null, categoria, usuarioId: u.sub, usuarioNome: u.nome, autorizadoPor,
       });
+      movimentoId = ins.identifiers?.[0]?.id ?? '';
       // sangria vai para o caixa ADM
       if (dto.tipo === 'sangria') {
         await m.insert(CaixaMovimento, {
@@ -206,7 +209,32 @@ export class CaixaService {
         });
       }
     });
-    return this.atual(u, t.ambienteId);
+    return { ...(await this.atual(u, t.ambienteId)), movimentoId };
+  }
+
+  /** Um lançamento do caixa principal, para imprimir o comprovante (sangria, entrada, saída). */
+  async movimentoDetalhe(u: UsuarioToken, id: string) {
+    await this.exigirModulo(u);
+    const mv = await this.movimentos.findOne({ where: { id, empresaId: u.empresaId } });
+    if (!mv) throw new NotFoundException('Lançamento não encontrado.');
+    const t = mv.turnoId ? await this.turnos.findOne({ where: { id: mv.turnoId } }) : null;
+    if (t && !this.podeVerAmbiente(u, t.ambienteId)) throw new ForbiddenException('Ambiente não liberado para você.');
+    return { ...mv, valor: Number(mv.valor), turno: t ? { numero: t.numero } : null, ambiente: t ? await this.ambienteNome(t.ambienteId) : '' };
+  }
+
+  async config(u: UsuarioToken) {
+    const e = await this.empresas.findOne({ where: { id: u.empresaId } });
+    const cfg = e?.configCaixa ?? {};
+    return {
+      saidas: cfg.saidas?.length ? cfg.saidas : ['Pagamento de fornecedor', 'Passagem', 'Padaria', 'Outras despesas'],
+      entradas: cfg.entradas?.length ? cfg.entradas : ['Reforço de troco', 'Outras entradas'],
+    };
+  }
+
+  async salvarConfig(u: UsuarioToken, dto: ConfigCaixaDto) {
+    const limpa = (l: string[]) => [...new Set(l.map((x) => x.trim()).filter(Boolean))];
+    await this.empresas.update({ id: u.empresaId }, { configCaixa: { saidas: limpa(dto.saidas), entradas: limpa(dto.entradas) } });
+    return this.config(u);
   }
 
   async fechar(u: UsuarioToken, id: string, dto: FecharTurnoDto) {

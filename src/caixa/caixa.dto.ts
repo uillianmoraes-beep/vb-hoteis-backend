@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsIn, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 
 export class AutorizacaoCaixaDto {
   @IsString() @MinLength(3) @MaxLength(120) login!: string;
@@ -15,7 +15,13 @@ export class MovimentoDto {
   @IsIn(['sangria', 'reforco', 'despesa']) tipo!: 'sangria' | 'reforco' | 'despesa';
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) @Max(1_000_000) valor!: number;
   @IsOptional() @IsString() @MaxLength(300) descricao?: string;
+  @IsOptional() @IsString() @MaxLength(60) categoria?: string;
   @IsOptional() @ValidateNested() @Type(() => AutorizacaoCaixaDto) autorizacao?: AutorizacaoCaixaDto;
+}
+
+export class ConfigCaixaDto {
+  @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) @MaxLength(60, { each: true }) saidas!: string[];
+  @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) @MaxLength(60, { each: true }) entradas!: string[];
 }
 
 export class FecharTurnoDto {

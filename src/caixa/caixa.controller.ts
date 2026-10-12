@@ -1,6 +1,6 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { CaixaService } from './caixa.service';
-import { AbrirTurnoDto, FecharTurnoDto, LancamentoAdmDto, MovimentoDto } from './caixa.dto';
+import { AbrirTurnoDto, ConfigCaixaDto, FecharTurnoDto, LancamentoAdmDto, MovimentoDto } from './caixa.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
@@ -13,6 +13,24 @@ export class CaixaController {
   @Requer('caixa.principal', 'caixa.relatorios')
   atual(@Usuario() u: UsuarioToken, @Query('ambienteId', ParseUUIDPipe) ambienteId: string) {
     return this.service.atual(u, ambienteId);
+  }
+
+  @Get('config')
+  @Requer('caixa.principal', 'caixa.adm', 'caixa.relatorios')
+  config(@Usuario() u: UsuarioToken) {
+    return this.service.config(u);
+  }
+
+  @Put('config')
+  @Requer('caixa.adm')
+  salvarConfig(@Usuario() u: UsuarioToken, @Body() dto: ConfigCaixaDto) {
+    return this.service.salvarConfig(u, dto);
+  }
+
+  @Get('movimentos/:id')
+  @Requer('caixa.principal', 'caixa.adm', 'caixa.relatorios')
+  movimentoDetalhe(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.movimentoDetalhe(u, id);
   }
 
   @Post('turnos')
