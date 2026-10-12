@@ -12,6 +12,8 @@ export class Empresa {
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) aparencia!: { tema?: string; cores?: Record<string, string> };
   /** tributação do serviço de hospedagem (NFS-e) */
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) fiscal!: { hospedagem?: DadosFiscais };
+  /** perguntas da pesquisa de satisfação (null = padrão) */
+  @Column({ type: 'jsonb', nullable: true }) pesquisa!: { id: string; texto: string; ativo: boolean }[] | null;
   @Column({ name: 'ultimo_uso', type: 'int', default: 0 }) ultimoUso!: number;
   /** módulos contratados (revenda); só a Virtual Barra altera */
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) modulos!: Record<string, boolean>;

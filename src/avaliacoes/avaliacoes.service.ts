@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Avaliacao } from './avaliacao.entity';
-import { ResponderAvaliacaoDto } from './avaliacoes.dto';
+import { ResponderAvaliacaoDto, SalvarPerguntasDto } from './avaliacoes.dto';
 import { Estadia } from '../estadias/estadia.entity';
 import { Unidade } from '../unidades/unidade.entity';
 import { Empresa } from '../empresas/empresa.entity';
@@ -12,7 +12,18 @@ import { UsuarioToken } from '../common/permissoes';
 const DIA = 86_400_000;
 /** o cliente tem até 3 dias depois da saída para avaliar */
 const PRAZO_DIAS = 3;
-const CRITERIOS = ['limpeza', 'atendimento', 'conforto', 'consumo'] as const;
+const LEGADO = ['limpeza', 'atendimento', 'conforto', 'consumo'] as const;
+
+export type Pergunta = { id: string; texto: string; ativo: boolean };
+/** perguntas iniciais; a empresa muda, desliga ou cria outras */
+export const PERGUNTAS_PADRAO: Pergunta[] = [
+  { id: 'limpeza', texto: 'Limpeza da suíte', ativo: true },
+  { id: 'atendimento', texto: 'Atendimento', ativo: true },
+  { id: 'conforto', texto: 'Conforto e conservação', ativo: true },
+  { id: 'refeicao', texto: 'A refeição estava boa?', ativo: true },
+  { id: 'frigobar', texto: 'Frigobar e bebidas', ativo: true },
+];
+const perguntasDe = (e: Empresa | null | undefined): Pergunta[] => (e?.pesquisa?.length ? e.pesquisa : PERGUNTAS_PADRAO);
 
 @Injectable()
 export class AvaliacoesService {
@@ -39,24 +50,51 @@ export class AvaliacoesService {
     const ja = (await this.repo.count({ where: { estadiaId: e.id } })) > 0;
     const base = e.saidaEm ?? new Date();
     const expirada = Date.now() - base.getTime() > PRAZO_DIAS * DIA;
-    return { empresa: empresa.nome, unidade: unidade?.codigo ?? '', data: e.entradaEm, jaAvaliada: ja, expirada };
+    const perguntas = perguntasDe(empresa).filter((p) => p.ativo).map(({ id, texto }) => ({ id, texto }));
+    return { empresa: empresa.nome, unidade: unidade?.codigo ?? '', data: e.entradaEm, jaAvaliada: ja, expirada, perguntas };
   }
 
   async responder(token: string, dto: ResponderAvaliacaoDto) {
-    const { e } = await this.porToken(token);
+    const { e, empresa } = await this.porToken(token);
     const base = e.saidaEm ?? new Date();
     if (Date.now() - base.getTime() > PRAZO_DIAS * DIA) throw new BadRequestException('O prazo para avaliar esta estadia terminou.');
     if (e.status === 'cancelada') throw new BadRequestException('Esta estadia foi cancelada.');
-    const notas = CRITERIOS.map((c) => dto[c]).filter((n): n is number => typeof n === 'number');
+    const validas = new Set(perguntasDe(empresa).filter((p) => p.ativo).map((p) => p.id));
+    const respostas: Record<string, number> = {};
+    for (const [k, v] of Object.entries(dto.respostas ?? {})) {
+      const n = Number(v);
+      if (validas.has(k) && Number.isInteger(n) && n >= 1 && n <= 5) respostas[k] = n;
+    }
+    // compatibilidade com a versão anterior da página
+    for (const k of LEGADO) if (typeof dto[k] === 'number' && !respostas[k === 'consumo' ? 'frigobar' : k]) respostas[k === 'consumo' ? 'frigobar' : k] = dto[k] as number;
+    const notas = Object.values(respostas);
     if (!notas.length) throw new BadRequestException('Dê pelo menos uma nota.');
     if ((await this.repo.count({ where: { estadiaId: e.id } })) > 0) throw new BadRequestException('Esta estadia já foi avaliada. Obrigado!');
     const geral = notas.reduce((s, n) => s + n, 0) / notas.length;
     await this.repo.insert({
       empresaId: e.empresaId, estadiaId: e.id, unidadeId: e.unidadeId, ambienteId: e.ambienteId,
-      limpeza: dto.limpeza ?? null, atendimento: dto.atendimento ?? null, conforto: dto.conforto ?? null, consumo: dto.consumo ?? null,
-      geral: geral.toFixed(2), voltaria: dto.voltaria ?? null, comentario: dto.comentario?.trim().slice(0, 1000) || null,
+      limpeza: respostas.limpeza ?? null, atendimento: respostas.atendimento ?? null, conforto: respostas.conforto ?? null, consumo: respostas.frigobar ?? null,
+      respostas, geral: geral.toFixed(2), voltaria: dto.voltaria ?? null, comentario: dto.comentario?.trim().slice(0, 1000) || null,
     });
     return { ok: true };
+  }
+
+  async perguntas(u: UsuarioToken) {
+    const empresa = await this.empresas.findOne({ where: { id: u.empresaId } });
+    return perguntasDe(empresa);
+  }
+
+  async salvarPerguntas(u: UsuarioToken, dto: SalvarPerguntasDto) {
+    const ids = new Set<string>();
+    const lista = dto.perguntas.map((p) => {
+      const id = p.id.trim().toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 30) || `p${ids.size + 1}`;
+      if (ids.has(id)) throw new BadRequestException('Há perguntas repetidas.');
+      ids.add(id);
+      return { id, texto: p.texto.trim(), ativo: !!p.ativo };
+    });
+    if (!lista.some((p) => p.ativo)) throw new BadRequestException('Deixe pelo menos uma pergunta ativa.');
+    await this.empresas.update({ id: u.empresaId }, { pesquisa: lista });
+    return lista;
   }
 
   async relatorio(u: UsuarioToken, filtro: { de?: string; ate?: string }) {
@@ -80,7 +118,12 @@ export class AvaliacoesService {
       const v = vals.filter((n): n is number => typeof n === 'number');
       return v.length ? Math.round((v.reduce((s, n) => s + n, 0) / v.length) * 100) / 100 : null;
     };
-    const criterios = Object.fromEntries(CRITERIOS.map((c) => [c, media(lista.map((a) => a[c]))]));
+    const todas = perguntasDe(empresa);
+    // perguntas que aparecem nas respostas, mesmo se a empresa desligou depois
+    const usadas = new Set(lista.flatMap((a) => Object.keys(a.respostas ?? {})));
+    const perguntas = todas.filter((p) => p.ativo || usadas.has(p.id)).map(({ id, texto }) => ({ id, texto }));
+    const nota = (a: Avaliacao, id: string) => (typeof a.respostas?.[id] === 'number' ? a.respostas[id] : null);
+    const criterios = perguntas.map((p) => ({ ...p, media: media(lista.map((a) => nota(a, p.id))) }));
     const respostasVoltaria = lista.filter((a) => a.voltaria !== null);
     const porUnidade = new Map<string, Avaliacao[]>();
     for (const a of lista) {
@@ -93,11 +136,12 @@ export class AvaliacoesService {
       de, ate,
       total: lista.length,
       geral: media(lista.map((a) => Number(a.geral))),
+      perguntas,
       criterios,
       voltaria: respostasVoltaria.length ? Math.round((respostasVoltaria.filter((a) => a.voltaria).length / respostasVoltaria.length) * 100) : null,
       distribuicao,
       unidades: [...porUnidade.entries()]
-        .map(([codigo, l]) => ({ codigo, total: l.length, geral: media(l.map((a) => Number(a.geral))), ...Object.fromEntries(CRITERIOS.map((c) => [c, media(l.map((a) => a[c]))])) }))
+        .map(([codigo, l]) => ({ codigo, total: l.length, geral: media(l.map((a) => Number(a.geral))), notas: Object.fromEntries(perguntas.map((p) => [p.id, media(l.map((a) => nota(a, p.id)))])) }))
         .sort((a, b) => (a.geral ?? 9) - (b.geral ?? 9)),
       comentarios: lista.filter((a) => a.comentario).slice(0, 200).map((a) => ({
         id: a.id, uso: numUso.get(a.estadiaId) ?? null, data: a.criadoEm, unidade: cod.get(a.unidadeId ?? '') ?? '—', geral: Number(a.geral), voltaria: a.voltaria, comentario: a.comentario,

@@ -11,6 +11,8 @@ export class Avaliacao {
   @Column({ type: 'smallint', nullable: true }) atendimento!: number | null;
   @Column({ type: 'smallint', nullable: true }) conforto!: number | null;
   @Column({ type: 'smallint', nullable: true }) consumo!: number | null;
+  /** nota (1–5) por pergunta da empresa */
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) respostas!: Record<string, number>;
   @Column({ type: 'numeric', precision: 3, scale: 2 }) geral!: string;
   @Column({ type: 'boolean', nullable: true }) voltaria!: boolean | null;
   @Column({ type: 'text', nullable: true }) comentario!: string | null;
