@@ -9,6 +9,8 @@ import { Unidade } from '../unidades/unidade.entity';
 import { Perfil } from '../perfis/perfil.entity';
 import { UsuarioEntity } from '../usuarios/usuario.entity';
 import { LimitesPerfil, Permissao, PERMISSOES } from '../common/permissoes';
+import { Periodo } from '../tarifas/periodo.entity';
+import { TabelaPreco } from '../tarifas/tabela-preco.entity';
 
 /**
  * Primeira subida: se ainda não existe nenhum usuário, cria a empresa,
@@ -75,7 +77,7 @@ export class SeedService implements OnApplicationBootstrap {
         { nome: 'Gerente', descricao: 'Gestão do dia a dia', permissoes: todas.filter((p) => p !== 'empresa.editar'),
           limites: { descontoPercentual: 100, acrescimoPercentual: 100, cortesia: true, ajusteDiaria: true } },
         { nome: 'Recepção', descricao: 'Recepção / telefonista',
-          permissoes: ['painel.ver', 'unidades.status', 'unidades.bloquear'],
+          permissoes: ['painel.ver', 'unidades.status', 'unidades.bloquear', 'estadias.operar'],
           limites: { descontoPercentual: 10, acrescimoPercentual: 10, cortesia: false, ajusteDiaria: true } },
         { nome: 'Supervisor da limpeza', descricao: 'Distribui e revisa a limpeza',
           permissoes: ['painel.ver', 'unidades.status', 'unidades.bloquear', 'unidades.desbloquear'],
@@ -109,7 +111,10 @@ export class SeedService implements OnApplicationBootstrap {
 
       if ((process.env.SEED_EXEMPLOS || 'false').toLowerCase() === 'true') {
         const [motel, hotel] = await m.save([
-          m.create(Ambiente, { empresaId, nome: 'Motel', tipo: 'motel', cor: '#E11D48', ordem: 1 }),
+          m.create(Ambiente, {
+            empresaId, nome: 'Motel', tipo: 'motel', cor: '#E11D48', ordem: 1,
+            regras: { toleranciaMin: 15, aposUltimo: 'hora_adicional', pessoasIncluidas: 2, alertaViradaMin: 10 },
+          }),
           m.create(Ambiente, { empresaId, nome: 'Hotel', tipo: 'hotel', cor: '#0E77DA', ordem: 2 }),
         ]);
         const [standard, luxo, hidro, quarto] = await m.save([
@@ -135,6 +140,15 @@ export class SeedService implements OnApplicationBootstrap {
           }),
         );
         await m.save([...suites, ...quartos]);
+
+        // Padrão de cobrança do motel (editável em Tarifas): 4h, 6h, 12h e pernoite, sem preço
+        await m.save([
+          m.create(Periodo, { empresaId, ambienteId: motel.id, nome: '4 horas', tipo: 'horas', duracaoMin: 240, ordem: 1 }),
+          m.create(Periodo, { empresaId, ambienteId: motel.id, nome: '6 horas', tipo: 'horas', duracaoMin: 360, ordem: 2 }),
+          m.create(Periodo, { empresaId, ambienteId: motel.id, nome: '12 horas', tipo: 'horas', duracaoMin: 720, ordem: 3 }),
+          m.create(Periodo, { empresaId, ambienteId: motel.id, nome: 'Pernoite', tipo: 'pernoite', pernoiteInicio: '22:00', pernoiteFim: '12:00', ordem: 4 }),
+        ]);
+        await m.save(m.create(TabelaPreco, { empresaId, ambienteId: motel.id, nome: 'Todos os dias', prioridade: 0 }));
       }
     });
 

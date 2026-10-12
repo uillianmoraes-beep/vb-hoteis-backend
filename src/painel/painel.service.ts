@@ -4,6 +4,7 @@ import { FindOptionsWhere, In, Repository } from 'typeorm';
 import { Unidade } from '../unidades/unidade.entity';
 import { Ambiente } from '../ambientes/ambiente.entity';
 import { STATUS_UNIDADE, StatusUnidade, UsuarioToken } from '../common/permissoes';
+import { EstadiasService } from '../estadias/estadias.service';
 
 /**
  * Tempos de alerta da faixa "Precisa de você agora" (em minutos).
@@ -18,7 +19,7 @@ const ALERTA_MINUTOS: Partial<Record<StatusUnidade, number>> = {
 export interface AlertaPainel {
   unidadeId: string;
   codigo: string;
-  tipo: 'limpeza_demorada' | 'vistoria_aguardando' | 'conta_aguardando' | 'bloqueada';
+  tipo: 'limpeza_demorada' | 'vistoria_aguardando' | 'conta_aguardando' | 'bloqueada' | 'vira_periodo';
   mensagem: string;
   minutos: number;
   urgencia: number;
@@ -29,6 +30,7 @@ export class PainelService {
   constructor(
     @InjectRepository(Unidade) private readonly unidades: Repository<Unidade>,
     @InjectRepository(Ambiente) private readonly ambientes: Repository<Ambiente>,
+    private readonly estadias: EstadiasService,
   ) {}
 
   async montar(u: UsuarioToken, ambienteId?: string) {
@@ -51,6 +53,7 @@ export class PainelService {
       order: { ordem: 'ASC', codigo: 'ASC' },
     });
 
+    const contas = await this.estadias.abertasComConta(u.empresaId, lista.map((x) => x.id));
     const agora = Date.now();
     const resumo = Object.fromEntries(STATUS_UNIDADE.map((s) => [s, 0])) as Record<StatusUnidade, number>;
     const alertas: AlertaPainel[] = [];
@@ -69,7 +72,14 @@ export class PainelService {
       } else if (x.status === 'conta_entregue' && limite !== undefined && minutos >= limite) {
         alertas.push({ unidadeId: x.id, codigo: x.codigo, tipo: 'conta_aguardando', minutos,
           mensagem: `Conta entregue há ${minutos} min`, urgencia: 3 });
-      } else if (x.status === 'bloqueada') {
+      }
+      const aberta = contas.get(x.id);
+      if (aberta && aberta.estadia.status === 'aberta' && aberta.conta.proximaViradaMin !== null
+        && aberta.conta.proximaViradaMin <= aberta.motor.regras.alertaViradaMin) {
+        alertas.push({ unidadeId: x.id, codigo: x.codigo, tipo: 'vira_periodo', minutos: aberta.conta.proximaViradaMin,
+          mensagem: `vira ${aberta.conta.proximoNome ?? 'o período'} em ${aberta.conta.proximaViradaMin} min`, urgencia: 3 });
+      }
+      if (x.status === 'bloqueada') {
         alertas.push({ unidadeId: x.id, codigo: x.codigo, tipo: 'bloqueada', minutos,
           mensagem: `Bloqueada: ${x.motivoBloqueio?.nome ?? 'sem motivo'}`, urgencia: 1 });
       }
@@ -91,6 +101,24 @@ export class PainelService {
         observacaoStatus: x.observacaoStatus,
         plantaX: x.plantaX !== null ? Number(x.plantaX) : null,
         plantaY: x.plantaY !== null ? Number(x.plantaY) : null,
+        estadia: aberta
+          ? {
+              id: aberta.estadia.id,
+              placa: aberta.estadia.placa,
+              pessoas: aberta.estadia.pessoas,
+              modalidade: aberta.estadia.modalidade,
+              entradaEm: aberta.estadia.entradaEm,
+              status: aberta.estadia.status,
+              periodoNome: aberta.conta.periodoNome,
+              total: aberta.conta.total / 100,
+              minutosUso: aberta.conta.minutosUso,
+              proximaViradaMin: aberta.conta.proximaViradaMin,
+              proximoNome: aberta.conta.proximoNome,
+              trechoInicio: aberta.conta.trechoInicio,
+              trechoFim: aberta.conta.trechoFim,
+              semPreco: aberta.conta.semPreco,
+            }
+          : null,
       };
     });
 

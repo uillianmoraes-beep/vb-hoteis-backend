@@ -16,6 +16,8 @@ import { UnidadesModule } from './unidades/unidades.module';
 import { PerfisModule } from './perfis/perfis.module';
 import { UsuariosModule } from './usuarios/usuarios.module';
 import { PainelModule } from './painel/painel.module';
+import { TarifasModule } from './tarifas/tarifas.module';
+import { EstadiasModule } from './estadias/estadias.module';
 import { SeedModule } from './seed/seed.module';
 
 @Module({
@@ -44,6 +46,8 @@ import { SeedModule } from './seed/seed.module';
     PerfisModule,
     UsuariosModule,
     PainelModule,
+    TarifasModule,
+    EstadiasModule,
     SeedModule,
   ],
   providers: [

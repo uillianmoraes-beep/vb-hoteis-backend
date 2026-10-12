@@ -6,6 +6,7 @@ import { DataSource, FindOptionsWhere, In, Repository } from 'typeorm';
 import { Unidade } from './unidade.entity';
 import { UnidadeEvento } from './unidade-evento.entity';
 import { MotivoBloqueio } from '../motivos-bloqueio/motivo-bloqueio.entity';
+import { Estadia } from '../estadias/estadia.entity';
 import { Ambiente } from '../ambientes/ambiente.entity';
 import {
   AtualizarUnidadeDto, CriarUnidadeDto, CriarUnidadesLoteDto, MudarStatusDto,
@@ -25,6 +26,7 @@ export class UnidadesService {
     @InjectRepository(UnidadeEvento) private readonly eventos: Repository<UnidadeEvento>,
     @InjectRepository(Ambiente) private readonly ambientes: Repository<Ambiente>,
     @InjectRepository(MotivoBloqueio) private readonly motivos: Repository<MotivoBloqueio>,
+    @InjectRepository(Estadia) private readonly estadias: Repository<Estadia>,
     private readonly ds: DataSource,
   ) {}
 
@@ -139,6 +141,15 @@ export class UnidadesService {
       throw new BadRequestException(`A unidade já está como ${novo}.`);
     }
 
+    // Unidade com conta aberta: muda só pela conta (entregar, fechar ou cancelar)
+    if (await this.estadias.exists({ where: { unidadeId: unidade.id, status: In(['aberta', 'conta_entregue']) } })) {
+      throw new BadRequestException('Esta unidade tem uma conta aberta. Use entregar, fechar ou cancelar a conta.');
+    }
+    // No motel, ocupar só pela entrada (para a conta correr)
+    if ((novo === 'ocupada' || novo === 'conta_entregue') && unidade.ambiente?.tipo === 'motel') {
+      throw new BadRequestException('No motel, use "Dar entrada" para ocupar a unidade.');
+    }
+
     // Permissões específicas
     if (novo === 'bloqueada' && !temPermissao(u, 'unidades.bloquear')) {
       throw new ForbiddenException('Seu perfil não pode bloquear unidades.');
@@ -204,7 +215,8 @@ export class UnidadesService {
 
   async desativar(u: UsuarioToken, id: string) {
     const unidade = await this.buscar(u, id);
-    if (['ocupada', 'conta_entregue'].includes(unidade.status)) {
+    if (['ocupada', 'conta_entregue'].includes(unidade.status)
+      || (await this.estadias.exists({ where: { unidadeId: unidade.id, status: In(['aberta', 'conta_entregue']) } }))) {
       throw new BadRequestException('Não é possível desativar uma unidade ocupada.');
     }
     await this.repo.update({ id }, { ativo: false });
