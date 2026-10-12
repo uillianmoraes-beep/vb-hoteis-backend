@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
-import { Estadia } from './estadia.entity';
+import { Estadia, FormaPagamento } from './estadia.entity';
 import { EstadiaItem } from './estadia-item.entity';
 import { EstadiaPagamento } from './estadia-pagamento.entity';
 import { EstadiaEvento } from './estadia-evento.entity';
@@ -510,7 +510,7 @@ export class EstadiasService {
     }
     if (restante <= 0 && pags.length) throw new BadRequestException(restante < 0 ? `A conta já está paga (sobram ${brl(-restante)} para devolver ao cliente).` : 'A conta já está paga.');
     const formas = [...new Set([...anteriores.map((p) => p.forma), ...pags.map((p) => p.forma)])];
-    const forma = total === 0 && !formas.length ? 'cortesia' : formas.length === 1 ? formas[0] : 'misto';
+    const forma = (total === 0 && !formas.length ? 'cortesia' : formas.length === 1 ? formas[0] : 'misto') as FormaPagamento;
     const trocoTotal = pags.reduce((s, p) => s + p.troco, 0);
     const gorjeta = pags.find((p) => p.trocoDestino === 'gorjeta');
 
