@@ -1,0 +1,65 @@
+/**
+ * Catálogo de permissões. O perfil Administrador recebe '*' (tudo).
+ * Novas permissões entram aqui conforme os módulos forem chegando.
+ */
+export const PERMISSOES = {
+  'painel.ver': 'Ver o Painel de Unidades',
+  'unidades.status': 'Mudar status das unidades (limpeza, vistoria, livre)',
+  'unidades.bloquear': 'Bloquear unidade com motivo',
+  'unidades.desbloquear': 'Desbloquear unidade',
+  'unidades.gerenciar': 'Cadastrar e editar unidades',
+  'categorias.gerenciar': 'Cadastrar e editar categorias',
+  'ambientes.gerenciar': 'Cadastrar e editar ambientes',
+  'motivos.gerenciar': 'Cadastrar motivos de bloqueio',
+  'perfis.gerenciar': 'Cadastrar perfis e limites',
+  'usuarios.gerenciar': 'Cadastrar usuários',
+  'empresa.editar': 'Editar dados da empresa',
+} as const;
+
+export type Permissao = keyof typeof PERMISSOES;
+
+/**
+ * Limites de cada perfil. Acima do limite, a ação pede a senha
+ * de alguém cujo perfil permita (regra aplicada nos módulos de conta e caixa).
+ */
+export interface LimitesPerfil {
+  /** Desconto máximo em % sobre a conta (0 a 100). */
+  descontoPercentual?: number;
+  /** Acréscimo máximo em %. */
+  acrescimoPercentual?: number;
+  /** Pode dar cortesia (venda com 100% de desconto). */
+  cortesia?: boolean;
+  /** Pode ajustar diária por número de pessoas (3ª pessoa etc.). */
+  ajusteDiaria?: boolean;
+}
+
+export const STATUS_UNIDADE = [
+  'livre',
+  'ocupada',
+  'conta_entregue',
+  'limpeza',
+  'vistoria',
+  'bloqueada',
+  'reservada',
+] as const;
+export type StatusUnidade = (typeof STATUS_UNIDADE)[number];
+
+export const TIPOS_UNIDADE = ['suite', 'quarto', 'mesa', 'area'] as const;
+export type TipoUnidade = (typeof TIPOS_UNIDADE)[number];
+
+export const TIPOS_AMBIENTE = ['motel', 'hotel', 'pousada', 'restaurante', 'bar'] as const;
+export type TipoAmbiente = (typeof TIPOS_AMBIENTE)[number];
+
+/** Dados do usuário logado, gravados no token. */
+export interface UsuarioToken {
+  sub: string;
+  empresaId: string;
+  perfilId: string;
+  nome: string;
+  permissoes: string[];
+  ambientesIds: string[] | null;
+}
+
+export function temPermissao(usuario: UsuarioToken, permissao: string): boolean {
+  return usuario.permissoes.includes('*') || usuario.permissoes.includes(permissao);
+}

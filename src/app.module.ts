@@ -1,0 +1,54 @@
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { JwtModule } from '@nestjs/jwt';
+import { APP_GUARD } from '@nestjs/core';
+import { opcoesBanco } from './database/typeorm.config';
+import { AuthGuard } from './common/guards/auth.guard';
+import { PermissoesGuard } from './common/guards/permissoes.guard';
+import { HealthModule } from './health/health.module';
+import { AuthModule } from './auth/auth.module';
+import { EmpresasModule } from './empresas/empresas.module';
+import { AmbientesModule } from './ambientes/ambientes.module';
+import { CategoriasModule } from './categorias/categorias.module';
+import { MotivosBloqueioModule } from './motivos-bloqueio/motivos-bloqueio.module';
+import { UnidadesModule } from './unidades/unidades.module';
+import { PerfisModule } from './perfis/perfis.module';
+import { UsuariosModule } from './usuarios/usuarios.module';
+import { PainelModule } from './painel/painel.module';
+import { SeedModule } from './seed/seed.module';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    TypeOrmModule.forRootAsync({ useFactory: () => opcoesBanco() }),
+    JwtModule.registerAsync({
+      global: true,
+      useFactory: () => {
+        if (!process.env.JWT_SECRET) {
+          throw new Error('Variável JWT_SECRET não configurada.');
+        }
+        return {
+          secret: process.env.JWT_SECRET,
+          signOptions: { expiresIn: process.env.JWT_EXPIRA_EM || '12h' },
+        };
+      },
+    }),
+    HealthModule,
+    AuthModule,
+    EmpresasModule,
+    AmbientesModule,
+    CategoriasModule,
+    MotivosBloqueioModule,
+    UnidadesModule,
+    PerfisModule,
+    UsuariosModule,
+    PainelModule,
+    SeedModule,
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: PermissoesGuard },
+  ],
+})
+export class AppModule {}

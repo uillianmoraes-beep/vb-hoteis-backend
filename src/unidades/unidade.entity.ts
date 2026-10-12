@@ -1,0 +1,45 @@
+import {
+  Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn,
+} from 'typeorm';
+import { StatusUnidade, TipoUnidade } from '../common/permissoes';
+import { Ambiente } from '../ambientes/ambiente.entity';
+import { Categoria } from '../categorias/categoria.entity';
+import { MotivoBloqueio } from '../motivos-bloqueio/motivo-bloqueio.entity';
+
+/** Unidade universal: suíte, quarto, mesa ou área. */
+@Entity('unidades')
+export class Unidade {
+  @PrimaryGeneratedColumn('uuid') id!: string;
+  @Column({ name: 'empresa_id', type: 'uuid' }) empresaId!: string;
+
+  /** Ambiente em que a unidade está agora (pode mudar na virada de andar). */
+  @Column({ name: 'ambiente_id', type: 'uuid' }) ambienteId!: string;
+  @ManyToOne(() => Ambiente) @JoinColumn({ name: 'ambiente_id' }) ambiente?: Ambiente;
+
+  /** Ambiente de origem, para onde volta no fim da virada. */
+  @Column({ name: 'ambiente_padrao_id', type: 'uuid' }) ambientePadraoId!: string;
+
+  @Column({ name: 'categoria_id', type: 'uuid', nullable: true }) categoriaId!: string | null;
+  @ManyToOne(() => Categoria, { nullable: true }) @JoinColumn({ name: 'categoria_id' }) categoria?: Categoria | null;
+
+  @Column({ length: 20 }) codigo!: string;
+  @Column({ type: 'varchar', length: 80, nullable: true }) nome!: string | null;
+  @Column({ type: 'varchar', length: 20, default: 'suite' }) tipo!: TipoUnidade;
+  @Column({ type: 'varchar', length: 20, nullable: true }) andar!: string | null;
+  @Column({ type: 'varchar', length: 20, nullable: true }) garagem!: string | null;
+  @Column({ type: 'int', default: 2 }) capacidade!: number;
+
+  @Column({ type: 'varchar', length: 20, default: 'livre' }) status!: StatusUnidade;
+  @Column({ name: 'status_desde', type: 'timestamptz', default: () => 'now()' }) statusDesde!: Date;
+  @Column({ name: 'motivo_bloqueio_id', type: 'uuid', nullable: true }) motivoBloqueioId!: string | null;
+  @ManyToOne(() => MotivoBloqueio, { nullable: true }) @JoinColumn({ name: 'motivo_bloqueio_id' })
+  motivoBloqueio?: MotivoBloqueio | null;
+  @Column({ name: 'observacao_status', type: 'text', nullable: true }) observacaoStatus!: string | null;
+
+  @Column({ type: 'int', default: 0 }) ordem!: number;
+  @Column({ name: 'planta_x', type: 'numeric', precision: 8, scale: 2, nullable: true }) plantaX!: string | null;
+  @Column({ name: 'planta_y', type: 'numeric', precision: 8, scale: 2, nullable: true }) plantaY!: string | null;
+  @Column({ default: true }) ativo!: boolean;
+  @CreateDateColumn({ name: 'criado_em', type: 'timestamptz' }) criadoEm!: Date;
+  @UpdateDateColumn({ name: 'atualizado_em', type: 'timestamptz' }) atualizadoEm!: Date;
+}
