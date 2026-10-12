@@ -69,6 +69,7 @@ export class UsuariosService {
         ...(dto.login !== undefined && { login: dto.login.trim() }),
         ...(dto.perfilId !== undefined && { perfilId: dto.perfilId }),
         ...(dto.ativo !== undefined && { ativo: dto.ativo }),
+        ...(dto.acessoCelular !== undefined && { acessoCelular: dto.acessoCelular }),
         ...(dto.ambientesIds !== undefined && {
           ambientesIds: dto.ambientesIds && dto.ambientesIds.length ? dto.ambientesIds : null,
         }),

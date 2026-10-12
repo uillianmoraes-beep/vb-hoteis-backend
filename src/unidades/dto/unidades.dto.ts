@@ -50,3 +50,8 @@ export class MudarStatusDto {
   @IsOptional() @IsUUID() motivoBloqueioId?: string;
   @IsOptional() @IsString() @MaxLength(500) observacao?: string;
 }
+
+export class ResponsavelDto {
+  /** vazio = tira o responsável */
+  @IsString() @MaxLength(60) nome!: string;
+}

@@ -14,6 +14,8 @@ export class UsuarioEntity {
   @Column({ name: 'senha_hash', length: 100, select: false }) senhaHash!: string;
   /** Ambientes que o usuário pode ver. Vazio/nulo = todos. */
   @Column({ name: 'ambientes_ids', type: 'uuid', array: true, nullable: true }) ambientesIds!: string[] | null;
+  /** pode entrar pelo celular/tablet */
+  @Column({ name: 'acesso_celular', default: true }) acessoCelular!: boolean;
   @Column({ default: true }) ativo!: boolean;
   @Column({ name: 'ultimo_acesso', type: 'timestamptz', nullable: true }) ultimoAcesso!: Date | null;
   @CreateDateColumn({ name: 'criado_em', type: 'timestamptz' }) criadoEm!: Date;

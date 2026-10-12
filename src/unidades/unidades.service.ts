@@ -204,6 +204,22 @@ export class UnidadesService {
     return this.buscar(u, id);
   }
 
+  async definirResponsavel(u: UsuarioToken, id: string, nome: string) {
+    const unidade = await this.buscar(u, id);
+    if (!['limpeza', 'vistoria'].includes(unidade.status)) throw new BadRequestException('Só dá para indicar responsável em limpeza ou vistoria.');
+    const limpo = nome.trim().slice(0, 60);
+    const papel = unidade.status === 'limpeza' ? 'Camareira' : 'Revisora';
+    const obs = limpo ? `${papel}: ${limpo}` : null;
+    await this.ds.transaction(async (m) => {
+      await m.update(Unidade, { id: unidade.id }, { observacaoStatus: obs });
+      await m.insert(UnidadeEvento, {
+        empresaId: u.empresaId, unidadeId: unidade.id, statusAnterior: unidade.status, statusNovo: unidade.status,
+        motivoBloqueioId: null, observacao: obs ?? `Sem ${papel.toLowerCase()}`, usuarioId: u.sub, usuarioNome: u.nome,
+      });
+    });
+    return this.buscar(u, id);
+  }
+
   async historico(u: UsuarioToken, id: string, limite = 50) {
     await this.buscar(u, id);
     return this.eventos.find({

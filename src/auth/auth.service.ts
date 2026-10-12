@@ -24,11 +24,14 @@ export class AuthService {
       .getOne();
   }
 
-  async login(login: string, senha: string) {
+  async login(login: string, senha: string, agente?: string) {
     const usuario = await this.buscarComSenha('lower(u.login) = lower(:valor)', login.trim());
     const senhaOk = usuario ? await bcrypt.compare(senha, usuario.senhaHash) : false;
     if (!usuario || !senhaOk) throw new UnauthorizedException('Login ou senha incorretos.');
     if (!usuario.ativo) throw new UnauthorizedException('Usuário desativado. Fale com o gerente.');
+    if (usuario.acessoCelular === false && /Mobi|Android|iPhone|iPad|iPod/i.test(agente ?? '')) {
+      throw new UnauthorizedException('Seu usuário não tem acesso pelo celular. Use o computador da empresa.');
+    }
 
     const empresa = await this.empresas.findOne({ where: { id: usuario.empresaId } });
     if (!empresa || !empresa.ativo) throw new UnauthorizedException('Acesso da empresa suspenso.');

@@ -3,7 +3,7 @@ import {
 } from '@nestjs/common';
 import { UnidadesService } from './unidades.service';
 import {
-  AtualizarUnidadeDto, CriarUnidadeDto, CriarUnidadesLoteDto, MudarStatusDto,
+  AtualizarUnidadeDto, CriarUnidadeDto, CriarUnidadesLoteDto, MudarStatusDto, ResponsavelDto,
 } from './dto/unidades.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
@@ -50,6 +50,13 @@ export class UnidadesController {
   @Patch(':id/status')
   mudarStatus(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: MudarStatusDto) {
     return this.service.mudarStatus(u, id, dto);
+  }
+
+  /** Governança: quem está limpando / vistoriando a unidade. */
+  @Patch(':id/responsavel')
+  @Requer('unidades.status', 'governanca.operar')
+  responsavel(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ResponsavelDto) {
+    return this.service.definirResponsavel(u, id, dto.nome);
   }
 
   @Delete(':id')

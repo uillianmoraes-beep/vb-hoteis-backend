@@ -83,6 +83,7 @@ export class SeedService implements OnApplicationBootstrap {
           permissoes: ['painel.ver', 'unidades.status', 'unidades.bloquear', 'unidades.desbloquear'],
           limites: {} },
         { nome: 'Portaria', descricao: 'Dá entrada nas suítes e recebe na entrada', permissoes: ['painel.ver', 'estadias.entrada'], limites: {} },
+        { nome: 'Governança', descricao: 'Mesário da limpeza: camareiras, vistoria e liberação', permissoes: ['painel.ver', 'unidades.status', 'unidades.bloquear', 'governanca.operar'], limites: {} },
         { nome: 'Revisora', descricao: 'Vistoria e libera as unidades', permissoes: ['painel.ver', 'unidades.status'], limites: {} },
         { nome: 'Camareira', descricao: 'Limpeza das unidades', permissoes: ['painel.ver', 'unidades.status'], limites: {} },
       ];

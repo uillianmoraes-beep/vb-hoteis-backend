@@ -8,6 +8,7 @@ export const PERMISSOES = {
   'unidades.bloquear': 'Bloquear unidade com motivo',
   'unidades.desbloquear': 'Desbloquear unidade',
   'unidades.gerenciar': 'Cadastrar e editar unidades',
+  'governanca.operar': 'Tela da governança (limpeza, vistoria, camareiras)',
   'estadias.operar': 'Dar entrada, entregar e fechar contas',
   'estadias.entrada': 'Dar entrada e receber na entrada (portaria)',
   'estadias.cancelar': 'Cancelar uma entrada já feita',
@@ -26,6 +27,19 @@ export const PERMISSOES = {
 } as const;
 
 export type Permissao = keyof typeof PERMISSOES;
+
+/** Agrupamento por módulo, para montar perfis marcando o módulo inteiro. */
+export const GRUPOS_PERMISSAO: { grupo: string; permissoes: Permissao[] }[] = [
+  { grupo: 'Recepção e painel', permissoes: ['painel.ver', 'unidades.status', 'unidades.bloquear', 'unidades.desbloquear'] },
+  { grupo: 'Contas (telefonista)', permissoes: ['estadias.operar', 'estadias.cancelar', 'estadias.corrigir', 'estadias.estornar'] },
+  { grupo: 'Portaria', permissoes: ['estadias.entrada'] },
+  { grupo: 'Governança (limpeza)', permissoes: ['governanca.operar'] },
+  { grupo: 'Tarifas e produtos', permissoes: ['tarifas.gerenciar', 'produtos.gerenciar'] },
+  { grupo: 'Notas fiscais', permissoes: ['notas.gerenciar'] },
+  { grupo: 'Satisfação', permissoes: ['avaliacoes.ver'] },
+  { grupo: 'Cadastros', permissoes: ['unidades.gerenciar', 'categorias.gerenciar', 'ambientes.gerenciar', 'motivos.gerenciar'] },
+  { grupo: 'Equipe e empresa', permissoes: ['usuarios.gerenciar', 'perfis.gerenciar', 'empresa.editar'] },
+];
 
 /**
  * Limites de cada perfil. Acima do limite, a ação pede a senha

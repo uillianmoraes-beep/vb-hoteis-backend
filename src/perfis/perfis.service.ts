@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 import { Perfil } from './perfil.entity';
 import { UsuarioEntity } from '../usuarios/usuario.entity';
 import { AtualizarPerfilDto, CriarPerfilDto } from './perfis.dto';
-import { PERMISSOES } from '../common/permissoes';
+import { GRUPOS_PERMISSAO, PERMISSOES } from '../common/permissoes';
 
 @Injectable()
 export class PerfisService {
@@ -14,7 +14,9 @@ export class PerfisService {
   ) {}
 
   catalogo() {
-    return Object.entries(PERMISSOES).map(([chave, descricao]) => ({ chave, descricao }));
+    const grupoDe = new Map<string, string>();
+    for (const g of GRUPOS_PERMISSAO) for (const p of g.permissoes) grupoDe.set(p, g.grupo);
+    return Object.entries(PERMISSOES).map(([chave, descricao]) => ({ chave, descricao, grupo: grupoDe.get(chave) ?? 'Outros' }));
   }
 
   private validarPermissoes(lista: string[]) {

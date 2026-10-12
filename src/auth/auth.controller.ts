@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Patch, Post } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto, TrocarMinhaSenhaDto } from './dto/login.dto';
 import { Publico } from '../common/decorators/publico.decorator';
@@ -12,8 +12,8 @@ export class AuthController {
   @Publico()
   @Post('login')
   @HttpCode(200)
-  login(@Body() dto: LoginDto) {
-    return this.service.login(dto.login, dto.senha);
+  login(@Body() dto: LoginDto, @Headers('user-agent') agente?: string) {
+    return this.service.login(dto.login, dto.senha, agente);
   }
 
   @Get('eu')
