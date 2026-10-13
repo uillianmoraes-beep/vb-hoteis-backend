@@ -1,4 +1,5 @@
-import { IsEmail, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 
 const DATA = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -29,4 +30,51 @@ export class CancelarReservaDto {
 export class CheckinReservaDto {
   /** lança o sinal já recebido como adiantamento na conta (abate do total) */
   @IsOptional() @IsIn(['sim', 'nao']) lancarSinal?: 'sim' | 'nao';
+}
+
+export class ConfigCategoriaOnlineDto {
+  @IsUUID() categoriaId!: string;
+  @IsBoolean() ativo!: boolean;
+  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(1_000_000) diaria!: number;
+  /** valor por pessoa acima de 2 (0 = não cobra) */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100_000) pessoaExtra?: number;
+  @IsOptional() @IsString() @MaxLength(300) descricao?: string;
+}
+
+export class ConfigQuartoOnlineDto {
+  @IsUUID() unidadeId!: string;
+  /** ex.: "Vista para o mar", "Varanda" */
+  @IsOptional() @IsString() @MaxLength(60) destaque?: string;
+  /** acréscimo por diária para escolher este quarto */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100_000) acrescimo?: number;
+  @IsOptional() @IsBoolean() oculto?: boolean;
+}
+
+export class ConfigReservaOnlineDto {
+  @IsBoolean() ativo!: boolean;
+  @IsIn(['automatica', 'recepcao']) confirmacao!: 'automatica' | 'recepcao';
+  @IsBoolean() escolherQuarto!: boolean;
+  @IsOptional() @IsString() @MaxLength(600) mensagem?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(60) minNoites?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(365) maxNoites?: number;
+  /** até quantos dias à frente aceita reserva */
+  @IsOptional() @IsInt() @Min(7) @Max(730) janelaDias?: number;
+  @IsOptional() @IsString() @MaxLength(30) whatsapp?: string;
+  @IsArray() @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => ConfigCategoriaOnlineDto) categorias!: ConfigCategoriaOnlineDto[];
+  @IsArray() @ArrayMaxSize(1000) @ValidateNested({ each: true }) @Type(() => ConfigQuartoOnlineDto) quartos!: ConfigQuartoOnlineDto[];
+}
+
+export class ReservaPublicaDto {
+  @Matches(DATA) chegada!: string;
+  @Matches(DATA) saida!: string;
+  @IsInt() @Min(1) @Max(20) adultos!: number;
+  @IsOptional() @IsInt() @Min(0) @Max(20) criancas?: number;
+  @IsUUID() categoriaId!: string;
+  /** quarto escolhido pelo hóspede (quando o hotel permite) */
+  @IsOptional() @IsUUID() unidadeId?: string;
+  @IsString() @MinLength(3) @MaxLength(120) nome!: string;
+  @IsString() @MinLength(8) @MaxLength(30) telefone!: string;
+  @IsOptional() @IsEmail() @MaxLength(120) email?: string;
+  @IsOptional() @IsString() @MaxLength(30) documento?: string;
+  @IsOptional() @IsString() @MaxLength(500) observacao?: string;
 }

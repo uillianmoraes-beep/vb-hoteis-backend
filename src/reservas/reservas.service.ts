@@ -24,6 +24,7 @@ const fmt = (r: Record<string, unknown>) => ({
   adultos: r.adultos, criancas: r.criancas, valorDiaria: Number(r.valor_diaria), valorTotal: Number(r.valor_total),
   sinal: Number(r.sinal), sinalForma: r.sinal_forma, origem: r.origem, observacao: r.observacao, status: r.status,
   estadiaId: r.estadia_id, nova: !r.vista_em, motivoCancelamento: r.motivo_cancelamento, criadoPor: r.criado_por, criadoEm: r.criado_em,
+  codigoPublico: r.codigo_publico ?? null, categoriaPedida: r.categoria_pedida ?? null, quartoEscolhido: !!r.quarto_escolhido,
 });
 
 @Injectable()
