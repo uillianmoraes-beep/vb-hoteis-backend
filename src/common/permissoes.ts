@@ -33,6 +33,8 @@ export const PERMISSOES = {
   'motivos.gerenciar': 'Cadastrar motivos de bloqueio',
   'perfis.gerenciar': 'Cadastrar perfis e limites',
   'usuarios.gerenciar': 'Cadastrar usuários',
+  'funcionarios.gerenciar': 'Funcionários: cadastro, crachá e itens da revisão',
+  'funcionarios.financeiro': 'Ficha financeira dos funcionários (vales, descontos, pagamentos e gorjetas)',
   'empresa.editar': 'Editar dados da empresa',
 } as const;
 
@@ -50,7 +52,7 @@ export const GRUPOS_PERMISSAO: { grupo: string; permissoes: Permissao[] }[] = [
   { grupo: 'Notas fiscais', permissoes: ['notas.gerenciar'] },
   { grupo: 'Satisfação', permissoes: ['avaliacoes.ver'] },
   { grupo: 'Cadastros', permissoes: ['unidades.gerenciar', 'categorias.gerenciar', 'ambientes.gerenciar', 'motivos.gerenciar'] },
-  { grupo: 'Equipe e empresa', permissoes: ['usuarios.gerenciar', 'perfis.gerenciar', 'empresa.editar'] },
+  { grupo: 'Equipe e empresa', permissoes: ['usuarios.gerenciar', 'perfis.gerenciar', 'empresa.editar', 'funcionarios.gerenciar', 'funcionarios.financeiro'] },
 ];
 
 /**

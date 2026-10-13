@@ -47,7 +47,13 @@ export class GorjetasService {
   /** Quem pode receber gorjeta (usuários marcados) + a Casa. */
   async beneficiarios(u: UsuarioToken) {
     const lista = await this.usuarios.find({ where: { empresaId: u.empresaId, ativo: true, recebeGorjeta: true }, order: { nome: 'ASC' } });
-    return { config: await this.config(u.empresaId), pessoas: lista.map((x) => ({ id: x.id, nome: x.nome })) };
+    // funcionários cadastrados (sem login) que recebem gorjeta
+    const funcs: { id: string; nome: string; usuario_id: string | null }[] = await this.repo.query(
+      `SELECT id, nome, usuario_id FROM funcionarios WHERE empresa_id = $1 AND ativo AND recebe_gorjeta ORDER BY nome`, [u.empresaId]);
+    const ligados = new Set(funcs.map((f) => f.usuario_id).filter(Boolean));
+    const pessoas = [...funcs.map((f) => ({ id: f.id, nome: f.nome })), ...lista.filter((x) => !ligados.has(x.id)).map((x) => ({ id: x.id, nome: x.nome }))]
+      .sort((a, b) => a.nome.localeCompare(b.nome));
+    return { config: await this.config(u.empresaId), pessoas };
   }
 
   /**
@@ -59,7 +65,8 @@ export class GorjetasService {
     const cfg = await this.config(u.empresaId);
     const ids = dados.itens.map((i) => i.beneficiarioId).filter((x): x is string => !!x);
     const pessoas = ids.length ? await this.usuarios.find({ where: { id: In(ids), empresaId: u.empresaId } }) : [];
-    const nomeDe = new Map(pessoas.map((p) => [p.id, p.nome]));
+    const funcs: { id: string; nome: string }[] = ids.length ? await m.query(`SELECT id, nome FROM funcionarios WHERE empresa_id = $1 AND id = ANY($2::uuid[])`, [u.empresaId, ids]) : [];
+    const nomeDe = new Map([...pessoas.map((p) => [p.id, p.nome] as [string, string]), ...funcs.map((f) => [f.id, f.nome] as [string, string])]);
     const salvas: Gorjeta[] = [];
     for (const i of dados.itens) {
       if (i.valorCent <= 0) continue;

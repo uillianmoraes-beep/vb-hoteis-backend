@@ -188,7 +188,8 @@ export class UnidadesService {
         status: novo,
         statusDesde: new Date(),
         motivoBloqueioId: motivoId,
-        observacaoStatus: dto.observacao ?? null,
+        // a camareira da limpeza continua indicada na vistoria (para a revisão)
+        observacaoStatus: dto.observacao ?? (atual === 'limpeza' && novo === 'vistoria' && unidade.observacaoStatus?.startsWith('Camareira:') ? unidade.observacaoStatus : null),
       });
       await m.insert(UnidadeEvento, {
         empresaId: u.empresaId,
@@ -209,7 +210,7 @@ export class UnidadesService {
     const unidade = await this.buscar(u, id);
     if (!['limpeza', 'vistoria'].includes(unidade.status)) throw new BadRequestException('Só dá para indicar responsável em limpeza ou vistoria.');
     const limpo = nome.trim().slice(0, 60);
-    const papel = unidade.status === 'limpeza' ? 'Camareira' : 'Revisora';
+    const papel = 'Camareira';
     const obs = limpo ? `${papel}: ${limpo}` : null;
     await this.ds.transaction(async (m) => {
       await m.update(Unidade, { id: unidade.id }, { observacaoStatus: obs });
