@@ -18,6 +18,7 @@ import { moduloAtivo } from '../common/modulos';
 import { FUSO, Motor, TarifasService } from '../tarifas/tarifas.service';
 import { CaixaService } from '../caixa/caixa.service';
 import { GorjetasService } from '../gorjetas/gorjetas.service';
+import { CortesiasService } from '../cortesias/cortesias.service';
 import { Penhora } from '../caixa/penhora.entity';
 import { CaixaMovimento, CaixaTurno } from '../caixa/caixa.entity';
 import { Gorjeta } from '../gorjetas/gorjeta.entity';
@@ -80,6 +81,7 @@ export class EstadiasService {
     private readonly tarifas: TarifasService,
     private readonly caixa: CaixaService,
     private readonly gorjetas: GorjetasService,
+    private readonly cortesias: CortesiasService,
     private readonly ds: DataSource,
   ) {}
 
@@ -564,11 +566,20 @@ export class EstadiasService {
     const motor = await this.tarifas.motor(u.empresaId, e.ambienteId);
     const consumo = (await this.consumoDe([e.id])).get(e.id) ?? 0;
     const conta = this.calcular(e, motor, consumo);
-    const desconto = centavos(dto.desconto ?? 0);
+    // cortesia cadastrada: o desconto vem da regra dela (e não do limite do perfil)
+    let cortesia: { nome: string; pct: number; aplicaEm: string; exigeSenha: boolean } | null = null;
+    if (dto.cortesiaId) {
+      const und = await this.unidades.findOne({ where: { id: e.unidadeId } });
+      cortesia = await this.cortesias.paraConta(u.empresaId, dto.cortesiaId, e.unidadeId, e.categoriaId ?? und?.categoriaId ?? null);
+    }
+    const baseCortesia = cortesia ? (cortesia.aplicaEm === 'hospedagem' ? conta.valorHospedagem + conta.valorPessoas : conta.total) : 0;
+    const desconto = cortesia ? Math.round((baseCortesia * cortesia.pct) / 100) : centavos(dto.desconto ?? 0);
     const acrescimo = centavos(dto.acrescimo ?? 0);
     if (desconto > conta.total + acrescimo) throw new BadRequestException('O desconto é maior que a conta.');
-    if ((desconto > 0 || acrescimo > 0) && !dto.motivo?.trim()) throw new BadRequestException('Informe o motivo do desconto ou acréscimo.');
-    const autorizadoPor = await this.conferirLimite(u, conta.total, desconto, acrescimo, dto);
+    if (!cortesia && (desconto > 0 || acrescimo > 0) && !dto.motivo?.trim()) throw new BadRequestException('Informe o motivo do desconto ou acréscimo.');
+    let autorizadoPor = await this.conferirLimite(u, conta.total, cortesia ? 0 : desconto, acrescimo, dto);
+    if (cortesia?.exigeSenha) autorizadoPor = (await this.liberarAcao(u, 'cortesias.gerenciar', `usar a cortesia ${cortesia.nome}`, dto.autorizacao)) ?? autorizadoPor;
+    if (cortesia && !dto.motivo?.trim()) dto.motivo = `Cortesia ${cortesia.nome} (${cortesia.pct}%)`;
     const total = conta.total - desconto + acrescimo;
 
     // pagamentos: com o que já foi pago na entrada, precisam somar exatamente o total
@@ -632,6 +643,7 @@ export class EstadiasService {
         trocoDestino: trocoTotal > 0 ? (gorjeta ? 'gorjeta' : 'cliente') : null,
         gorjetaPara: gorjeta?.gorjetaPara ?? null,
         motivoAjuste: dto.motivo?.trim() || null,
+        cortesiaNome: cortesia?.nome ?? null,
         autorizadoPor,
         usuarioSaidaId: u.sub,
         usuarioSaidaNome: u.nome,

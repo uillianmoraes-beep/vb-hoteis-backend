@@ -16,6 +16,7 @@ export const PERMISSOES = {
   'tarifas.gerenciar': 'Configurar períodos, preços e regras de cobrança',
   'estadias.corrigir': 'Corrigir hora de entrada e tabela de uma conta',
   'estadias.estornar': 'Estornar item lançado na conta',
+  'cortesias.gerenciar': 'Cadastrar cortesias (30%, 50%, 100%…) e liberar as que pedem senha',
   'pagamentos.corrigir': 'Mudar a forma de pagamento já lançada (ex.: débito que foi pix)',
   'produtos.gerenciar': 'Cadastrar produtos e serviços',
   'avaliacoes.ver': 'Ver o relatório de satisfação dos clientes',
@@ -40,7 +41,7 @@ export type Permissao = keyof typeof PERMISSOES;
 /** Agrupamento por módulo, para montar perfis marcando o módulo inteiro. */
 export const GRUPOS_PERMISSAO: { grupo: string; permissoes: Permissao[] }[] = [
   { grupo: 'Recepção e painel', permissoes: ['painel.ver', 'unidades.status', 'unidades.bloquear', 'unidades.desbloquear'] },
-  { grupo: 'Contas (telefonista)', permissoes: ['estadias.operar', 'estadias.cancelar', 'estadias.corrigir', 'estadias.estornar', 'pagamentos.corrigir'] },
+  { grupo: 'Contas (telefonista)', permissoes: ['estadias.operar', 'estadias.cancelar', 'estadias.corrigir', 'estadias.estornar', 'pagamentos.corrigir', 'cortesias.gerenciar'] },
   { grupo: 'Portaria e saída', permissoes: ['estadias.entrada', 'saida.registrar'] },
   { grupo: 'Governança (limpeza)', permissoes: ['governanca.operar'] },
   { grupo: 'Tarifas e produtos', permissoes: ['tarifas.gerenciar', 'produtos.gerenciar'] },

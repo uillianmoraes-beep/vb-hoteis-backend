@@ -24,6 +24,7 @@ import { LicencaModule } from './licenca/licenca.module';
 import { FiscalModule } from './fiscal/fiscal.module';
 import { AvaliacoesModule } from './avaliacoes/avaliacoes.module';
 import { RelatoriosModule } from './relatorios/relatorios.module';
+import { CortesiasModule } from './cortesias/cortesias.module';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { RelatoriosModule } from './relatorios/relatorios.module';
     FiscalModule,
     AvaliacoesModule,
     RelatoriosModule,
+    CortesiasModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },

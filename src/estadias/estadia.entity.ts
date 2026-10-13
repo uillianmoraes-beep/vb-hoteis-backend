@@ -39,6 +39,7 @@ export class Estadia {
   @Column({ name: 'troco_destino', type: 'varchar', length: 10, nullable: true }) trocoDestino!: 'cliente' | 'gorjeta' | null;
   @Column({ name: 'gorjeta_para', type: 'varchar', length: 120, nullable: true }) gorjetaPara!: string | null;
   @Column({ name: 'motivo_ajuste', type: 'text', nullable: true }) motivoAjuste!: string | null;
+  @Column({ name: 'cortesia_nome', type: 'varchar', length: 80, nullable: true }) cortesiaNome!: string | null;
   @Column({ name: 'autorizado_por', type: 'varchar', length: 120, nullable: true }) autorizadoPor!: string | null;
   @Column({ name: 'usuario_entrada_id', type: 'uuid', nullable: true }) usuarioEntradaId!: string | null;
   @Column({ name: 'usuario_entrada_nome', type: 'varchar', length: 120, nullable: true }) usuarioEntradaNome!: string | null;

@@ -46,11 +46,17 @@ export class RelatoriosService {
       formasDe.set(p.estadiaId, [...(formasDe.get(p.estadiaId) ?? []), p.forma]);
     }
     const porCategoria = new Map<string, { nome: string; usos: number; total: number }>();
+    const porCortesia = new Map<string, { nome: string; usos: number; desconto: number }>();
     let hosp = 0, cons = 0, desc = 0, acr = 0, total = 0, minutos = 0;
     for (const e of ests) {
       hosp += c(e.valorHospedagem) + c(e.valorPessoas);
       cons += c(e.valorConsumo);
       desc += c(e.desconto);
+      if (e.cortesiaNome) {
+        const k = porCortesia.get(e.cortesiaNome) ?? { nome: e.cortesiaNome, usos: 0, desconto: 0 };
+        k.usos += 1; k.desconto += c(e.desconto);
+        porCortesia.set(e.cortesiaNome, k);
+      }
       acr += c(e.acrescimo);
       total += c(e.valorTotal);
       if (e.saidaEm) minutos += Math.max(0, (e.saidaEm.getTime() - e.entradaEm.getTime()) / 60000);
@@ -66,12 +72,13 @@ export class RelatoriosService {
         ticketMedio: ests.length ? r(total / ests.length) : 0, permanenciaMediaMin: ests.length ? Math.round(minutos / ests.length) : 0,
       },
       porForma: Object.fromEntries(Object.entries(porForma).map(([k, v]) => [k, r(v)])),
+      porCortesia: [...porCortesia.values()].map((x) => ({ ...x, desconto: r(x.desconto) })).sort((a, b) => b.usos - a.usos),
       porCategoria: [...porCategoria.values()].map((x) => ({ ...x, total: r(x.total) })).sort((a, b) => b.total - a.total),
       lista: ests.map((e) => ({
         id: e.id, uso: e.numero, unidade: mapU.get(e.unidadeId)?.codigo ?? '—', ambiente: mapA.get(e.ambienteId) ?? '',
         entradaEm: e.entradaEm, saidaEm: e.saidaEm, periodo: e.periodoNome, placa: e.placa,
         hospedagem: r(c(e.valorHospedagem) + c(e.valorPessoas)), consumo: r(c(e.valorConsumo)), desconto: Number(e.desconto), total: Number(e.valorTotal ?? 0),
-        formas: [...new Set(formasDe.get(e.id) ?? [])], fechadoPor: e.usuarioSaidaNome,
+        formas: [...new Set(formasDe.get(e.id) ?? [])], fechadoPor: e.usuarioSaidaNome, cortesia: e.cortesiaNome,
       })),
     };
   }

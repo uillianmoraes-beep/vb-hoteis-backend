@@ -58,6 +58,8 @@ export class FecharEstadiaDto {
   @IsOptional() @IsString() @MaxLength(300) motivo?: string;
   /** login e senha de quem libera quando passa do limite do perfil */
   @IsOptional() @ValidateNested() @Type(() => AutorizacaoDto) autorizacao?: AutorizacaoDto;
+  /** cortesia cadastrada (o desconto sai da regra dela) */
+  @IsOptional() @IsUUID() cortesiaId?: string;
   /** hotel (com cadastro do hóspede): dados para a nota. No motel não vai. */
   @IsOptional() @ValidateNested() @Type(() => NotaFiscalDto) nota?: NotaFiscalDto;
 }
