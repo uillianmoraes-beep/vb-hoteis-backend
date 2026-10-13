@@ -42,5 +42,7 @@ export class CaixaMovimento {
   @Column({ name: 'usuario_id', type: 'uuid', nullable: true }) usuarioId!: string | null;
   @Column({ name: 'usuario_nome', type: 'varchar', length: 120, nullable: true }) usuarioNome!: string | null;
   @Column({ name: 'autorizado_por', type: 'varchar', length: 120, nullable: true }) autorizadoPor!: string | null;
+  /** CNPJ (só números) quando não é o da empresa principal */
+  @Column({ type: 'varchar', length: 14, nullable: true }) cnpj!: string | null;
   @CreateDateColumn({ name: 'criado_em', type: 'timestamptz' }) criadoEm!: Date;
 }

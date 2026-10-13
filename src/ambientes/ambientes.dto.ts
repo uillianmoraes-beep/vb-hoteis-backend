@@ -8,6 +8,8 @@ export class CriarAmbienteDto {
   @IsOptional() @IsInt() ordem?: number;
   @IsOptional() @IsBoolean() portaoUnico?: boolean;
   @IsOptional() @IsBoolean() limpezaNaSaida?: boolean;
+  @IsOptional() @IsString() @MaxLength(18) cnpj?: string;
+  @IsOptional() @IsString() @MaxLength(150) razaoSocial?: string;
 }
 
 export class AtualizarAmbienteDto {
@@ -18,4 +20,6 @@ export class AtualizarAmbienteDto {
   @IsOptional() @IsBoolean() ativo?: boolean;
   @IsOptional() @IsBoolean() portaoUnico?: boolean;
   @IsOptional() @IsBoolean() limpezaNaSaida?: boolean;
+  @IsOptional() @IsString() @MaxLength(18) cnpj?: string;
+  @IsOptional() @IsString() @MaxLength(150) razaoSocial?: string;
 }

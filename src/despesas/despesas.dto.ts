@@ -12,6 +12,8 @@ export class ContaPagarDto {
   @IsOptional() @IsString() @MaxLength(300) observacao?: string;
   /** conta de todo mês com valor que muda (luz, água): a próxima nasce estimada e o sistema pede o valor */
   @IsOptional() @IsBoolean() valorVariavel?: boolean;
+  /** de qual CNPJ é a conta ('principal' ou o CNPJ do ambiente) */
+  @IsOptional() @IsString() @MaxLength(18) cnpj?: string;
 }
 
 export class ParcelaNfeDto {
@@ -30,6 +32,7 @@ export class ImportarNfeDto {
   /** já foi paga (à vista): lança como paga */
   @IsOptional() @IsIn(['dinheiro', 'pix', 'debito', 'credito', 'transferencia', 'boleto']) pagaCom?: string;
   @IsOptional() @IsIn(['sim', 'nao']) lancarCaixa?: 'sim' | 'nao';
+  @IsOptional() @IsString() @MaxLength(18) cnpj?: string;
 }
 
 export class PagarContaDto {

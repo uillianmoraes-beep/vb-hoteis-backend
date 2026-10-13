@@ -21,6 +21,7 @@ export class LancamentoManualDto {
   @IsString() @MinLength(2) @MaxLength(250) descricao!: string;
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) @Max(10_000_000) valor!: number;
   @IsOptional() @Matches(DATA) vencimento?: string;
+  @IsOptional() @IsString() @MaxLength(18) cnpj?: string;
 }
 
 export class GerarFaturaDto {
@@ -50,4 +51,5 @@ export class CreditoDto {
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) @Max(10_000_000) valor!: number;
   @IsIn(['pix', 'transferencia', 'dinheiro', 'boleto', 'debito', 'credito']) forma!: string;
   @IsOptional() @IsString() @MaxLength(250) descricao?: string;
+  @IsOptional() @IsString() @MaxLength(18) cnpj?: string;
 }

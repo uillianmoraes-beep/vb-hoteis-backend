@@ -67,8 +67,8 @@ export class CaixaController {
 
   @Get('adm')
   @Requer('caixa.adm')
-  adm(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string) {
-    return this.service.adm(u, { de, ate });
+  adm(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string, @Query('cnpj') cnpj?: string) {
+    return this.service.adm(u, { de, ate, cnpj });
   }
 
   @Post('adm')

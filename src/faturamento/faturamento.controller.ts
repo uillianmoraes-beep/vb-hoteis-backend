@@ -15,7 +15,7 @@ export class FaturamentoController {
   constructor(private readonly service: FaturamentoService) {}
 
   @Get('resumo') @Requer('faturamento.gerenciar')
-  resumo(@Usuario() u: UsuarioToken) { return this.service.resumo(u); }
+  resumo(@Usuario() u: UsuarioToken, @Query('cnpj') cnpj?: string) { return this.service.resumo(u, cnpj); }
 
   @Get('clientes') @Requer('faturamento.gerenciar')
   clientes(@Usuario() u: UsuarioToken, @Query('todos') todos?: string) { return this.service.clientes(u, todos === '1'); }
@@ -37,7 +37,7 @@ export class FaturamentoController {
   credito(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CreditoDto) { return this.service.credito(u, id, dto); }
 
   @Get('receber') @Requer('faturamento.gerenciar')
-  receber(@Usuario() u: UsuarioToken, @Query('clienteId') clienteId?: string, @Query('status') status?: string) { return this.service.receber(u, { clienteId, status }); }
+  receber(@Usuario() u: UsuarioToken, @Query('clienteId') clienteId?: string, @Query('status') status?: string, @Query('cnpj') cnpj?: string) { return this.service.receber(u, { clienteId, status, cnpj }); }
 
   @Post('receber') @Requer('faturamento.gerenciar')
   lancar(@Usuario() u: UsuarioToken, @Body() dto: LancamentoManualDto) { return this.service.lancamentoManual(u, dto); }
@@ -52,7 +52,7 @@ export class FaturamentoController {
   cancelarLancamento(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.cancelarLancamento(u, id); }
 
   @Get('faturas') @Requer('faturamento.gerenciar')
-  faturas(@Usuario() u: UsuarioToken, @Query('status') status?: string, @Query('clienteId') clienteId?: string) { return this.service.faturas(u, { status, clienteId }); }
+  faturas(@Usuario() u: UsuarioToken, @Query('status') status?: string, @Query('clienteId') clienteId?: string, @Query('cnpj') cnpj?: string) { return this.service.faturas(u, { status, clienteId, cnpj }); }
 
   @Post('faturas') @Requer('faturamento.gerenciar')
   gerar(@Usuario() u: UsuarioToken, @Body() dto: GerarFaturaDto) { return this.service.gerarFatura(u, dto); }

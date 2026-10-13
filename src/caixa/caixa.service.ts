@@ -13,6 +13,7 @@ import { UsuarioEntity } from '../usuarios/usuario.entity';
 import { Gorjeta } from '../gorjetas/gorjeta.entity';
 import { Penhora } from './penhora.entity';
 import { moduloAtivo } from '../common/modulos';
+import { cnpjDoAmbiente, cnpjDoForm } from '../common/cnpj';
 import { UsuarioToken, temPermissao } from '../common/permissoes';
 
 const FORMAS = ['dinheiro', 'pix', 'debito', 'credito', 'faturado', 'penhora'] as const;
@@ -235,7 +236,7 @@ export class CaixaService {
       // sangria vai para o caixa ADM
       if (dto.tipo === 'sangria') {
         await m.insert(CaixaMovimento, {
-          empresaId: u.empresaId, turnoId: null, caixa: 'adm', tipo: 'sangria', forma: 'dinheiro', valor: dto.valor.toFixed(2),
+          empresaId: u.empresaId, turnoId: null, caixa: 'adm', tipo: 'sangria', forma: 'dinheiro', valor: dto.valor.toFixed(2), cnpj: await cnpjDoAmbiente(this.ds, t.ambienteId),
           descricao: `Sangria do turno ${t.numero} (${await this.ambienteNome(t.ambienteId)})${dto.descricao?.trim() ? ` · ${dto.descricao.trim()}` : ''}`,
           usuarioId: u.sub, usuarioNome: u.nome, autorizadoPor,
         });
@@ -295,11 +296,12 @@ export class CaixaService {
       });
       // tudo o que foi recebido vai para o caixa ADM, por forma (conciliação bancária):
       // dinheiro = o que foi retirado da gaveta; pix/débito/crédito = o que o sistema registrou
+      const cnpj = await cnpjDoAmbiente(m, t.ambienteId);
       const entradas: [string, number][] = [['dinheiro', retirado], ...(['pix', 'debito', 'credito'] as const).map((f) => [f, c(res.esperado[f])] as [string, number])];
       for (const [forma, cent] of entradas) {
         if (cent <= 0) continue;
         await m.insert(CaixaMovimento, {
-          empresaId: u.empresaId, turnoId: t.id, caixa: 'adm', tipo: 'entrada', forma, valor: r(cent).toFixed(2),
+          empresaId: u.empresaId, turnoId: t.id, caixa: 'adm', tipo: 'entrada', forma, valor: r(cent).toFixed(2), cnpj,
           descricao: `${forma === 'dinheiro' ? 'Dinheiro retirado no' : 'Recebido no'} fechamento · turno ${t.numero} (${amb})`, usuarioId: u.sub, usuarioNome: u.nome, autorizadoPor: null,
         });
       }
@@ -424,11 +426,14 @@ export class CaixaService {
 
   /* ---------------- caixa ADM ---------------- */
 
-  async adm(u: UsuarioToken, filtro: { de?: string; ate?: string }) {
+  async adm(u: UsuarioToken, filtro: { de?: string; ate?: string; cnpj?: string }) {
     await this.exigirModulo(u);
     const ate = filtro.ate ? new Date(`${filtro.ate}T23:59:59.999-03:00`) : new Date();
     const de = filtro.de ? new Date(`${filtro.de}T00:00:00-03:00`) : new Date(ate.getTime() - 30 * DIA);
-    const todos = await this.movimentos.find({ where: { empresaId: u.empresaId, caixa: 'adm' }, order: { criadoEm: 'DESC' } });
+    const todosEmpresa = await this.movimentos.find({ where: { empresaId: u.empresaId, caixa: 'adm' }, order: { criadoEm: 'DESC' } });
+    // vários CNPJs: cada um tem o seu caixa ADM (conciliação com o banco daquele CNPJ)
+    const fc = filtro.cnpj;
+    const todos = !fc ? todosEmpresa : fc === 'principal' ? todosEmpresa.filter((m) => !m.cnpj) : todosEmpresa.filter((m) => m.cnpj === fc.replace(/\D/g, ''));
     const sinal = (m: CaixaMovimento) => (m.tipo === 'saida' ? -1 : 1) * c(m.valor);
     const saldoPorForma: Record<string, number> = {};
     for (const m of todos) saldoPorForma[m.forma] = (saldoPorForma[m.forma] ?? 0) + sinal(m);
@@ -451,8 +456,8 @@ export class CaixaService {
     await this.exigirModulo(u);
     await this.movimentos.insert({
       empresaId: u.empresaId, turnoId: null, caixa: 'adm', tipo: dto.tipo, forma: dto.forma, valor: dto.valor.toFixed(2),
-      descricao: dto.descricao.trim(), usuarioId: u.sub, usuarioNome: u.nome, autorizadoPor: null,
+      descricao: dto.descricao.trim(), usuarioId: u.sub, usuarioNome: u.nome, autorizadoPor: null, cnpj: cnpjDoForm(dto.cnpj),
     });
-    return this.adm(u, {});
+    return this.adm(u, { cnpj: dto.cnpj });
   }
 }

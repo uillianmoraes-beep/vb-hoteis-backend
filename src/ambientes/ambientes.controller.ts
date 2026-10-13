@@ -14,6 +14,12 @@ export class AmbientesController {
     return this.service.listar(u.empresaId, inativos === 'true');
   }
 
+  /** CNPJs da conta: a empresa principal e os ambientes com CNPJ próprio */
+  @Get('cnpjs')
+  cnpjs(@Usuario() u: UsuarioToken) {
+    return this.service.cnpjs(u.empresaId);
+  }
+
   @Post()
   @Requer('ambientes.gerenciar')
   criar(@Usuario() u: UsuarioToken, @Body() dto: CriarAmbienteDto) {

@@ -45,4 +45,6 @@ export class LancamentoAdmDto {
   @IsIn(['dinheiro', 'pix', 'debito', 'credito', 'transferencia', 'boleto']) forma!: string;
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) @Max(10_000_000) valor!: number;
   @IsString() @MinLength(2) @MaxLength(300) descricao!: string;
+  /** 'principal' ou o CNPJ do ambiente */
+  @IsOptional() @IsString() @MaxLength(18) cnpj?: string;
 }

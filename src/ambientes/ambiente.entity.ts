@@ -22,6 +22,9 @@ export class Ambiente {
   @Column({ name: 'portao_unico', default: false }) portaoUnico!: boolean;
   /** a suíte paga só vai para limpeza quando o portão confere o ticket */
   @Column({ name: 'limpeza_na_saida', default: false }) limpezaNaSaida!: boolean;
+  /** CNPJ próprio deste ambiente (motel e hotel com CNPJs diferentes); vazio = o da empresa */
+  @Column({ type: 'varchar', length: 18, nullable: true }) cnpj!: string | null;
+  @Column({ name: 'razao_social', type: 'varchar', length: 150, nullable: true }) razaoSocial!: string | null;
   @Column({ default: true }) ativo!: boolean;
   @CreateDateColumn({ name: 'criado_em', type: 'timestamptz' }) criadoEm!: Date;
   @UpdateDateColumn({ name: 'atualizado_em', type: 'timestamptz' }) atualizadoEm!: Date;

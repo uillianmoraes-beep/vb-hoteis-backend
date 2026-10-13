@@ -11,8 +11,8 @@ export class DespesasController {
 
   @Get()
   @Requer('despesas.gerenciar')
-  listar(@Usuario() u: UsuarioToken, @Query('status') status?: string, @Query('de') de?: string, @Query('ate') ate?: string) {
-    return this.service.listar(u, { status, de, ate });
+  listar(@Usuario() u: UsuarioToken, @Query('status') status?: string, @Query('de') de?: string, @Query('ate') ate?: string, @Query('cnpj') cnpj?: string) {
+    return this.service.listar(u, { status, de, ate, cnpj });
   }
 
   @Post()

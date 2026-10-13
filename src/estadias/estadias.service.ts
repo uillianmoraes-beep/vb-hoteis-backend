@@ -17,6 +17,7 @@ import { Ambiente } from '../ambientes/ambiente.entity';
 import { moduloAtivo } from '../common/modulos';
 import { FUSO, Motor, TarifasService } from '../tarifas/tarifas.service';
 import { FaturamentoService } from '../faturamento/faturamento.service';
+import { cnpjDoAmbiente } from '../common/cnpj';
 import { CaixaService } from '../caixa/caixa.service';
 import { GorjetasService } from '../gorjetas/gorjetas.service';
 import { CortesiasService } from '../cortesias/cortesias.service';
@@ -727,7 +728,7 @@ export class EstadiasService {
       await m.update(Gorjeta, { estadiaId: e.id, origem: 'adicional', forma: de }, { forma: dto.forma });
       if (turno?.status === 'fechado') {
         const desc = `Correção de forma · uso ${e.numero ?? '—'} · turno ${turno.numero}: ${NOMES_FORMA[de]} → ${NOMES_FORMA[dto.forma]}`;
-        const base = { empresaId: u.empresaId, turnoId: turno.id, caixa: 'adm' as const, valor: p.valor, usuarioId: u.sub, usuarioNome: u.nome, autorizadoPor };
+        const base = { empresaId: u.empresaId, turnoId: turno.id, caixa: 'adm' as const, valor: p.valor, usuarioId: u.sub, usuarioNome: u.nome, autorizadoPor, cnpj: await cnpjDoAmbiente(m, turno.ambienteId) };
         // dinheiro já foi conferido na gaveta (a diferença ficou no fechamento); só eletrônicos são corrigidos no ADM
         if (de !== 'dinheiro') await m.insert(CaixaMovimento, { ...base, tipo: 'saida', forma: de, descricao: desc });
         if (dto.forma !== 'dinheiro') await m.insert(CaixaMovimento, { ...base, tipo: 'entrada', forma: dto.forma, descricao: desc });
