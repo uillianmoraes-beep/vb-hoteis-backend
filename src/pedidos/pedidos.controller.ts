@@ -1,6 +1,6 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { PedidosService } from './pedidos.service';
-import { CardapioDto, NovoPedidoDto, RecusarPedidoDto } from './pedidos.dto';
+import { CardapioDto, FrigobarCategoriaDto, NovoPedidoDto, RecusarPedidoDto } from './pedidos.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { Publico } from '../common/decorators/publico.decorator';
@@ -36,6 +36,15 @@ export class PedidosController {
 
   @Post('pedidos/qrcodes/:unidadeId/trocar') @HttpCode(200) @Requer('produtos.gerenciar', 'unidades.gerenciar')
   trocar(@Usuario() u: UsuarioToken, @Param('unidadeId', ParseUUIDPipe) id: string) { return this.service.trocarQr(u, id); }
+
+  @Post('pedidos/servicos-padrao') @HttpCode(200) @Requer('produtos.gerenciar')
+  servicosPadrao(@Usuario() u: UsuarioToken) { return this.service.servicosPadrao(u); }
+
+  @Get('pedidos/frigobar') @Requer('estadias.operar', 'produtos.gerenciar', 'estadias.entrada')
+  frigobar(@Usuario() u: UsuarioToken) { return this.service.frigobarCategorias(u); }
+
+  @Put('pedidos/frigobar/:categoriaId') @Requer('produtos.gerenciar')
+  salvarFrigobar(@Usuario() u: UsuarioToken, @Param('categoriaId', ParseUUIDPipe) id: string, @Body() dto: FrigobarCategoriaDto) { return this.service.salvarFrigobar(u, id, dto.itens); }
 
   @Get('pedidos/cardapio') @Requer('estadias.operar', 'produtos.gerenciar')
   cardapio(@Usuario() u: UsuarioToken) { return this.service.cardapio(u); }

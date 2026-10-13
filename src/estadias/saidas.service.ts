@@ -60,7 +60,9 @@ export class SaidasService {
         limpeza = true;
       }
     }
-    return { numero: e.numero, unidade: unidade?.codigo ?? '', placa: e.placa, situacao, hora: agora, limpeza };
+    // portão único (motel + hotel): diz de qual ambiente é o ticket
+    const amb = await this.ambientes.findOne({ where: { id: e.ambienteId } });
+    return { numero: e.numero, unidade: unidade?.codigo ?? '', tipoUnidade: unidade?.tipo ?? 'suite', ambiente: amb?.nome ?? null, ambienteTipo: amb?.tipo ?? null, placa: e.placa, situacao, hora: agora, limpeza };
   }
 
   async listar(u: UsuarioToken, filtro: { de?: string; ate?: string; ambienteId?: string }) {

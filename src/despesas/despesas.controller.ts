@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { DespesasService } from './despesas.service';
-import { ContaPagarDto, PagarContaDto } from './despesas.dto';
+import { ContaPagarDto, ImportarNfeDto, PagarContaDto } from './despesas.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
@@ -19,6 +19,12 @@ export class DespesasController {
   @Requer('despesas.gerenciar')
   criar(@Usuario() u: UsuarioToken, @Body() dto: ContaPagarDto) {
     return this.service.criar(u, dto);
+  }
+
+  @Post('importar-nfe')
+  @Requer('despesas.gerenciar')
+  importarNfe(@Usuario() u: UsuarioToken, @Body() dto: ImportarNfeDto) {
+    return this.service.importarNfe(u, dto);
   }
 
   @Patch(':id')

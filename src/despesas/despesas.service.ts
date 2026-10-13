@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { ContaPagarDto, PagarContaDto } from './despesas.dto';
+import { ContaPagarDto, ImportarNfeDto, PagarContaDto } from './despesas.dto';
 import { UsuarioToken } from '../common/permissoes';
 
 const hojeSP = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
@@ -10,6 +10,7 @@ const fmt = (v: Record<string, unknown>) => ({
   status: v.status, recorrente: v.recorrente, pagoEm: v.pago_em ? (v.pago_em instanceof Date ? v.pago_em.toISOString().slice(0, 10) : String(v.pago_em).slice(0, 10)) : null,
   valorPago: v.valor_pago === null ? null : Number(v.valor_pago), formaPagamento: v.forma_pagamento, codigoBarras: v.codigo_barras,
   observacao: v.observacao, criadoPor: v.criado_por, pagoPor: v.pago_por,
+  valorVariavel: !!v.valor_variavel, valorConfirmado: v.valor_confirmado !== false, chaveNfe: v.chave_nfe ?? null,
 });
 function maisUmMes(d: string) {
   const [a, m, dia] = d.split('-').map(Number);
@@ -36,14 +37,18 @@ export class DespesasService {
     const [tot] = await this.ds.query(
       `SELECT COALESCE(SUM(valor) FILTER (WHERE vencimento < $2),0) AS vencidas, COALESCE(SUM(valor) FILTER (WHERE vencimento BETWEEN $2 AND $3),0) AS semana,
               COALESCE(SUM(valor),0) AS abertas FROM contas_pagar WHERE empresa_id = $1 AND status = 'aberta'`, [u.empresaId, hoje, em7]);
-    return { totais: { vencidas: Number(tot.vencidas), proximos7: Number(tot.semana), abertas: Number(tot.abertas) }, hoje, lista };
+    // contas de valor que varia: perto do vencimento (10 dias) o sistema pede o valor do mês
+    const em10 = new Date(Date.now() + 10 * 86_400_000).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const aguardando = (await this.ds.query(
+      `SELECT * FROM contas_pagar WHERE empresa_id = $1 AND status = 'aberta' AND valor_confirmado = false AND vencimento <= $2 ORDER BY vencimento`, [u.empresaId, em10])).map(fmt);
+    return { totais: { vencidas: Number(tot.vencidas), proximos7: Number(tot.semana), abertas: Number(tot.abertas) }, hoje, lista, aguardandoValor: aguardando };
   }
 
   async criar(u: UsuarioToken, dto: ContaPagarDto) {
     await this.ds.query(
-      `INSERT INTO contas_pagar (empresa_id, descricao, fornecedor, categoria, valor, vencimento, recorrente, codigo_barras, observacao, criado_por) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      `INSERT INTO contas_pagar (empresa_id, descricao, fornecedor, categoria, valor, vencimento, recorrente, codigo_barras, observacao, criado_por, valor_variavel) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       [u.empresaId, dto.descricao.trim(), dto.fornecedor?.trim() || null, dto.categoria?.trim() || null, dto.valor.toFixed(2), dto.vencimento, dto.recorrente ?? 'nao',
-        dto.codigoBarras?.trim() || null, dto.observacao?.trim() || null, u.nome]);
+        dto.codigoBarras?.trim() || null, dto.observacao?.trim() || null, u.nome, (dto.recorrente ?? 'nao') === 'mensal' && !!dto.valorVariavel]);
     return { ok: true };
   }
 
@@ -57,9 +62,10 @@ export class DespesasService {
     const v = await this.buscar(u, id);
     if (v.status !== 'aberta') throw new BadRequestException('Só dá para editar conta em aberto.');
     await this.ds.query(
-      `UPDATE contas_pagar SET descricao=$3, fornecedor=$4, categoria=$5, valor=$6, vencimento=$7, recorrente=$8, codigo_barras=$9, observacao=$10 WHERE id=$1 AND empresa_id=$2`,
+      `UPDATE contas_pagar SET descricao=$3, fornecedor=$4, categoria=$5, valor=$6, vencimento=$7, recorrente=$8, codigo_barras=$9, observacao=$10,
+              valor_variavel=$11, valor_confirmado=true WHERE id=$1 AND empresa_id=$2`,
       [id, u.empresaId, dto.descricao.trim(), dto.fornecedor?.trim() || null, dto.categoria?.trim() || null, dto.valor.toFixed(2), dto.vencimento, dto.recorrente ?? 'nao',
-        dto.codigoBarras?.trim() || null, dto.observacao?.trim() || null]);
+        dto.codigoBarras?.trim() || null, dto.observacao?.trim() || null, (dto.recorrente ?? 'nao') === 'mensal' && !!dto.valorVariavel]);
     return { ok: true };
   }
 
@@ -79,11 +85,37 @@ export class DespesasService {
       if (v.recorrente === 'mensal') {
         const venc = v.vencimento instanceof Date ? v.vencimento.toISOString().slice(0, 10) : String(v.vencimento).slice(0, 10);
         await m.query(
-          `INSERT INTO contas_pagar (empresa_id, descricao, fornecedor, categoria, valor, vencimento, recorrente, observacao, criado_por) VALUES ($1,$2,$3,$4,$5,$6,'mensal',$7,$8)`,
-          [u.empresaId, v.descricao, v.fornecedor, v.categoria, v.valor, maisUmMes(venc), v.observacao, u.nome]);
+          `INSERT INTO contas_pagar (empresa_id, descricao, fornecedor, categoria, valor, vencimento, recorrente, observacao, criado_por, valor_variavel, valor_confirmado)
+           VALUES ($1,$2,$3,$4,$5,$6,'mensal',$7,$8,$9,$10)`,
+          [u.empresaId, v.descricao, v.fornecedor, v.categoria, valor.toFixed(2), maisUmMes(venc), v.observacao, u.nome, !!v.valor_variavel, !v.valor_variavel]);
       }
     });
     return { ok: true };
+  }
+
+  /** nota de compra (XML): uma conta por duplicata; pode já entrar como paga */
+  async importarNfe(u: UsuarioToken, dto: ImportarNfeDto) {
+    const [ja] = await this.ds.query(`SELECT id FROM contas_pagar WHERE empresa_id = $1 AND chave_nfe = $2 AND status <> 'cancelada' LIMIT 1`, [u.empresaId, dto.chave]);
+    if (ja) throw new BadRequestException('Esta nota fiscal já foi lançada em contas a pagar.');
+    const hoje = hojeSP();
+    await this.ds.transaction(async (m) => {
+      const n = dto.parcelas.length;
+      for (const [i, p] of dto.parcelas.entries()) {
+        const desc = `NF ${dto.numero}${n > 1 ? ` · parcela ${i + 1}/${n}` : ''}`;
+        const [c] = await m.query(
+          `INSERT INTO contas_pagar (empresa_id, descricao, fornecedor, categoria, valor, vencimento, recorrente, observacao, criado_por, chave_nfe)
+           VALUES ($1,$2,$3,$4,$5,$6,'nao',$7,$8,$9) RETURNING id`,
+          [u.empresaId, desc, dto.fornecedor.trim(), dto.categoria?.trim() || 'Fornecedores', p.valor.toFixed(2), p.vencimento, `Importada do XML · chave ${dto.chave}`, u.nome, dto.chave]);
+        if (dto.pagaCom) {
+          await m.query(`UPDATE contas_pagar SET status='paga', pago_em=$2, valor_pago=valor, forma_pagamento=$3, pago_por=$4 WHERE id=$1`, [c.id, hoje, dto.pagaCom, u.nome]);
+          if ((dto.lancarCaixa ?? 'sim') === 'sim') {
+            await m.query(`INSERT INTO caixa_movimentos (empresa_id, turno_id, caixa, tipo, forma, valor, descricao, categoria, usuario_id, usuario_nome) VALUES ($1, NULL, 'adm', 'saida', $2, $3, $4, $5, $6, $7)`,
+              [u.empresaId, dto.pagaCom, p.valor.toFixed(2), `Conta paga: ${desc} · ${dto.fornecedor}`.slice(0, 300), dto.categoria?.trim() || 'Fornecedores', u.sub, u.nome]);
+          }
+        }
+      }
+    });
+    return { ok: true, parcelas: dto.parcelas.length };
   }
 
   async cancelar(u: UsuarioToken, id: string) {
