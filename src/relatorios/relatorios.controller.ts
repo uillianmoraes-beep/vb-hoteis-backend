@@ -8,6 +8,12 @@ import { UsuarioToken } from '../common/permissoes';
 export class RelatoriosController {
   constructor(private readonly service: RelatoriosService) {}
 
+  @Get('dashboard')
+  @Requer('relatorios.ver')
+  dashboard(@Usuario() u: UsuarioToken, @Query('dias') dias?: string, @Query('ambienteId') ambienteId?: string) {
+    return this.service.dashboard(u, { dias: Number(dias) || 30, ambienteId });
+  }
+
   /** Vendas e usos do período: totais, por forma de pagamento, por categoria e a lista de contas fechadas. */
   @Get('vendas')
   @Requer('relatorios.ver')

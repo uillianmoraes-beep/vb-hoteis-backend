@@ -29,6 +29,7 @@ import { FuncionariosModule } from './funcionarios/funcionarios.module';
 import { BalcaoModule } from './balcao/balcao.module';
 import { DespesasModule } from './despesas/despesas.module';
 import { FichasModule } from './fichas/fichas.module';
+import { EnxovalModule } from './enxoval/enxoval.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { FichasModule } from './fichas/fichas.module';
     BalcaoModule,
     DespesasModule,
     FichasModule,
+    EnxovalModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },
