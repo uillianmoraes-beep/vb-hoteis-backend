@@ -24,7 +24,7 @@ export class EmpresasService {
   }
 
   /** Aceita só nome de tema simples e cores hexadecimais dos status conhecidos. */
-  private limparAparencia(a: { tema?: string; cores?: Record<string, string> }) {
+  private limparAparencia(a: { tema?: string; cores?: Record<string, string>; menu?: string }) {
     const tema = typeof a.tema === 'string' && /^[a-z0-9-]{1,30}$/.test(a.tema) ? a.tema : 'dia';
     const cores: Record<string, string> = {};
     for (const [st, cor] of Object.entries(a.cores ?? {})) {
@@ -32,6 +32,8 @@ export class EmpresasService {
         cores[st] = cor.toUpperCase();
       }
     }
-    return { tema, cores };
+    // cor própria do menu lateral (opcional)
+    const menu = typeof a.menu === 'string' && /^#[0-9a-fA-F]{6}$/.test(a.menu) ? a.menu.toUpperCase() : undefined;
+    return menu ? { tema, cores, menu } : { tema, cores };
   }
 }

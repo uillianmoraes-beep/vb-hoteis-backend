@@ -9,7 +9,7 @@ export class Empresa {
   /** Termos renomeados pelo estabelecimento, ex.: { "suite": "cabine", "recepcao": "telefonista" } */
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) vocabulario!: Record<string, string>;
   /** Tema e cores dos status escolhidos pela empresa, ex.: { "tema": "dia", "cores": { "livre": "#16A34A" } } */
-  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) aparencia!: { tema?: string; cores?: Record<string, string> };
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) aparencia!: { tema?: string; cores?: Record<string, string>; menu?: string };
   /** tributação do serviço de hospedagem (NFS-e) */
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) fiscal!: { hospedagem?: DadosFiscais };
   /** perguntas da pesquisa de satisfação (null = padrão) */
