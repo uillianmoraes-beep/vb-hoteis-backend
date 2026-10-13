@@ -154,6 +154,11 @@ export class ReservasService {
     } as never);
     const estadiaId = (e as unknown as { id: string }).id;
     await this.ds.query(`UPDATE reservas SET status='hospedada', estadia_id=$3, atualizado_em=now() WHERE id=$1 AND empresa_id=$2`, [id, u.empresaId, estadiaId]);
+    // a conta passa a cobrar o valor combinado na reserva (se tiver valor)
+    if (Number(r.valor_total) > 0) {
+      await this.ds.query(`UPDATE estadias SET total_combinado = $2, diaria_combinada = $3, saida_prevista = $4 WHERE id = $1`,
+        [estadiaId, Number(r.valor_total).toFixed(2), Number(r.valor_diaria) > 0 ? Number(r.valor_diaria).toFixed(2) : (Number(r.valor_total) / Math.max(1, noites(dia(r.chegada), dia(r.saida)))).toFixed(2), dia(r.saida)]);
+    }
     // já deixa a ficha FNRH começada com o que a reserva tem
     try {
       const dados: Record<string, unknown> = { nome: r.hospede, checkin: `${dia(r.chegada)}T14:00`, checkout: `${dia(r.saida)}T12:00` };

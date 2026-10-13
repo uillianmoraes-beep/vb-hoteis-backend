@@ -16,6 +16,7 @@ import { Empresa } from '../empresas/empresa.entity';
 import { Ambiente } from '../ambientes/ambiente.entity';
 import { moduloAtivo } from '../common/modulos';
 import { FUSO, Motor, TarifasService } from '../tarifas/tarifas.service';
+import { FaturamentoService } from '../faturamento/faturamento.service';
 import { CaixaService } from '../caixa/caixa.service';
 import { GorjetasService } from '../gorjetas/gorjetas.service';
 import { CortesiasService } from '../cortesias/cortesias.service';
@@ -82,6 +83,7 @@ export class EstadiasService {
     private readonly caixa: CaixaService,
     private readonly gorjetas: GorjetasService,
     private readonly cortesias: CortesiasService,
+    private readonly faturamento: FaturamentoService,
     private readonly ds: DataSource,
   ) {}
 
@@ -105,8 +107,32 @@ export class EstadiasService {
       consumo,
     });
     const tabela = motor.tabelas.find((t) => t.id === e.tabelaId);
+    if (e.totalCombinado !== null && e.totalCombinado !== undefined && e.saidaPrevista) {
+      return { ...this.contaCombinada(e, fim, consumo), minutosUso, tabelaNome: 'Reserva', parado: e.status === 'conta_entregue', pacote: null };
+    }
     const pacote = e.periodoMinimoId ? periodos.find((p) => p.id === e.periodoMinimoId)?.nome ?? null : null;
     return { ...r, minutosUso, tabelaNome: tabela?.nome ?? null, parado: e.status === 'conta_entregue', pacote };
+  }
+
+  /**
+   * Hotel com reserva: cobra o total combinado; se passar da saída prevista
+   * (check-out até as 14h), cada dia a mais é mais uma diária combinada.
+   */
+  private contaCombinada(e: Estadia, fim: Date, consumo: number): ResultadoCalc {
+    const partes = new Intl.DateTimeFormat('sv-SE', { timeZone: FUSO, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false }).formatToParts(fim);
+    const pt = (t: string) => partes.find((p) => p.type === t)?.value ?? '00';
+    const diaFim = `${pt('year')}-${pt('month')}-${pt('day')}`;
+    const hora = Number(pt('hour')) % 24;
+    const saida = String(e.saidaPrevista).slice(0, 10);
+    const dif = Math.round((Date.parse(`${diaFim}T12:00:00Z`) - Date.parse(`${saida}T12:00:00Z`)) / 86_400_000);
+    const extras = dif < 0 || (dif === 0 && hora < 14) ? 0 : dif + (hora >= 14 ? 1 : 0);
+    const diaria = centavos(Number(e.diariaCombinada ?? 0));
+    const hosp = centavos(Number(e.totalCombinado ?? 0)) + extras * diaria;
+    return {
+      periodoNome: extras ? `Reserva + ${extras} diária(s) extra` : 'Reserva (valor combinado)',
+      valorHospedagem: hosp, horasAdicionais: 0, valorPessoas: 0, pessoasExtras: 0, consumo, total: hosp + consumo,
+      proximaViradaMin: null, proximoNome: null, trechoInicio: 0, trechoFim: null, semPreco: false,
+    };
   }
 
   private async consumoDe(ids: string[]): Promise<Map<string, number>> {
@@ -259,6 +285,7 @@ export class EstadiasService {
         forma: p.forma, valor, recebido, troco, trocoDestino, gorjetaPara: trocoDestino === 'gorjeta' ? p.gorjetaPara?.trim() || 'Casa' : null,
         gorjetaUsuarioId: p.gorjetaUsuarioId ?? null, gorjetaAdicional: centavos(p.gorjetaAdicional ?? 0),
         penhoraItem: p.forma === 'penhora' ? p.penhoraItem?.trim() || '' : '', penhoraContato: p.forma === 'penhora' ? p.penhoraContato?.trim() || null : null,
+        clienteFaturadoId: p.forma === 'faturado' ? p.clienteFaturadoId ?? null : null,
       };
     });
   }
@@ -621,6 +648,10 @@ export class EstadiasService {
             valor: reais(p.valor), item: p.penhoraItem, contato: p.penhoraContato, status: 'aberta', usuarioNome: u.nome,
           });
           await this.registrar(m, u, id, 'penhora', `Penhora: ${p.penhoraItem} garante ${brl(p.valor)}${p.penhoraContato ? ` · contato ${p.penhoraContato}` : ''}`);
+        }
+        if (p.forma === 'faturado') {
+          const quando = new Date(e.entradaEm).toLocaleDateString('pt-BR', { timeZone: FUSO });
+          await this.faturamento.lancarDaConta(m, u, p.clienteFaturadoId, e.id, p.valor, `Uso nº ${e.numero ?? '—'} · ${unidade.codigo} · ${quando}${e.placa ? ` · ${e.placa}` : ''}`);
         }
       }
       // gorjetas identificadas: troco deixado e valor a mais no cartão/pix

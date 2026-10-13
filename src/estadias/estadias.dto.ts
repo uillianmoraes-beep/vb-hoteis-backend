@@ -39,6 +39,8 @@ export class PagamentoDto {
   @IsOptional() @IsString() @MaxLength(200) penhoraItem?: string;
   /** penhora: nome ou telefone para contato (opcional) */
   @IsOptional() @IsString() @MaxLength(120) penhoraContato?: string;
+  /** faturado: cliente (empresa/convênio) que vai pagar depois */
+  @IsOptional() @IsUUID() clienteFaturadoId?: string;
 }
 
 export class NotaFiscalDto {

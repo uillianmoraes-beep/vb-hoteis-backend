@@ -23,6 +23,10 @@ export class Estadia {
   @Column({ name: 'pausado_min', type: 'int', default: 0 }) pausadoMin!: number;
   /** Pacote: cobra no mínimo este período. */
   @Column({ name: 'periodo_minimo_id', type: 'uuid', nullable: true }) periodoMinimoId!: string | null;
+  /** Hotel com reserva: diária combinada, total combinado e saída prevista (a conta usa isto em vez da tabela). */
+  @Column({ name: 'diaria_combinada', type: 'numeric', precision: 10, scale: 2, nullable: true }) diariaCombinada!: string | null;
+  @Column({ name: 'total_combinado', type: 'numeric', precision: 10, scale: 2, nullable: true }) totalCombinado!: string | null;
+  @Column({ name: 'saida_prevista', type: 'date', nullable: true }) saidaPrevista!: string | null;
   @Column({ name: 'valor_consumo', type: 'numeric', precision: 10, scale: 2, nullable: true }) valorConsumo!: string | null;
   @Column({ name: 'saida_em', type: 'timestamptz', nullable: true }) saidaEm!: Date | null;
   @Column({ name: 'periodo_nome', type: 'varchar', length: 60, nullable: true }) periodoNome!: string | null;

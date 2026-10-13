@@ -30,6 +30,8 @@ import { BalcaoModule } from './balcao/balcao.module';
 import { DespesasModule } from './despesas/despesas.module';
 import { FichasModule } from './fichas/fichas.module';
 import { ReservasModule } from './reservas/reservas.module';
+import { FaturamentoModule } from './faturamento/faturamento.module';
+import { CafeModule } from './cafe/cafe.module';
 import { EnxovalModule } from './enxoval/enxoval.module';
 
 @Module({
@@ -72,6 +74,8 @@ import { EnxovalModule } from './enxoval/enxoval.module';
     DespesasModule,
     FichasModule,
     ReservasModule,
+    FaturamentoModule,
+    CafeModule,
     EnxovalModule,
   ],
   providers: [
