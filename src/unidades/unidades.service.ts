@@ -145,6 +145,7 @@ export class UnidadesService {
     if (await this.estadias.exists({ where: { unidadeId: unidade.id, status: In(['aberta', 'conta_entregue']) } })) {
       throw new BadRequestException('Esta unidade tem uma conta aberta. Use entregar, fechar ou cancelar a conta.');
     }
+    if (novo === 'paga') throw new BadRequestException('A suíte fica paga só pelo fechamento da conta.');
     // No motel, ocupar só pela entrada (para a conta correr)
     if ((novo === 'ocupada' || novo === 'conta_entregue') && unidade.ambiente?.tipo === 'motel') {
       throw new BadRequestException('No motel, use "Dar entrada" para ocupar a unidade.');

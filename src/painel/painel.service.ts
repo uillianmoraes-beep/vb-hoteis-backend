@@ -14,12 +14,13 @@ const ALERTA_MINUTOS: Partial<Record<StatusUnidade, number>> = {
   limpeza: 40,
   vistoria: 15,
   conta_entregue: 10,
+  paga: 20,
 };
 
 export interface AlertaPainel {
   unidadeId: string;
   codigo: string;
-  tipo: 'limpeza_demorada' | 'vistoria_aguardando' | 'conta_aguardando' | 'bloqueada' | 'vira_periodo' | 'saiu_sem_fechar';
+  tipo: 'limpeza_demorada' | 'vistoria_aguardando' | 'conta_aguardando' | 'bloqueada' | 'vira_periodo' | 'saiu_sem_fechar' | 'paga_sem_sair';
   mensagem: string;
   minutos: number;
   urgencia: number;
@@ -69,6 +70,9 @@ export class PainelService {
       } else if (x.status === 'vistoria' && limite !== undefined && minutos >= limite) {
         alertas.push({ unidadeId: x.id, codigo: x.codigo, tipo: 'vistoria_aguardando', minutos,
           mensagem: `Aguardando vistoria há ${minutos} min`, urgencia: 2 });
+      } else if (x.status === 'paga' && limite !== undefined && minutos >= limite) {
+        alertas.push({ unidadeId: x.id, codigo: x.codigo, tipo: 'paga_sem_sair', minutos,
+          mensagem: `Paga há ${minutos} min e não passou no portão`, urgencia: 2 });
       } else if (x.status === 'conta_entregue' && limite !== undefined && minutos >= limite) {
         alertas.push({ unidadeId: x.id, codigo: x.codigo, tipo: 'conta_aguardando', minutos,
           mensagem: `Conta entregue há ${minutos} min`, urgencia: 3 });

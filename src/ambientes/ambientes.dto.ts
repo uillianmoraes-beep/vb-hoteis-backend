@@ -7,6 +7,7 @@ export class CriarAmbienteDto {
   @IsOptional() @IsString() @MaxLength(9) cor?: string;
   @IsOptional() @IsInt() ordem?: number;
   @IsOptional() @IsBoolean() portaoUnico?: boolean;
+  @IsOptional() @IsBoolean() limpezaNaSaida?: boolean;
 }
 
 export class AtualizarAmbienteDto {
@@ -16,4 +17,5 @@ export class AtualizarAmbienteDto {
   @IsOptional() @IsInt() ordem?: number;
   @IsOptional() @IsBoolean() ativo?: boolean;
   @IsOptional() @IsBoolean() portaoUnico?: boolean;
+  @IsOptional() @IsBoolean() limpezaNaSaida?: boolean;
 }

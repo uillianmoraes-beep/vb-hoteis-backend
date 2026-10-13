@@ -71,6 +71,7 @@ export const STATUS_UNIDADE = [
   'livre',
   'ocupada',
   'conta_entregue',
+  'paga',
   'limpeza',
   'vistoria',
   'bloqueada',

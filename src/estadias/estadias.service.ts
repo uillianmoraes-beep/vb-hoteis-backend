@@ -13,6 +13,7 @@ import { UsuarioEntity } from '../usuarios/usuario.entity';
 import { Perfil } from '../perfis/perfil.entity';
 import { Produto } from '../produtos/produto.entity';
 import { Empresa } from '../empresas/empresa.entity';
+import { Ambiente } from '../ambientes/ambiente.entity';
 import { moduloAtivo } from '../common/modulos';
 import { FUSO, Motor, TarifasService } from '../tarifas/tarifas.service';
 import { CaixaService } from '../caixa/caixa.service';
@@ -623,7 +624,10 @@ export class EstadiasService {
         : 'cortesia';
       await this.registrar(m, u, id, 'fechamento',
         `Fechada: ${brl(total)} · ${resumoPag}${desconto ? ` · desconto ${brl(desconto)}` : ''}${acrescimo ? ` · acréscimo ${brl(acrescimo)}` : ''}${autorizadoPor ? ` · liberado por ${autorizadoPor}` : ''}`);
-      await this.mudarUnidade(m, u, unidade, 'limpeza', `Saída · ${brl(total)}`);
+      // motel com portão: a suíte fica "paga" até o ticket ser conferido na saída
+      const amb = await m.findOne(Ambiente, { where: { id: e.ambienteId } });
+      if (amb?.limpezaNaSaida && !e.saidaPortariaEm) await this.mudarUnidade(m, u, unidade, 'paga', `Paga · ${brl(total)} · aguardando saída`);
+      else await this.mudarUnidade(m, u, unidade, 'limpeza', `Saída · ${brl(total)}`);
     });
     return this.detalhe(u, id);
   }

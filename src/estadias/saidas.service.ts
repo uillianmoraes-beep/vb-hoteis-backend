@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
+import { UnidadeEvento } from '../unidades/unidade-evento.entity';
 import { Estadia } from './estadia.entity';
 import { EstadiaEvento } from './estadia-evento.entity';
 import { Unidade } from '../unidades/unidade.entity';
@@ -19,6 +20,7 @@ export class SaidasService {
     @InjectRepository(EstadiaEvento) private readonly eventos: Repository<EstadiaEvento>,
     @InjectRepository(Unidade) private readonly unidades: Repository<Unidade>,
     @InjectRepository(Ambiente) private readonly ambientes: Repository<Ambiente>,
+    private readonly ds: DataSource,
   ) {}
 
   async registrar(u: UsuarioToken, dto: RegistrarSaidaDto) {
@@ -43,7 +45,22 @@ export class SaidasService {
       empresaId: u.empresaId, estadiaId: e.id, tipo: 'saida', usuarioId: u.sub, usuarioNome: u.nome,
       descricao: `Saída no portão (ticket nº ${e.numero})${situacao === 'pendente' ? ' · conta ainda não fechada no sistema' : ''}`,
     });
-    return { numero: e.numero, unidade: unidade?.codigo ?? '', placa: e.placa, situacao, hora: agora };
+    // suíte paga esperando a saída: agora vai para limpeza
+    let limpeza = false;
+    if (unidade?.status === 'paga' && e.status === 'fechada') {
+      const outra = await this.repo.findOne({ where: { unidadeId: unidade.id, status: In(['aberta', 'conta_entregue']) } });
+      if (!outra) {
+        await this.ds.transaction(async (m) => {
+          await m.update(Unidade, { id: unidade.id }, { status: 'limpeza', statusDesde: agora, motivoBloqueioId: null, observacaoStatus: null });
+          await m.insert(UnidadeEvento, {
+            empresaId: u.empresaId, unidadeId: unidade.id, statusAnterior: 'paga', statusNovo: 'limpeza',
+            motivoBloqueioId: null, observacao: `Saiu pelo portão (ticket nº ${e.numero})`, usuarioId: u.sub, usuarioNome: u.nome,
+          });
+        });
+        limpeza = true;
+      }
+    }
+    return { numero: e.numero, unidade: unidade?.codigo ?? '', placa: e.placa, situacao, hora: agora, limpeza };
   }
 
   async listar(u: UsuarioToken, filtro: { de?: string; ate?: string; ambienteId?: string }) {
