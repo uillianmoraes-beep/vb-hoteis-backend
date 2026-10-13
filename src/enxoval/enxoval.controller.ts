@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Ip, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { EnxovalService } from './enxoval.service';
-import { KitDto, MovimentoEnxovalDto, TipoEnxovalDto } from './enxoval.dto';
+import { AssinarRelatorioDto, KitDto, MovimentoEnxovalDto, NovoRelatorioDto, ResponsavelEnxovalDto, TipoEnxovalDto } from './enxoval.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
@@ -44,4 +44,34 @@ export class EnxovalController {
   kit(@Usuario() u: UsuarioToken, @Body() dto: KitDto) {
     return this.service.salvarKit(u, dto);
   }
+
+  @Get('lotes') @Requer('enxoval.gerenciar', 'governanca.operar')
+  lotes(@Usuario() u: UsuarioToken) { return this.service.lotes(u); }
+
+  @Get('lotes/:chave') @Requer('enxoval.gerenciar', 'governanca.operar', 'enxoval.aprovar')
+  lote(@Usuario() u: UsuarioToken, @Param('chave') chave: string) { return this.service.lote(u, chave.slice(0, 40)); }
+
+  @Get('movimentos/:id/fotos') @Requer('enxoval.gerenciar', 'governanca.operar', 'enxoval.aprovar')
+  fotos(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.fotosMovimento(u, id); }
+
+  @Get('config') @Requer('enxoval.gerenciar', 'enxoval.aprovar')
+  config(@Usuario() u: UsuarioToken) { return this.service.config(u); }
+
+  @Put('config/responsavel') @Requer('enxoval.aprovar', 'usuarios.gerenciar')
+  responsavel(@Usuario() u: UsuarioToken, @Body() dto: ResponsavelEnxovalDto) { return this.service.definirResponsavel(u, dto.usuarioId); }
+
+  @Get('relatorios') @Requer('enxoval.gerenciar', 'enxoval.aprovar')
+  relatorios(@Usuario() u: UsuarioToken) { return this.service.relatorios(u); }
+
+  @Post('relatorios') @Requer('enxoval.gerenciar', 'enxoval.aprovar')
+  criarRelatorio(@Usuario() u: UsuarioToken, @Body() dto: NovoRelatorioDto) { return this.service.criarRelatorio(u, dto); }
+
+  @Get('relatorios/:id') @Requer('enxoval.gerenciar', 'enxoval.aprovar')
+  relatorio(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.relatorio(u, id); }
+
+  @Delete('relatorios/:id') @Requer('enxoval.gerenciar', 'enxoval.aprovar')
+  excluir(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.excluirRascunho(u, id); }
+
+  @Post('relatorios/:id/assinar') @HttpCode(200) @Requer('enxoval.gerenciar', 'enxoval.aprovar')
+  assinar(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: AssinarRelatorioDto, @Ip() ip: string) { return this.service.assinar(u, id, dto, ip ?? ''); }
 }
