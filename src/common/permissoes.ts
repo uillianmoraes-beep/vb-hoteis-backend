@@ -8,6 +8,7 @@ export const PERMISSOES = {
   'unidades.bloquear': 'Bloquear unidade com motivo',
   'unidades.desbloquear': 'Desbloquear unidade',
   'unidades.gerenciar': 'Cadastrar e editar unidades',
+  'reservas.gerenciar': 'Reservas do hotel: criar, alterar, cancelar e fazer o check-in',
   'governanca.operar': 'Tela da governança (limpeza, vistoria, camareiras)',
   'enxoval.gerenciar': 'Enxoval: tipos de peça, kits, compras, lavanderia e perdas',
   'estadias.operar': 'Dar entrada, entregar e fechar contas',
@@ -44,7 +45,7 @@ export type Permissao = keyof typeof PERMISSOES;
 
 /** Agrupamento por módulo, para montar perfis marcando o módulo inteiro. */
 export const GRUPOS_PERMISSAO: { grupo: string; permissoes: Permissao[] }[] = [
-  { grupo: 'Recepção e painel', permissoes: ['painel.ver', 'unidades.status', 'unidades.bloquear', 'unidades.desbloquear'] },
+  { grupo: 'Recepção e painel', permissoes: ['painel.ver', 'unidades.status', 'unidades.bloquear', 'unidades.desbloquear', 'reservas.gerenciar'] },
   { grupo: 'Contas (telefonista)', permissoes: ['estadias.operar', 'estadias.cancelar', 'estadias.corrigir', 'estadias.estornar', 'pagamentos.corrigir', 'cortesias.gerenciar'] },
   { grupo: 'Portaria e saída', permissoes: ['estadias.entrada', 'saida.registrar'] },
   { grupo: 'Governança (limpeza)', permissoes: ['governanca.operar', 'enxoval.gerenciar'] },

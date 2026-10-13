@@ -29,6 +29,7 @@ import { FuncionariosModule } from './funcionarios/funcionarios.module';
 import { BalcaoModule } from './balcao/balcao.module';
 import { DespesasModule } from './despesas/despesas.module';
 import { FichasModule } from './fichas/fichas.module';
+import { ReservasModule } from './reservas/reservas.module';
 import { EnxovalModule } from './enxoval/enxoval.module';
 
 @Module({
@@ -70,6 +71,7 @@ import { EnxovalModule } from './enxoval/enxoval.module';
     BalcaoModule,
     DespesasModule,
     FichasModule,
+    ReservasModule,
     EnxovalModule,
   ],
   providers: [

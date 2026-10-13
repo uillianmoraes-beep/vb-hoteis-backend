@@ -295,7 +295,13 @@ export class EstadiasService {
     const unidade = await this.unidades.findOne({ where: { id: dto.unidadeId, empresaId: u.empresaId, ativo: true } });
     if (!unidade) throw new NotFoundException('Unidade não encontrada.');
     if (!this.podeVer(u, unidade.ambienteId)) throw new ForbiddenException('Unidade de outro ambiente.');
-    if (!['livre', 'reservada'].includes(unidade.status)) {
+    // hotel: quarto marcado "ocupado" à mão (sem conta) também pode receber o check-in
+    let ocupadaSemConta = false;
+    if (unidade.status === 'ocupada') {
+      const [aberta] = await this.ds.query(`SELECT id FROM estadias WHERE unidade_id = $1 AND status IN ('aberta','conta_entregue') LIMIT 1`, [unidade.id]);
+      ocupadaSemConta = !aberta;
+    }
+    if (!['livre', 'reservada'].includes(unidade.status) && !ocupadaSemConta) {
       throw new BadRequestException(`A unidade ${unidade.codigo} não está livre (está como ${unidade.status}).`);
     }
     const motor = await this.tarifas.motor(u.empresaId, unidade.ambienteId);
