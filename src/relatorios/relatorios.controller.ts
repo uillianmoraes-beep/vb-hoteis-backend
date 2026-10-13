@@ -11,7 +11,7 @@ export class RelatoriosController {
   /** Vendas e usos do período: totais, por forma de pagamento, por categoria e a lista de contas fechadas. */
   @Get('vendas')
   @Requer('relatorios.ver')
-  vendas(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string, @Query('ambienteId') ambienteId?: string) {
-    return this.service.vendas(u, { de, ate, ambienteId });
+  vendas(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string, @Query('ambienteId') ambienteId?: string, @Query('forma') forma?: string) {
+    return this.service.vendas(u, { de, ate, ambienteId, forma });
   }
 }

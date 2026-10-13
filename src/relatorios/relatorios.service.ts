@@ -22,16 +22,23 @@ export class RelatoriosService {
     @InjectRepository(Categoria) private readonly categorias: Repository<Categoria>,
   ) {}
 
-  async vendas(u: UsuarioToken, filtro: { de?: string; ate?: string; ambienteId?: string }) {
+  async vendas(u: UsuarioToken, filtro: { de?: string; ate?: string; ambienteId?: string; forma?: string }) {
     const ate = filtro.ate ? new Date(`${filtro.ate}T23:59:59.999-03:00`) : new Date();
     const de = filtro.de ? new Date(`${filtro.de}T00:00:00-03:00`) : new Date(ate.getTime() - 7 * DIA);
     const qb = this.estadias.createQueryBuilder('e').where('e.empresaId = :emp', { emp: u.empresaId })
       .andWhere(`e.status = 'fechada'`).andWhere('e.saidaEm BETWEEN :de AND :ate', { de, ate });
     if (u.ambientesIds?.length) qb.andWhere('e.ambienteId IN (:...amb)', { amb: u.ambientesIds });
     if (filtro.ambienteId) qb.andWhere('e.ambienteId = :a', { a: filtro.ambienteId });
-    const ests: Estadia[] = await qb.orderBy('e.saidaEm', 'DESC').limit(5000).getMany();
-    const ids = ests.map((e) => e.id);
-    const pags = ids.length ? await this.pagamentos.find({ where: { estadiaId: In(ids) } }) : [];
+    let ests: Estadia[] = await qb.orderBy('e.saidaEm', 'DESC').limit(5000).getMany();
+    let pags = ests.length ? await this.pagamentos.find({ where: { estadiaId: In(ests.map((e) => e.id)) } }) : [];
+    // filtro por forma: só as contas que tiveram pagamento nessa forma
+    if (filtro.forma) {
+      const com = new Set(pags.filter((p) => p.forma === filtro.forma).map((p) => p.estadiaId));
+      ests = ests.filter((e) => com.has(e.id));
+      pags = pags.filter((p) => com.has(p.estadiaId));
+    }
+    const pagsDe = new Map<string, { forma: string; valor: number }[]>();
+    for (const p of pags) pagsDe.set(p.estadiaId, [...(pagsDe.get(p.estadiaId) ?? []), { forma: p.forma, valor: Number(p.valor) }]);
     const unis = ests.length ? await this.unidades.find({ where: { id: In([...new Set(ests.map((e) => e.unidadeId))]) } }) : [];
     const cats = await this.categorias.find({ where: { empresaId: u.empresaId } });
     const ambs = await this.ambientes.find({ where: { empresaId: u.empresaId } });
@@ -78,7 +85,7 @@ export class RelatoriosService {
         id: e.id, uso: e.numero, unidade: mapU.get(e.unidadeId)?.codigo ?? '—', ambiente: mapA.get(e.ambienteId) ?? '',
         entradaEm: e.entradaEm, saidaEm: e.saidaEm, periodo: e.periodoNome, placa: e.placa,
         hospedagem: r(c(e.valorHospedagem) + c(e.valorPessoas)), consumo: r(c(e.valorConsumo)), desconto: Number(e.desconto), total: Number(e.valorTotal ?? 0),
-        formas: [...new Set(formasDe.get(e.id) ?? [])], fechadoPor: e.usuarioSaidaNome, cortesia: e.cortesiaNome,
+        formas: [...new Set(formasDe.get(e.id) ?? [])], pagamentos: pagsDe.get(e.id) ?? [], fechadoPor: e.usuarioSaidaNome, cortesia: e.cortesiaNome,
       })),
     };
   }
