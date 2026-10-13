@@ -89,6 +89,15 @@ export class PedidosService {
     return p;
   }
 
+  /** um pedido, para imprimir o ticket do bar/cozinha */
+  async um(u: UsuarioToken, id: string) {
+    const [p] = await this.ds.query(
+      `SELECT p.*, un.codigo, un.tipo, un.ambiente_id, e.nome AS empresa FROM pedidos p JOIN unidades un ON un.id = p.unidade_id JOIN empresas e ON e.id = p.empresa_id
+        WHERE p.id = $1 AND p.empresa_id = $2`, [id, u.empresaId]);
+    if (!p) throw new NotFoundException('Pedido não encontrado.');
+    return { ...fmt(p), tipo: p.tipo, empresa: p.empresa };
+  }
+
   /** aceita e lança cada item na conta da suíte/quarto */
   async aceitar(u: UsuarioToken, id: string) {
     const p = await this.pedido(u, id);

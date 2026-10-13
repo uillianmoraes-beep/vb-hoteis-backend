@@ -42,4 +42,8 @@ export class PedidosController {
 
   @Patch('pedidos/cardapio/:produtoId') @Requer('produtos.gerenciar')
   marcar(@Usuario() u: UsuarioToken, @Param('produtoId', ParseUUIDPipe) id: string, @Body() dto: CardapioDto) { return this.service.marcarCardapio(u, id, dto.cardapio); }
+
+  // por último: senão o ':id' engoliria /pendentes, /historico…
+  @Get('pedidos/:id') @Requer('painel.ver', 'estadias.operar', 'estadias.entrada')
+  um(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.um(u, id); }
 }
