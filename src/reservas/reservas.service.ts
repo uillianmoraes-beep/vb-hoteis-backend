@@ -23,7 +23,7 @@ const fmt = (r: Record<string, unknown>) => ({
   chegada: dia(r.chegada), saida: dia(r.saida), noites: noites(dia(r.chegada), dia(r.saida)),
   adultos: r.adultos, criancas: r.criancas, valorDiaria: Number(r.valor_diaria), valorTotal: Number(r.valor_total),
   sinal: Number(r.sinal), sinalForma: r.sinal_forma, origem: r.origem, observacao: r.observacao, status: r.status,
-  estadiaId: r.estadia_id, motivoCancelamento: r.motivo_cancelamento, criadoPor: r.criado_por, criadoEm: r.criado_em,
+  estadiaId: r.estadia_id, nova: !r.vista_em, motivoCancelamento: r.motivo_cancelamento, criadoPor: r.criado_por, criadoEm: r.criado_em,
 });
 
 @Injectable()
@@ -103,8 +103,8 @@ export class ReservasService {
       const linha = Array.isArray(c?.[0]) ? c[0][0] : c?.[0];
       const [nova] = await m.query(
         `INSERT INTO reservas (empresa_id, numero, unidade_id, ambiente_id, hospede, telefone, email, documento, chegada, saida, adultos, criancas, valor_diaria,
-           valor_total, sinal, sinal_forma, origem, observacao, status, criado_por)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) RETURNING id, numero`,
+           valor_total, sinal, sinal_forma, origem, observacao, status, criado_por, vista_em)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, now()) RETURNING id, numero`,
         [u.empresaId, linha ? Number(linha.ultima_reserva) : null, dto.unidadeId, q.ambiente_id, ...this.campos(dto),
           total.toFixed(2), (dto.sinal ?? 0).toFixed(2), (dto.sinal ?? 0) > 0 ? dto.sinalForma : null, dto.origem?.trim() || null,
           dto.observacao?.trim() || null, dto.status ?? 'confirmada', u.nome]);
@@ -131,6 +131,59 @@ export class ReservasService {
     if (!['pendente', 'confirmada'].includes(r.status)) throw new BadRequestException('Esta reserva já foi hospedada ou cancelada.');
     await this.ds.query(`UPDATE reservas SET status=$3, motivo_cancelamento=$4, atualizado_em=now() WHERE id=$1 AND empresa_id=$2`,
       [id, u.empresaId, dto.tipo ?? 'cancelada', dto.motivo?.trim() || null]);
+    return { ok: true };
+  }
+
+  /**
+   * Dados do hotel para o painel em lista / linha do tempo: hóspede, FNRH, saída prevista,
+   * chegada de hoje, próxima reserva e reservas novas ainda não vistas (piscam).
+   */
+  async painel(u: UsuarioToken, ambienteId?: string) {
+    const hoje = hojeSP();
+    const params: unknown[] = [u.empresaId];
+    let filtroAmb = '';
+    if (ambienteId && /^[0-9a-f-]{36}$/i.test(ambienteId)) { params.push(ambienteId); filtroAmb = ` AND un.ambiente_id = $${params.length}`; }
+    const contas = await this.ds.query(
+      `SELECT e.id, e.unidade_id, e.saida_prevista, e.entrada_em,
+              (SELECT r.hospede FROM reservas r WHERE r.estadia_id = e.id LIMIT 1) AS hospede_reserva,
+              (SELECT f.dados->>'nome' FROM fichas_hospede f WHERE f.estadia_id = e.id ORDER BY f.criado_em LIMIT 1) AS hospede_ficha,
+              (SELECT CASE WHEN bool_or(COALESCE(f.dados->>'numeroOficial','') <> '') THEN 'registrada'
+                           WHEN bool_or(f.status = 'preenchida') THEN 'preenchida' ELSE 'pendente' END
+                 FROM fichas_hospede f WHERE f.estadia_id = e.id) AS fnrh
+         FROM estadias e JOIN unidades un ON un.id = e.unidade_id
+        WHERE e.empresa_id = $1 AND e.status IN ('aberta','conta_entregue')${filtroAmb}`, params);
+    const pr = [...params, somaDias(hoje, -3), somaDias(hoje, 21)];
+    const n = params.length;
+    const res = await this.ds.query(
+      `SELECT r.id, r.numero, r.unidade_id, r.hospede, r.chegada, r.saida, r.status, r.origem, r.estadia_id, r.vista_em, (r.adultos + r.criancas)::int AS pessoas, r.sinal
+         FROM reservas r JOIN unidades un ON un.id = r.unidade_id
+        WHERE r.empresa_id = $1 AND r.status IN ('pendente','confirmada','hospedada')${filtroAmb}
+          AND r.chegada <= $${n + 2}::date AND r.saida >= $${n + 1}::date ORDER BY r.chegada`, pr);
+    const unidades: Record<string, Record<string, unknown>> = {};
+    const de = (id: string) => (unidades[id] ??= { hospede: null, fnrh: null, saidaPrevista: null, chegadaHoje: null, proxima: null, reservaNova: false });
+    for (const c of contas) {
+      const x = de(c.unidade_id);
+      x.hospede = c.hospede_reserva ?? c.hospede_ficha ?? null;
+      x.fnrh = c.fnrh ?? 'nenhuma';
+      x.saidaPrevista = c.saida_prevista ? dia(c.saida_prevista) : null;
+    }
+    const reservas = res.map((r: Record<string, unknown>) => ({
+      id: r.id, numero: r.numero, unidadeId: r.unidade_id, hospede: r.hospede, chegada: dia(r.chegada), saida: dia(r.saida), status: r.status,
+      origem: r.origem, estadiaId: r.estadia_id, pessoas: r.pessoas, sinal: Number(r.sinal), nova: !r.vista_em,
+    }));
+    for (const r of reservas) {
+      if (r.status === 'hospedada') continue;
+      const x = de(String(r.unidadeId));
+      if (r.nova) x.reservaNova = true;
+      if (r.chegada === hoje) x.chegadaHoje = { id: r.id, numero: r.numero, hospede: r.hospede, saida: r.saida, pessoas: r.pessoas, origem: r.origem, sinal: r.sinal };
+      else if (r.chegada > hoje && !x.proxima) x.proxima = { chegada: r.chegada, hospede: r.hospede };
+    }
+    return { hoje, unidades, reservas };
+  }
+
+  /** a recepção viu as reservas novas deste quarto (para de piscar) */
+  async marcarVistas(u: UsuarioToken, unidadeId: string) {
+    await this.ds.query(`UPDATE reservas SET vista_em = now() WHERE empresa_id = $1 AND unidade_id = $2 AND vista_em IS NULL`, [u.empresaId, unidadeId]);
     return { ok: true };
   }
 

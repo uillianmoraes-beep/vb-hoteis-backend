@@ -15,6 +15,19 @@ export class ReservasController {
     return this.service.listar(u, { de, ate, busca });
   }
 
+  @Get('painel')
+  @Requer('painel.ver', 'reservas.gerenciar', 'estadias.operar', 'estadias.entrada')
+  painel(@Usuario() u: UsuarioToken, @Query('ambienteId') ambienteId?: string) {
+    return this.service.painel(u, ambienteId);
+  }
+
+  @Post('vistas/:unidadeId')
+  @HttpCode(200)
+  @Requer('painel.ver', 'reservas.gerenciar', 'estadias.operar', 'estadias.entrada')
+  vistas(@Usuario() u: UsuarioToken, @Param('unidadeId', ParseUUIDPipe) unidadeId: string) {
+    return this.service.marcarVistas(u, unidadeId);
+  }
+
   @Post()
   @Requer('reservas.gerenciar', 'estadias.operar')
   criar(@Usuario() u: UsuarioToken, @Body() dto: ReservaDto) {
