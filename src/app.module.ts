@@ -28,6 +28,7 @@ import { CortesiasModule } from './cortesias/cortesias.module';
 import { FuncionariosModule } from './funcionarios/funcionarios.module';
 import { BalcaoModule } from './balcao/balcao.module';
 import { DespesasModule } from './despesas/despesas.module';
+import { FichasModule } from './fichas/fichas.module';
 
 @Module({
   imports: [
@@ -67,6 +68,7 @@ import { DespesasModule } from './despesas/despesas.module';
     FuncionariosModule,
     BalcaoModule,
     DespesasModule,
+    FichasModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },
