@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { randomBytes } from 'crypto';
 import { UsuarioToken } from '../common/permissoes';
 import { ConfigReservaOnlineDto, ReservaPublicaDto } from './reservas.dto';
+import { CobrancaService } from '../cobranca/cobranca.service';
 
 interface Q { query: (sql: string, params?: unknown[]) => Promise<any> }
 
@@ -16,6 +17,8 @@ export interface ConfigOnline {
   maxNoites?: number;
   janelaDias?: number;
   whatsapp?: string;
+  /** % do total cobrado como sinal por Pix (0 = sem sinal) */
+  sinalPct?: number;
   categorias?: Record<string, { ativo: boolean; diaria: number; pessoaExtra?: number; descricao?: string }>;
   quartos?: Record<string, { destaque?: string; acrescimo?: number; oculto?: boolean }>;
 }
@@ -42,7 +45,7 @@ const novoCodigo = () => {
 
 @Injectable()
 export class ReservaOnlineService {
-  constructor(private readonly ds: DataSource) {}
+  constructor(private readonly ds: DataSource, private readonly cobranca: CobrancaService) {}
 
   // ---------------- recepção / gerência ----------------
 
@@ -73,12 +76,15 @@ export class ReservaOnlineService {
   async salvarConfig(u: UsuarioToken, ambienteId: string, dto: ConfigReservaOnlineDto) {
     const [a] = await this.ds.query(`SELECT id FROM ambientes WHERE id = $1 AND empresa_id = $2 AND tipo IN ('hotel','pousada')`, [ambienteId, u.empresaId]);
     if (!a) throw new NotFoundException('Ambiente de hotel/pousada não encontrado.');
+    if ((dto.sinalPct ?? 0) > 0 && !(await this.cobranca.ativa(u.empresaId))) {
+      throw new BadRequestException('Para cobrar sinal por Pix, ligue antes a Cobrança automática (Asaas).');
+    }
     if (dto.ativo && !dto.categorias.some((c) => c.ativo && c.diaria > 0)) {
       throw new BadRequestException('Ligue pelo menos uma categoria com o valor da diária.');
     }
     const cfg: ConfigOnline = {
       ativo: dto.ativo, confirmacao: dto.confirmacao, escolherQuarto: dto.escolherQuarto, mensagem: dto.mensagem?.trim() || undefined,
-      minNoites: dto.minNoites ?? 1, maxNoites: dto.maxNoites ?? 30, janelaDias: dto.janelaDias ?? 365, whatsapp: (dto.whatsapp ?? '').replace(/\D/g, '') || undefined,
+      minNoites: dto.minNoites ?? 1, maxNoites: dto.maxNoites ?? 30, janelaDias: dto.janelaDias ?? 365, whatsapp: (dto.whatsapp ?? '').replace(/\D/g, '') || undefined, sinalPct: dto.sinalPct ?? 0,
       categorias: Object.fromEntries(dto.categorias.map((c) => [c.categoriaId, { ativo: c.ativo, diaria: c.diaria, pessoaExtra: c.pessoaExtra ?? 0, descricao: c.descricao?.trim() || undefined }])),
       quartos: Object.fromEntries(dto.quartos.filter((q) => q.destaque?.trim() || q.acrescimo || q.oculto)
         .map((q) => [q.unidadeId, { destaque: q.destaque?.trim() || undefined, acrescimo: q.acrescimo || 0, oculto: !!q.oculto }])),
@@ -116,13 +122,14 @@ export class ReservaOnlineService {
 
   async info(token: string) {
     const { a, cfg } = await this.ambientePorToken(token);
+    const sinalPct = (cfg.sinalPct ?? 0) > 0 && (await this.cobranca.ativa(a.empresa_id)) ? cfg.sinalPct! : 0;
     const cats = await this.ds.query(
       `SELECT c.id, c.nome, c.descricao, c.foto, MAX(un.capacidade) AS capacidade, COUNT(un.id) AS quartos
          FROM categorias c JOIN unidades un ON un.categoria_id = c.id AND un.ativo AND un.ambiente_id = $1
         WHERE c.empresa_id = $2 GROUP BY c.id ORDER BY c.ordem, c.nome`, [a.id, a.empresa_id]);
     return {
       hotel: a.empresa, ambiente: a.nome, mensagem: cfg.mensagem ?? null, escolherQuarto: !!cfg.escolherQuarto, confirmacao: cfg.confirmacao ?? 'recepcao',
-      minNoites: cfg.minNoites ?? 1, maxNoites: cfg.maxNoites ?? 30, hoje: hojeSP(), ate: somaDias(hojeSP(), cfg.janelaDias ?? 365), whatsapp: cfg.whatsapp ?? null,
+      sinalPct, minNoites: cfg.minNoites ?? 1, maxNoites: cfg.maxNoites ?? 30, hoje: hojeSP(), ate: somaDias(hojeSP(), cfg.janelaDias ?? 365), whatsapp: cfg.whatsapp ?? null,
       categorias: cats.filter((c: { id: string }) => cfg.categorias?.[c.id]?.ativo && (cfg.categorias[c.id].diaria ?? 0) > 0).map((c: Record<string, unknown>) => ({
         id: c.id, nome: c.nome, descricao: cfg.categorias![c.id as string].descricao ?? c.descricao ?? null, foto: c.foto ?? null,
         capacidade: Number(c.capacidade ?? 2), diaria: cfg.categorias![c.id as string].diaria,
@@ -203,7 +210,13 @@ export class ReservaOnlineService {
       [a.empresa_id, fone]);
     if (recentes >= 3) throw new BadRequestException('Muitas reservas seguidas com este telefone. Fale com a recepção.');
 
-    const status = cfg.confirmacao === 'automatica' ? 'confirmada' : 'pendente';
+    const sinalPct = (cfg.sinalPct ?? 0) > 0 && (await this.cobranca.ativa(a.empresa_id)) ? cfg.sinalPct! : 0;
+    if (sinalPct > 0) {
+      const cpf = (dto.documento ?? '').replace(/\D/g, '');
+      if (cpf.length !== 11 && cpf.length !== 14) throw new BadRequestException('Informe o CPF para gerar o Pix do sinal.');
+    }
+    // com sinal, a reserva só confirma quando o Pix for pago
+    const status = sinalPct > 0 ? 'pendente' : cfg.confirmacao === 'automatica' ? 'confirmada' : 'pendente';
     const r = await this.ds.transaction(async (m) => {
       // uma reserva por vez neste hotel: dois hóspedes não pegam o mesmo quarto
       await m.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`reserva-online:${a.id}`]);
@@ -228,21 +241,28 @@ export class ReservaOnlineService {
           dto.observacao?.trim() || null, status, codigo, cat?.nome ?? null, !!dto.unidadeId]);
       return { ...nova, codigo, quarto, total, categoria: cat?.nome ?? '' };
     });
+    const pix = sinalPct > 0
+      ? await this.cobranca.pixReserva(a.empresa_id, { reservaId: r.id, numero: r.numero, nome: dto.nome.trim(), cpf: dto.documento ?? '', telefone: dto.telefone, email: dto.email, valor: r2((r.total * sinalPct) / 100) })
+      : null;
     return {
       codigo: r.codigo, numero: r.numero, status, total: r.total, noites: n, categoria: r.categoria,
-      quarto: dto.unidadeId ? r.quarto.codigo : null,
+      quarto: dto.unidadeId ? r.quarto.codigo : null, sinal: sinalPct > 0 ? r2((r.total * sinalPct) / 100) : 0, pix,
     };
   }
 
   async consulta(codigo: string) {
     const [r] = await this.ds.query(
-      `SELECT r.numero, r.hospede, r.chegada, r.saida, r.adultos, r.criancas, r.valor_total, r.status, r.categoria_pedida, r.quarto_escolhido,
+      `SELECT r.id, r.sinal, r.numero, r.hospede, r.chegada, r.saida, r.adultos, r.criancas, r.valor_total, r.status, r.categoria_pedida, r.quarto_escolhido,
               un.codigo AS quarto, a.nome AS ambiente, a.reserva_online, e.nome AS hotel
          FROM reservas r JOIN unidades un ON un.id = r.unidade_id JOIN ambientes a ON a.id = r.ambiente_id JOIN empresas e ON e.id = r.empresa_id
         WHERE r.codigo_publico = $1`, [codigo]);
     if (!r) throw new NotFoundException('Reserva não encontrada. Confira o código.');
     const cfg = (r.reserva_online ?? {}) as ConfigOnline;
+    const [pix] = r.status === 'pendente' ? await this.ds.query(
+      `SELECT valor, pix_copia_cola, pix_imagem, vencimento FROM cobrancas WHERE tipo = 'reserva_sinal' AND referencia_id = $1 AND status = 'pendente' ORDER BY criado_em DESC LIMIT 1`, [r.id]) : [];
     return {
+      pix: pix ? { valor: Number(pix.valor), copiaECola: pix.pix_copia_cola, imagem: pix.pix_imagem, vencimento: dia(pix.vencimento) } : null,
+      sinalPago: Number(r.sinal ?? 0),
       numero: r.numero, hospede: String(r.hospede).split(' ')[0], chegada: dia(r.chegada), saida: dia(r.saida), adultos: r.adultos, criancas: r.criancas,
       total: Number(r.valor_total), status: r.status, categoria: r.categoria_pedida, hotel: r.hotel, ambiente: r.ambiente, whatsapp: cfg.whatsapp ?? null,
       // o número do quarto só aparece se o hóspede escolheu ou depois de confirmada

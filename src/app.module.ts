@@ -37,6 +37,7 @@ import { SugestoesModule } from './sugestoes/sugestoes.module';
 import { EnxovalModule } from './enxoval/enxoval.module';
 import { EstoqueModule } from './estoque/estoque.module';
 import { ComprasModule } from './compras/compras.module';
+import { CobrancaModule } from './cobranca/cobranca.module';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { ComprasModule } from './compras/compras.module';
     EnxovalModule,
     EstoqueModule,
     ComprasModule,
+    CobrancaModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },

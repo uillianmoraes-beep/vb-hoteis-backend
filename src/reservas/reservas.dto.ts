@@ -60,6 +60,7 @@ export class ConfigReservaOnlineDto {
   /** até quantos dias à frente aceita reserva */
   @IsOptional() @IsInt() @Min(7) @Max(730) janelaDias?: number;
   @IsOptional() @IsString() @MaxLength(30) whatsapp?: string;
+  @IsOptional() @IsInt() @Min(0) @Max(100) sinalPct?: number;
   @IsArray() @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => ConfigCategoriaOnlineDto) categorias!: ConfigCategoriaOnlineDto[];
   @IsArray() @ArrayMaxSize(1000) @ValidateNested({ each: true }) @Type(() => ConfigQuartoOnlineDto) quartos!: ConfigQuartoOnlineDto[];
 }
