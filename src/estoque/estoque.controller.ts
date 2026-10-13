@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { EstoqueService } from './estoque.service';
-import { EntradaDto, EntradaNotaDto, InventarioDto, LocalDto, PerdaDto, TransferenciaDto } from './estoque.dto';
+import { EntradaDto, EntradaNotaDto, InventarioDto, LocalDto, MinimosDto, PerdaDto, TransferenciaDto } from './estoque.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
@@ -19,6 +19,16 @@ export class EstoqueController {
 
   @Get('saldos') saldos(@Usuario() u: UsuarioToken, @Query('cnpj') cnpj?: string, @Query('busca') busca?: string) { return this.service.saldos(u, { cnpj, busca }); }
   @Get('abaixo-minimo') abaixo(@Usuario() u: UsuarioToken, @Query('cnpj') cnpj?: string) { return this.service.abaixoDoMinimo(u, cnpj); }
+
+  @Put('minimos') minimos(@Usuario() u: UsuarioToken, @Body() dto: MinimosDto) { return this.service.salvarMinimos(u, dto); }
+
+  /** recepção: estoque do ambiente (aviso no Painel e saldo ao lançar consumo) */
+  @Get('ambiente/:ambienteId')
+  @Requer('estoque.gerenciar', 'painel.ver', 'estadias.operar', 'estadias.entrada')
+  doAmbiente(@Usuario() u: UsuarioToken, @Param('ambienteId') id: string) {
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new BadRequestException('Ambiente inválido.');
+    return this.service.doAmbiente(u, id);
+  }
 
   @Post('entrada') entrada(@Usuario() u: UsuarioToken, @Body() dto: EntradaDto) { return this.service.entrada(u, dto); }
   @Get('vinculos') vinculos(@Usuario() u: UsuarioToken, @Query('fornecedor') f = '') { return this.service.vinculos(u, f); }

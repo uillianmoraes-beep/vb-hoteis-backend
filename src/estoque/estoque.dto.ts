@@ -70,3 +70,13 @@ export class PerdaDto {
   @IsString() @MaxLength(300) observacao!: string;
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(300) @ValidateNested({ each: true }) @Type(() => ItemQtdDto) itens!: ItemQtdDto[];
 }
+
+export class MinimoDto {
+  @IsUUID() produtoId!: string;
+  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(1_000_000) minimo!: number;
+}
+
+export class MinimosDto {
+  @IsUUID() localId!: string;
+  @IsArray() @ArrayMaxSize(2000) @ValidateNested({ each: true }) @Type(() => MinimoDto) itens!: MinimoDto[];
+}

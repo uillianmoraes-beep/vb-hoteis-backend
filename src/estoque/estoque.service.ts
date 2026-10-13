@@ -3,7 +3,7 @@ import { DataSource } from 'typeorm';
 import { UsuarioToken } from '../common/permissoes';
 import { cnpjDoAmbiente, cnpjDoForm, filtroCnpj, soDigitos } from '../common/cnpj';
 import { localDoAmbiente, moverEstoque } from './estoque.core';
-import { EntradaDto, EntradaNotaDto, InventarioDto, LocalDto, PerdaDto, TransferenciaDto } from './estoque.dto';
+import { EntradaDto, EntradaNotaDto, InventarioDto, LocalDto, MinimosDto, PerdaDto, TransferenciaDto } from './estoque.dto';
 
 const num = (v: unknown) => Number(v ?? 0);
 const r2 = (v: number) => Math.round(v * 100) / 100;
@@ -88,22 +88,27 @@ export class EstoqueService {
       `SELECT p.id, p.nome, p.codigo, p.grupo, p.unidade, p.estoque_minimo, p.preco FROM produtos p
         WHERE p.empresa_id = $1 AND p.ativo AND p.controla_estoque${filtro} ORDER BY p.grupo NULLS LAST, p.nome`, params);
     const ss = ids.length ? await this.ds.query(`SELECT * FROM estoque_saldos WHERE local_id = ANY($1::uuid[])`, [ids]) : [];
-    const porProduto = new Map<string, { localId: string; q: number; c: number }[]>();
+    const porProduto = new Map<string, { localId: string; q: number; c: number; m: number }[]>();
     for (const s of ss) {
       const l = porProduto.get(s.produto_id) ?? [];
-      l.push({ localId: s.local_id, q: num(s.quantidade), c: num(s.custo_medio) });
+      l.push({ localId: s.local_id, q: num(s.quantidade), c: num(s.custo_medio), m: num(s.minimo) });
       porProduto.set(s.produto_id, l);
     }
     const produtos = ps.map((p: Record<string, unknown>) => {
       const l = porProduto.get(p.id as string) ?? [];
       const saldos: Record<string, number> = {};
       const custos: Record<string, number> = {};
-      for (const x of l) { saldos[x.localId] = x.q; custos[x.localId] = x.c; }
+      const minimos: Record<string, number> = {};
+      for (const x of l) { saldos[x.localId] = x.q; custos[x.localId] = x.c; if (x.m > 0) minimos[x.localId] = x.m; }
+      // falta para chegar ao mínimo: por local quando definido, senão pelo mínimo do produto no total
+      const faltaLocais = l.reduce((s, x) => s + (x.m > 0 ? Math.max(0, x.m - Math.max(0, x.q)) : 0), 0);
       const total = r3(l.reduce((s, x) => s + x.q, 0));
       const valor = r2(l.reduce((s, x) => s + Math.max(0, x.q) * x.c, 0));
       return {
         id: p.id, nome: p.nome, codigo: p.codigo, grupo: p.grupo, unidade: p.unidade, minimo: num(p.estoque_minimo), preco: num(p.preco),
-        saldos, custos, total, valor, custoMedio: total > 0 ? r2(valor / total) : 0,
+        saldos, custos, minimos, total, valor, custoMedio: total > 0 ? r2(valor / total) : 0,
+        abaixoLocal: Object.keys(minimos).filter((k) => (saldos[k] ?? 0) < minimos[k]),
+        falta: r3(Math.max(faltaLocais, num(p.estoque_minimo) > 0 ? num(p.estoque_minimo) - total : 0)),
       };
     });
     return { locais, produtos, valorTotal: r2(produtos.reduce((s: number, p: { valor: number }) => s + p.valor, 0)) };
@@ -301,9 +306,50 @@ export class EstoqueService {
     };
   }
 
-  /** produtos abaixo do mínimo (somando os locais do CNPJ, ou todos) */
+  /** produtos abaixo do mínimo (do produto no total, ou de algum local) */
   async abaixoDoMinimo(u: UsuarioToken, cnpj?: string) {
     const s = await this.saldos(u, { cnpj });
-    return s.produtos.filter((p: { minimo: number; total: number }) => p.minimo > 0 && p.total < p.minimo);
+    return s.produtos.filter((p: { minimo: number; total: number; abaixoLocal: string[] }) => (p.minimo > 0 && p.total < p.minimo) || p.abaixoLocal.length > 0);
+  }
+
+  async salvarMinimos(u: UsuarioToken, dto: MinimosDto) {
+    const l = await this.local(u.empresaId, dto.localId);
+    if (dto.itens.length) await this.produtosDaEmpresa(u.empresaId, dto.itens.map((i) => i.produtoId));
+    await this.ds.transaction(async (m) => {
+      for (const i of dto.itens) {
+        await m.query(
+          `INSERT INTO estoque_saldos (local_id, produto_id, minimo) VALUES ($1,$2,$3) ON CONFLICT (local_id, produto_id) DO UPDATE SET minimo = $3`,
+          [l.id, i.produtoId, i.minimo]);
+      }
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Para a recepção: saldos do estoque do ambiente (mostrados ao lançar consumo)
+   * e os avisos de produto abaixo do mínimo daquele ambiente.
+   */
+  async doAmbiente(u: UsuarioToken, ambienteId: string) {
+    const [a] = await this.ds.query(`SELECT id FROM ambientes WHERE id = $1 AND empresa_id = $2`, [ambienteId, u.empresaId]);
+    if (!a) throw new NotFoundException('Ambiente não encontrado.');
+    const localId = await localDoAmbiente(this.ds, u.empresaId, ambienteId);
+    const [loc] = await this.ds.query(`SELECT nome FROM estoque_locais WHERE id = $1`, [localId]);
+    const [{ n }] = await this.ds.query(`SELECT COUNT(*) AS n FROM estoque_locais WHERE empresa_id = $1 AND ativo`, [u.empresaId]);
+    const unico = num(n) <= 1;
+    const ps = await this.ds.query(
+      `SELECT p.id, p.nome, p.unidade, p.estoque_minimo, COALESCE(s.quantidade, 0) AS q, COALESCE(s.minimo, 0) AS m
+         FROM produtos p LEFT JOIN estoque_saldos s ON s.produto_id = p.id AND s.local_id = $2
+        WHERE p.empresa_id = $1 AND p.ativo AND p.controla_estoque ORDER BY p.nome`, [u.empresaId, localId]);
+    const saldos: Record<string, number> = {};
+    const alertas: { produtoId: string; nome: string; unidade: string; saldo: number; minimo: number }[] = [];
+    for (const p of ps) {
+      const q = num(p.q);
+      saldos[p.id] = q;
+      // mínimo do local; com um local só, vale também o mínimo do cadastro do produto
+      const minimo = num(p.m) > 0 ? num(p.m) : unico ? num(p.estoque_minimo) : 0;
+      if (minimo > 0 && q < minimo) alertas.push({ produtoId: p.id, nome: p.nome, unidade: p.unidade, saldo: r3(q), minimo });
+    }
+    alertas.sort((x, y) => x.saldo / x.minimo - y.saldo / y.minimo);
+    return { localId, local: loc?.nome ?? '', saldos, alertas };
   }
 }
