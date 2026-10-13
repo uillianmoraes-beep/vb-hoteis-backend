@@ -123,6 +123,15 @@ export class EstadiasService {
   }
 
   /** Contas abertas de várias unidades de uma vez (para o painel). */
+  /** Última conta fechada de cada unidade (suíte paga esperando a saída: código do ticket para reimprimir). */
+  async ultimasFechadas(empresaId: string, unidadeIds: string[]) {
+    const r = new Map<string, Estadia>();
+    if (!unidadeIds.length) return r;
+    const lista = await this.repo.find({ where: { empresaId, unidadeId: In(unidadeIds), status: 'fechada' }, order: { saidaEm: 'DESC' }, take: unidadeIds.length * 5 });
+    for (const e of lista) if (!r.has(e.unidadeId)) r.set(e.unidadeId, e);
+    return r;
+  }
+
   async abertasComConta(empresaId: string, unidadeIds: string[]) {
     const resultado = new Map<string, { estadia: Estadia; conta: ContaCalculada; motor: Motor }>();
     if (!unidadeIds.length) return resultado;

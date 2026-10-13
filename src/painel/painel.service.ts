@@ -55,6 +55,7 @@ export class PainelService {
     });
 
     const contas = await this.estadias.abertasComConta(u.empresaId, lista.map((x) => x.id));
+    const pagas = await this.estadias.ultimasFechadas(u.empresaId, lista.filter((x) => x.status === 'paga').map((x) => x.id));
     const agora = Date.now();
     const resumo = Object.fromEntries(STATUS_UNIDADE.map((s) => [s, 0])) as Record<StatusUnidade, number>;
     const alertas: AlertaPainel[] = [];
@@ -128,6 +129,9 @@ export class PainelService {
               consumo: aberta.conta.consumo / 100,
               pacote: aberta.conta.pacote,
             }
+          : null,
+        ultimaPaga: x.status === 'paga' && pagas.get(x.id)
+          ? { id: pagas.get(x.id)!.id, numero: pagas.get(x.id)!.numero, placa: pagas.get(x.id)!.placa, total: Number(pagas.get(x.id)!.valorTotal ?? 0) }
           : null,
       };
     });
