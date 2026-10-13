@@ -32,6 +32,7 @@ import { FichasModule } from './fichas/fichas.module';
 import { ReservasModule } from './reservas/reservas.module';
 import { FaturamentoModule } from './faturamento/faturamento.module';
 import { CafeModule } from './cafe/cafe.module';
+import { PedidosModule } from './pedidos/pedidos.module';
 import { EnxovalModule } from './enxoval/enxoval.module';
 
 @Module({
@@ -76,6 +77,7 @@ import { EnxovalModule } from './enxoval/enxoval.module';
     ReservasModule,
     FaturamentoModule,
     CafeModule,
+    PedidosModule,
     EnxovalModule,
   ],
   providers: [
