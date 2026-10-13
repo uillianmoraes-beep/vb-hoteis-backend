@@ -1,5 +1,5 @@
 import {
-  IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min,
+  ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min,
 } from 'class-validator';
 import { STATUS_UNIDADE, StatusUnidade, TIPOS_UNIDADE, TipoUnidade } from '../../common/permissoes';
 
@@ -42,6 +42,14 @@ export class CriarUnidadesLoteDto {
   /** Quantos dígitos no número (2 → 01, 02...). */
   @IsOptional() @IsInt() @Min(1) @Max(5) digitos?: number;
   @IsOptional() @IsString() @MaxLength(20) andar?: string;
+}
+
+/** Muda várias unidades de uma vez (ex.: quartos cadastrados no motel que são do hotel). */
+export class MoverUnidadesDto {
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(500) @IsUUID('4', { each: true }) ids!: string[];
+  @IsOptional() @IsUUID() ambienteId?: string;
+  @IsOptional() @IsIn(TIPOS_UNIDADE as unknown as string[]) tipo?: TipoUnidade;
+  @IsOptional() @IsUUID() categoriaId?: string;
 }
 
 export class MudarStatusDto {

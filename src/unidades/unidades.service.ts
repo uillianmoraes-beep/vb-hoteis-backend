@@ -9,7 +9,7 @@ import { MotivoBloqueio } from '../motivos-bloqueio/motivo-bloqueio.entity';
 import { Estadia } from '../estadias/estadia.entity';
 import { Ambiente } from '../ambientes/ambiente.entity';
 import {
-  AtualizarUnidadeDto, CriarUnidadeDto, CriarUnidadesLoteDto, MudarStatusDto,
+  AtualizarUnidadeDto, CriarUnidadeDto, CriarUnidadesLoteDto, MoverUnidadesDto, MudarStatusDto,
 } from './dto/unidades.dto';
 import { StatusUnidade, temPermissao, UsuarioToken } from '../common/permissoes';
 
@@ -130,6 +130,29 @@ export class UnidadesService {
     delete unidade.ambiente;
     delete unidade.motivoBloqueio;
     return this.repo.save(unidade);
+  }
+
+  /** muda ambiente / tipo / categoria de várias unidades de uma vez (não mexe nas que têm conta aberta) */
+  async mover(u: UsuarioToken, dto: MoverUnidadesDto) {
+    if (!dto.ambienteId && !dto.tipo && !dto.categoriaId) throw new BadRequestException('Escolha o que mudar.');
+    if (dto.ambienteId) await this.validarAmbiente(u.empresaId, dto.ambienteId);
+    const lista = await this.repo.find({ where: { empresaId: u.empresaId, id: In(dto.ids) } });
+    const comConta: string[] = [];
+    let n = 0;
+    for (const un of lista) {
+      if (dto.ambienteId && un.ambienteId !== dto.ambienteId
+        && (await this.estadias.exists({ where: { unidadeId: un.id, status: In(['aberta', 'conta_entregue']) } }))) {
+        comConta.push(un.codigo);
+        continue;
+      }
+      const mud: Partial<Unidade> = {};
+      if (dto.ambienteId) { mud.ambienteId = dto.ambienteId; mud.ambientePadraoId = dto.ambienteId; }
+      if (dto.tipo) mud.tipo = dto.tipo;
+      if (dto.categoriaId) mud.categoriaId = dto.categoriaId;
+      await this.repo.update({ id: un.id }, mud);
+      n++;
+    }
+    return { alteradas: n, comConta };
   }
 
   async mudarStatus(u: UsuarioToken, id: string, dto: MudarStatusDto) {

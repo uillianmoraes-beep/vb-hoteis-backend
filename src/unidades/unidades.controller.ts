@@ -1,9 +1,9 @@
 import {
-  Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query,
+  Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query,
 } from '@nestjs/common';
 import { UnidadesService } from './unidades.service';
 import {
-  AtualizarUnidadeDto, CriarUnidadeDto, CriarUnidadesLoteDto, MudarStatusDto, ResponsavelDto,
+  AtualizarUnidadeDto, CriarUnidadeDto, CriarUnidadesLoteDto, MoverUnidadesDto, MudarStatusDto, ResponsavelDto,
 } from './dto/unidades.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
@@ -38,6 +38,13 @@ export class UnidadesController {
   @Requer('unidades.gerenciar')
   criarEmLote(@Usuario() u: UsuarioToken, @Body() dto: CriarUnidadesLoteDto) {
     return this.service.criarEmLote(u, dto);
+  }
+
+  @Post('mover')
+  @HttpCode(200)
+  @Requer('unidades.gerenciar')
+  mover(@Usuario() u: UsuarioToken, @Body() dto: MoverUnidadesDto) {
+    return this.service.mover(u, dto);
   }
 
   @Patch(':id')
