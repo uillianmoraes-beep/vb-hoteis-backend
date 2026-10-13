@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { CafeService } from './cafe.service';
 import { CafeItemDto, CriarListaDto, FecharListaDto } from './cafe.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
@@ -14,6 +14,12 @@ export class CafeController {
 
   @Post('itens') @Requer('cafe.gerenciar')
   criarItem(@Usuario() u: UsuarioToken, @Body() dto: CafeItemDto) { return this.service.criarItem(u, dto); }
+
+  @Post('itens/remover-repetidos') @HttpCode(200) @Requer('cafe.gerenciar')
+  removerRepetidos(@Usuario() u: UsuarioToken) { return this.service.removerRepetidos(u); }
+
+  @Delete('itens/:id') @Requer('cafe.gerenciar')
+  excluirItem(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.excluirItem(u, id); }
 
   @Patch('itens/:id') @Requer('cafe.gerenciar')
   atualizarItem(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CafeItemDto) { return this.service.atualizarItem(u, id, dto); }

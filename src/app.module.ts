@@ -33,6 +33,7 @@ import { ReservasModule } from './reservas/reservas.module';
 import { FaturamentoModule } from './faturamento/faturamento.module';
 import { CafeModule } from './cafe/cafe.module';
 import { PedidosModule } from './pedidos/pedidos.module';
+import { SugestoesModule } from './sugestoes/sugestoes.module';
 import { EnxovalModule } from './enxoval/enxoval.module';
 
 @Module({
@@ -78,6 +79,7 @@ import { EnxovalModule } from './enxoval/enxoval.module';
     FaturamentoModule,
     CafeModule,
     PedidosModule,
+    SugestoesModule,
     EnxovalModule,
   ],
   providers: [

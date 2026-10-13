@@ -41,6 +41,8 @@ export class CafeService {
   }
 
   async criarItem(u: UsuarioToken, dto: CafeItemDto) {
+    const [ja] = await this.ds.query(`SELECT id FROM cafe_itens WHERE empresa_id = $1 AND lower(trim(nome)) = lower(trim($2))`, [u.empresaId, dto.nome]);
+    if (ja) throw new BadRequestException(`"${dto.nome.trim()}" já está cadastrado.`);
     await this.ds.query(
       `INSERT INTO cafe_itens (empresa_id, nome, grupo, unidade, por_pessoa, passo, reaproveita, ordem, ativo, sobra) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [u.empresaId, ...this.vals(dto), dto.sobra ?? 0]);
@@ -54,6 +56,22 @@ export class CafeService {
       `UPDATE cafe_itens SET nome=$3, grupo=$4, unidade=$5, por_pessoa=$6, passo=$7, reaproveita=$8, ordem=$9, ativo=$10, sobra=COALESCE($11, sobra) WHERE id=$1 AND empresa_id=$2`,
       [id, u.empresaId, ...this.vals(dto), dto.sobra ?? null]);
     return { ok: true };
+  }
+
+  /** exclui o item (as listas antigas guardam a cópia do item, então o histórico não muda) */
+  async excluirItem(u: UsuarioToken, id: string) {
+    await this.ds.query(`DELETE FROM cafe_itens WHERE id = $1 AND empresa_id = $2`, [id, u.empresaId]);
+    return { ok: true };
+  }
+
+  /** apaga itens com o mesmo nome, deixando o mais antigo */
+  async removerRepetidos(u: UsuarioToken) {
+    const r = await this.ds.query(
+      `DELETE FROM cafe_itens c USING cafe_itens d
+        WHERE c.empresa_id = $1 AND d.empresa_id = $1 AND lower(trim(c.nome)) = lower(trim(d.nome))
+          AND (c.criado_em, c.id::text) > (d.criado_em, d.id::text)`, [u.empresaId]);
+    const n = Array.isArray(r) ? Number(r[1] ?? 0) : 0;
+    return { ok: true, removidos: n };
   }
 
   /* ---------- quantas pessoas tomam café na manhã do dia D ---------- */
