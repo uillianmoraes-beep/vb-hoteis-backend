@@ -26,6 +26,8 @@ import { AvaliacoesModule } from './avaliacoes/avaliacoes.module';
 import { RelatoriosModule } from './relatorios/relatorios.module';
 import { CortesiasModule } from './cortesias/cortesias.module';
 import { FuncionariosModule } from './funcionarios/funcionarios.module';
+import { BalcaoModule } from './balcao/balcao.module';
+import { DespesasModule } from './despesas/despesas.module';
 
 @Module({
   imports: [
@@ -63,6 +65,8 @@ import { FuncionariosModule } from './funcionarios/funcionarios.module';
     RelatoriosModule,
     CortesiasModule,
     FuncionariosModule,
+    BalcaoModule,
+    DespesasModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },

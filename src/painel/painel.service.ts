@@ -20,7 +20,7 @@ const ALERTA_MINUTOS: Partial<Record<StatusUnidade, number>> = {
 export interface AlertaPainel {
   unidadeId: string;
   codigo: string;
-  tipo: 'limpeza_demorada' | 'vistoria_aguardando' | 'conta_aguardando' | 'bloqueada' | 'vira_periodo' | 'saiu_sem_fechar' | 'paga_sem_sair';
+  tipo: 'limpeza_demorada' | 'vistoria_aguardando' | 'conta_aguardando' | 'bloqueada' | 'vira_periodo' | 'saiu_sem_fechar' | 'paga_sem_sair' | 'despertador';
   mensagem: string;
   minutos: number;
   urgencia: number;
@@ -136,6 +136,19 @@ export class PainelService {
       };
     });
 
+    // despertadores na hora (ou atrasados)
+    const ids = lista.map((x) => x.id);
+    if (ids.length) {
+      const desp: { unidade_id: string; horario: Date; observacao: string | null }[] = await this.unidades.query(
+        `SELECT unidade_id, horario, observacao FROM despertadores WHERE empresa_id = $1 AND status = 'pendente' AND horario <= now() + interval '1 minute' AND unidade_id = ANY($2::uuid[])`,
+        [u.empresaId, ids]);
+      const cod = new Map(lista.map((x) => [x.id, x.codigo]));
+      for (const d of desp) {
+        const h = new Date(d.horario).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' });
+        alertas.push({ unidadeId: d.unidade_id, codigo: cod.get(d.unidade_id) ?? '', tipo: 'despertador', minutos: Math.max(0, Math.floor((agora - new Date(d.horario).getTime()) / 60000)),
+          mensagem: `Despertar às ${h}${d.observacao ? ` · ${d.observacao}` : ''}`, urgencia: 5 });
+      }
+    }
     alertas.sort((a, b) => b.urgencia - a.urgencia || b.minutos - a.minutos);
 
     const ambsDaTela = ambienteId ? [ambienteId] : [...new Set(lista.map((x) => x.ambienteId))];

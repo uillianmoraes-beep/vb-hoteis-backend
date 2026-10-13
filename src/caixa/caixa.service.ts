@@ -84,6 +84,10 @@ export class CaixaService {
     const penhs = await this.penhoras.find({ where: { turnoId: t.id }, order: { criadoEm: 'ASC' } });
     const recebido: Record<string, number> = Object.fromEntries(FORMAS.map((f) => [f, 0]));
     for (const p of pags) recebido[p.forma] = (recebido[p.forma] ?? 0) + c(p.valor);
+    // vendas avulsas (fora da conta) do turno entram no recebido
+    const avulsas: { forma: string; total: string }[] = await this.ds.query(`SELECT forma, total FROM vendas_avulsas WHERE turno_id = $1 AND NOT cancelada`, [t.id]);
+    let totalAvulsas = 0;
+    for (const v of avulsas) { recebido[v.forma] = (recebido[v.forma] ?? 0) + c(v.total); totalAvulsas += c(v.total); }
     const somaMov = (tipo: string, forma?: string) => movs.filter((m) => m.tipo === tipo && (!forma || m.forma === forma)).reduce((s, m) => s + c(m.valor), 0);
     const esperado: Valores = {};
     for (const f of FORMAS) esperado[f] = recebido[f] ?? 0;
@@ -120,6 +124,8 @@ export class CaixaService {
       totalMovimentado: r(Object.values(recebido).reduce((s, v) => s + v, 0) + totalResgates),
       resgates: Object.fromEntries(Object.entries(resgates).map(([k, v]) => [k, r(v)])),
       totalResgates: r(totalResgates),
+      vendasAvulsas: r(totalAvulsas),
+      qtdVendasAvulsas: avulsas.length,
       penhoras: penhs.map((x) => ({ id: x.id, item: x.item, valor: Number(x.valor), status: x.status, contato: x.contato, criadoEm: x.criadoEm })),
       contas: new Set(pags.map((p) => p.estadiaId)).size,
       gorjetas: [...porPessoa.values()].map((a) => ({ para: a.para, valor: r(a.valor), naHora: r(a.naHora), aRepassar: r(a.aRepassar), casa: r(a.casa) })).sort((x, y) => y.valor - x.valor),
