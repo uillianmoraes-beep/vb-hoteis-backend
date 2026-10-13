@@ -76,10 +76,10 @@ export class FichasService {
     }
     const status = falta.length ? 'pendente' : 'preenchida';
     await this.ds.query(
-      `UPDATE fichas_hospede SET dados = $2::jsonb, doc_foto = COALESCE($3, doc_foto), assinatura = COALESCE($4, assinatura),
-        lgpd_aceito_em = CASE WHEN $5 THEN COALESCE(lgpd_aceito_em, now()) ELSE lgpd_aceito_em END,
-        status = $6, preenchida_por = CASE WHEN $6 = 'preenchida' THEN COALESCE(preenchida_por, $7) ELSE preenchida_por END,
-        preenchida_em = CASE WHEN $6 = 'preenchida' THEN COALESCE(preenchida_em, now()) ELSE preenchida_em END, atualizado_em = now()
+      `UPDATE fichas_hospede SET dados = $2::jsonb, doc_foto = COALESCE($3::text, doc_foto), assinatura = COALESCE($4::text, assinatura),
+        lgpd_aceito_em = CASE WHEN $5::boolean THEN COALESCE(lgpd_aceito_em, now()) ELSE lgpd_aceito_em END,
+        status = $6::varchar, preenchida_por = CASE WHEN $6::varchar = 'preenchida' THEN COALESCE(preenchida_por, $7::varchar) ELSE preenchida_por END,
+        preenchida_em = CASE WHEN $6::varchar = 'preenchida' THEN COALESCE(preenchida_em, now()) ELSE preenchida_em END, atualizado_em = now()
        WHERE id = $1`,
       [f.id, JSON.stringify(dados), dto.docFoto || null, dto.assinatura || null, !!dto.lgpd, status, quem]);
     // placa do hóspede vai para a conta, se ainda estiver vazia
