@@ -105,6 +105,8 @@ export class FichasService {
   }
 
   async enviarPublica(token: string, dto: SalvarFichaDto) {
+    // o número oficial é só da recepção
+    if (dto.dados) delete dto.dados.numeroOficial;
     const [f] = await this.ds.query(`SELECT status FROM fichas_hospede WHERE token = $1`, [token]);
     if (!f) throw new NotFoundException('Link inválido.');
     if (f.status === 'preenchida') throw new BadRequestException('Esta ficha já foi enviada. Fale com a recepção para corrigir.');

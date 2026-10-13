@@ -26,6 +26,8 @@ export class DadosFichaDto {
   @IsOptional() @IsString() @MaxLength(25) checkout?: string;
   @IsOptional() @IsString() @MaxLength(300) acompanhantes?: string;
   @IsOptional() @IsBoolean() naoFumante?: boolean;
+  /** número da ficha na FNRH Digital do governo (registrada no portal gov.br) */
+  @IsOptional() @IsString() @MaxLength(40) numeroOficial?: string;
 }
 
 export class SalvarFichaDto {
