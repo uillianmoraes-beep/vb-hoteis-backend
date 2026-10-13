@@ -18,8 +18,8 @@ export class FichasController {
 
   @Get('fichas')
   @Requer('estadias.operar', 'estadias.entrada')
-  listar(@Usuario() u: UsuarioToken, @Query('estadiaId') estadiaId?: string, @Query('busca') busca?: string) {
-    return this.service.listar(u, { estadiaId, busca });
+  listar(@Usuario() u: UsuarioToken, @Query('estadiaId') estadiaId?: string, @Query('busca') busca?: string, @Query('unidadeId') unidadeId?: string) {
+    return this.service.listar(u, { estadiaId, unidadeId, busca });
   }
 
   @Get('fichas/:id')

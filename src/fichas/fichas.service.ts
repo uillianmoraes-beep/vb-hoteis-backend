@@ -33,6 +33,9 @@ export class FichasService {
       const [e] = await this.ds.query(`SELECT id, unidade_id FROM estadias WHERE id = $1 AND empresa_id = $2`, [dto.estadiaId, u.empresaId]);
       if (!e) throw new NotFoundException('Hospedagem não encontrada.');
       unidadeId = e.unidade_id;
+    } else if (unidadeId) {
+      const [un] = await this.ds.query(`SELECT id FROM unidades WHERE id = $1 AND empresa_id = $2`, [unidadeId, u.empresaId]);
+      if (!un) throw new NotFoundException('Quarto não encontrado.');
     }
     const token = randomBytes(9).toString('base64url');
     const [f] = await this.ds.query(
@@ -41,10 +44,12 @@ export class FichasService {
     return this.formatar(Array.isArray(f) ? f[0] : f);
   }
 
-  async listar(u: UsuarioToken, filtro: { estadiaId?: string; busca?: string }) {
+  async listar(u: UsuarioToken, filtro: { estadiaId?: string; unidadeId?: string; busca?: string }) {
     const params: unknown[] = [u.empresaId];
     let where = 'empresa_id = $1';
     if (filtro.estadiaId) { params.push(filtro.estadiaId); where += ` AND estadia_id = $${params.length}`; }
+    // quarto sem conta aberta: fichas recentes (últimos 3 dias) daquele quarto
+    if (filtro.unidadeId) { params.push(filtro.unidadeId); where += ` AND unidade_id = $${params.length} AND criado_em >= now() - interval '3 days'`; }
     if (filtro.busca) { params.push(`%${filtro.busca.toLowerCase()}%`); where += ` AND (lower(dados->>'nome') LIKE $${params.length} OR dados->>'cpf' LIKE $${params.length} OR lower(dados->>'documento') LIKE $${params.length})`; }
     const l = await this.ds.query(`SELECT * FROM fichas_hospede WHERE ${where} ORDER BY criado_em DESC LIMIT 300`, params);
     return l.map((f: Record<string, unknown>) => this.formatar(f));
