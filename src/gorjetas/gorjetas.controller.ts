@@ -4,6 +4,8 @@ import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
 
+const uuidOk = (x?: string) => (x && /^[0-9a-f-]{36}$/i.test(x) ? x : undefined);
+
 @Controller('gorjetas')
 export class GorjetasController {
   constructor(private readonly service: GorjetasService) {}
@@ -16,8 +18,8 @@ export class GorjetasController {
 
   @Get()
   @Requer('gorjetas.gerenciar')
-  relatorio(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string) {
-    return this.service.relatorio(u, { de, ate });
+  relatorio(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string, @Query('ambienteId') ambienteId?: string) {
+    return this.service.relatorio(u, { de, ate, ambienteId: uuidOk(ambienteId) });
   }
 
   @Put('config')
@@ -29,7 +31,7 @@ export class GorjetasController {
   @Post('repasse/:chave')
   @HttpCode(200)
   @Requer('gorjetas.gerenciar')
-  repassar(@Usuario() u: UsuarioToken, @Param('chave') chave: string, @Body() corpo: { forma?: string }) {
-    return this.service.repassar(u, decodeURIComponent(chave), corpo?.forma ?? 'dinheiro');
+  repassar(@Usuario() u: UsuarioToken, @Param('chave') chave: string, @Body() corpo: { forma?: string; ambienteId?: string }) {
+    return this.service.repassar(u, decodeURIComponent(chave), corpo?.forma ?? 'dinheiro', uuidOk(corpo?.ambienteId));
   }
 }

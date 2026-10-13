@@ -97,7 +97,7 @@ export class AvaliacoesService {
     return lista;
   }
 
-  async relatorio(u: UsuarioToken, filtro: { de?: string; ate?: string }) {
+  async relatorio(u: UsuarioToken, filtro: { de?: string; ate?: string; ambienteId?: string }) {
     const empresa = await this.empresas.findOne({ where: { id: u.empresaId } });
     if (!moduloAtivo(empresa?.modulos, 'satisfacao')) throw new ForbiddenException('Módulo de satisfação não contratado.');
     const ate = filtro.ate ? new Date(`${filtro.ate}T23:59:59.999-03:00`) : new Date();
@@ -108,6 +108,7 @@ export class AvaliacoesService {
       .where('a.empresaId = :e', { e: u.empresaId })
       .andWhere('a.criadoEm BETWEEN :de AND :ate', { de, ate });
     if (u.ambientesIds?.length) qb.andWhere('a.ambienteId IN (:...amb)', { amb: u.ambientesIds });
+    if (filtro.ambienteId) qb.andWhere('a.ambienteId = :fa', { fa: filtro.ambienteId });
     const lista: Avaliacao[] = await qb.orderBy('a.criadoEm', 'DESC').limit(5000).getMany();
 
     const usos = lista.length ? await this.estadias.find({ where: { id: In(lista.map((a) => a.estadiaId)) }, select: { id: true, numero: true } }) : [];

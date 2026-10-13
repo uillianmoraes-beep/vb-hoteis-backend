@@ -43,7 +43,7 @@ export class AvaliacoesController {
 
   @Get()
   @Requer('avaliacoes.ver')
-  relatorio(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string) {
-    return this.service.relatorio(u, { de, ate });
+  relatorio(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string, @Query('ambienteId') ambienteId?: string) {
+    return this.service.relatorio(u, { de, ate, ambienteId: ambienteId && /^[0-9a-f-]{36}$/i.test(ambienteId) ? ambienteId : undefined });
   }
 }
