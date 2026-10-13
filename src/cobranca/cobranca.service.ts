@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from 'crypto';
+import { randomBytes, timingSafeEqual } from 'crypto';
+import { cifrar, decifrar } from '../common/cripto';
 import { UsuarioToken } from '../common/permissoes';
 import { soDigitos } from '../common/cnpj';
 import { FaturamentoService } from '../faturamento/faturamento.service';
@@ -23,21 +24,6 @@ const hojeSP = () => new Date().toLocaleDateString('sv-SE', { timeZone: FUSO });
 const somaDias = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const dia = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? '').slice(0, 10));
 const linhas = (r: any) => (Array.isArray(r?.[0]) ? r[0] : r);
-
-/** chave de criptografia derivada do segredo do servidor */
-const chaveServidor = () => createHash('sha256').update(`vb-cobranca:${process.env.JWT_SECRET ?? ''}`).digest();
-function cifrar(texto: string): string {
-  const iv = randomBytes(12);
-  const c = createCipheriv('aes-256-gcm', chaveServidor(), iv);
-  const enc = Buffer.concat([c.update(texto, 'utf8'), c.final()]);
-  return [iv.toString('base64'), c.getAuthTag().toString('base64'), enc.toString('base64')].join('.');
-}
-function decifrar(t: string): string {
-  const [iv, tag, enc] = t.split('.');
-  const d = createDecipheriv('aes-256-gcm', chaveServidor(), Buffer.from(iv, 'base64'));
-  d.setAuthTag(Buffer.from(tag, 'base64'));
-  return Buffer.concat([d.update(Buffer.from(enc, 'base64')), d.final()]).toString('utf8');
-}
 
 @Injectable()
 export class CobrancaService {
