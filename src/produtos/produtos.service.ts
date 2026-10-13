@@ -49,6 +49,9 @@ export class ProdutosService {
         preco: dto.preco.toFixed(2),
         fiscal: limparFiscal(dto.fiscal),
         frigobar: !!dto.frigobar,
+        controlaEstoque: dto.controlaEstoque ?? (dto.tipo ?? 'produto') === 'produto',
+        estoqueMinimo: String(dto.estoqueMinimo ?? 0),
+        unidade: dto.unidade?.trim() || 'un',
       }),
     );
   }
@@ -64,6 +67,9 @@ export class ProdutosService {
     if (dto.ativo !== undefined) p.ativo = dto.ativo;
     if (dto.frigobar !== undefined) p.frigobar = dto.frigobar;
     if (dto.fiscal !== undefined) p.fiscal = limparFiscal(dto.fiscal);
+    if (dto.controlaEstoque !== undefined) p.controlaEstoque = dto.controlaEstoque;
+    if (dto.estoqueMinimo !== undefined) p.estoqueMinimo = String(dto.estoqueMinimo);
+    if (dto.unidade !== undefined) p.unidade = dto.unidade.trim() || 'un';
     return this.repo.save(p);
   }
 

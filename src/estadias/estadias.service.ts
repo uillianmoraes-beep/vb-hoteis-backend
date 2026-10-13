@@ -18,6 +18,7 @@ import { moduloAtivo } from '../common/modulos';
 import { FUSO, Motor, TarifasService } from '../tarifas/tarifas.service';
 import { FaturamentoService } from '../faturamento/faturamento.service';
 import { cnpjDoAmbiente } from '../common/cnpj';
+import { baixarConsumo, devolverConsumo } from '../estoque/estoque.core';
 import { CaixaService } from '../caixa/caixa.service';
 import { GorjetasService } from '../gorjetas/gorjetas.service';
 import { CortesiasService } from '../cortesias/cortesias.service';
@@ -415,11 +416,14 @@ export class EstadiasService {
     if (preco === undefined) throw new BadRequestException('Informe o preço do item.');
     const totalC = Math.round(centavos(preco) * dto.quantidade);
     await this.ds.transaction(async (m) => {
-      await m.insert(EstadiaItem, {
+      const insItem = await m.insert(EstadiaItem, {
         empresaId: u.empresaId, estadiaId: e.id, produtoId, descricao,
         quantidade: String(dto.quantidade), precoUnitario: preco!.toFixed(2), total: reais(totalC),
         status: 'ativo', usuarioId: u.sub, usuarioNome: u.nome,
       });
+      // estoque: baixa no local do ambiente desta conta
+      const itemId = insItem.identifiers?.[0]?.id as string | undefined;
+      if (itemId) await baixarConsumo(m, u.empresaId, e.ambienteId, produtoId, dto.quantidade, { referencia: `item:${itemId}`, observacao: `Conta nº ${e.numero ?? '—'}`, usuario: u.nome });
       const qtd = Number.isInteger(dto.quantidade) ? dto.quantidade : dto.quantidade.toFixed(3);
       await this.registrar(m, u, e.id, 'consumo', `${qtd}× ${descricao} · ${brl(totalC)}`);
     });
@@ -435,6 +439,7 @@ export class EstadiasService {
     if (libE) dto.motivo = `${dto.motivo.trim()} · liberado por ${libE}`;
     await this.ds.transaction(async (m) => {
       await m.update(EstadiaItem, { id: item.id }, { status: 'estornado', motivoEstorno: dto.motivo.trim(), estornadoPor: u.nome, estornadoEm: new Date() });
+      await devolverConsumo(m, u.empresaId, `item:${item.id}`, u.nome);
       await this.registrar(m, u, e.id, 'estorno', `Estorno: ${item.descricao} · ${brl(centavos(item.total))} · ${dto.motivo.trim()}`);
     });
     return this.detalhe(u, id);

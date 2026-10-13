@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { CaixaService } from '../caixa/caixa.service';
 import { DespertadorDto, VendaAvulsaDto } from './balcao.dto';
 import { UsuarioToken } from '../common/permissoes';
+import { baixarConsumo } from '../estoque/estoque.core';
 
 const c = (v: number | string | null | undefined) => Math.round(Number(v ?? 0) * 100);
 const r = (x: number) => Math.round(x) / 100;
@@ -50,6 +51,8 @@ export class BalcaoService {
          VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12) RETURNING id`,
         [u.empresaId, dto.ambienteId, turnoId, func ? 'funcionario' : 'cliente', func?.id ?? null, func?.nome ?? null, JSON.stringify(itens), r(total).toFixed(2), dto.forma,
           recebido !== null ? r(recebido).toFixed(2) : null, r(troco).toFixed(2), u.nome]);
+      const vendaId = (Array.isArray(v) ? v[0] : v)?.id as string;
+      for (const i of itens) await baixarConsumo(m, u.empresaId, dto.ambienteId, i.produtoId, i.quantidade, { referencia: `venda:${vendaId}`, observacao: 'Venda avulsa', usuario: u.nome, tipo: 'venda' });
       if (dto.forma === 'ficha' && func) {
         await m.query(
           `INSERT INTO funcionario_lancamentos (empresa_id, funcionario_id, tipo, valor, descricao, data, usuario_nome) VALUES ($1,$2,'desconto',$3,$4,$5,$6)`,

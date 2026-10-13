@@ -12,6 +12,9 @@ export class Produto {
   @Column({ type: 'numeric', precision: 10, scale: 2, default: 0 }) preco!: string;
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) fiscal!: DadosFiscais;
   @Column({ default: false }) frigobar!: boolean;
+  @Column({ name: 'controla_estoque', default: false }) controlaEstoque!: boolean;
+  @Column({ name: 'estoque_minimo', type: 'numeric', precision: 12, scale: 3, default: 0 }) estoqueMinimo!: string;
+  @Column({ type: 'varchar', length: 8, default: 'un' }) unidade!: string;
   @Column({ default: true }) ativo!: boolean;
   @CreateDateColumn({ name: 'criado_em', type: 'timestamptz' }) criadoEm!: Date;
   @UpdateDateColumn({ name: 'atualizado_em', type: 'timestamptz' }) atualizadoEm!: Date;

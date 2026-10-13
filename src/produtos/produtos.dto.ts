@@ -8,6 +8,9 @@ export class CriarProdutoDto {
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(1_000_000) preco!: number;
   @IsOptional() @IsBoolean() frigobar?: boolean;
   @IsOptional() @IsObject() fiscal?: Record<string, unknown>;
+  @IsOptional() @IsBoolean() controlaEstoque?: boolean;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(1_000_000) estoqueMinimo?: number;
+  @IsOptional() @IsString() @MaxLength(8) unidade?: string;
 }
 
 export class AtualizarProdutoDto {
@@ -19,4 +22,7 @@ export class AtualizarProdutoDto {
   @IsOptional() @IsBoolean() ativo?: boolean;
   @IsOptional() @IsBoolean() frigobar?: boolean;
   @IsOptional() @IsObject() fiscal?: Record<string, unknown>;
+  @IsOptional() @IsBoolean() controlaEstoque?: boolean;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(1_000_000) estoqueMinimo?: number;
+  @IsOptional() @IsString() @MaxLength(8) unidade?: string;
 }
