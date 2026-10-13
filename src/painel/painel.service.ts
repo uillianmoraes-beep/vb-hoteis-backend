@@ -138,7 +138,12 @@ export class PainelService {
 
     alertas.sort((a, b) => b.urgencia - a.urgencia || b.minutos - a.minutos);
 
-    return { geradoEm: new Date(agora).toISOString(), ambientes, resumo, alertas, unidades };
+    const ambsDaTela = ambienteId ? [ambienteId] : [...new Set(lista.map((x) => x.ambienteId))];
+    const hoje = await this.estadias.contagemHoje(u.empresaId, ambsDaTela);
+    const emUso = unidades.filter((x) => ['ocupada', 'conta_entregue', 'paga'].includes(x.status)).length;
+    const resumoDia = { ...hoje, emUso, total: unidades.length, ocupacaoPct: unidades.length ? Math.round((emUso / unidades.length) * 100) : 0 };
+
+    return { geradoEm: new Date(agora).toISOString(), ambientes, resumo, alertas, unidades, resumoDia };
   }
 
   /** Últimas mudanças de status (quem fez, em qual unidade, quando). */

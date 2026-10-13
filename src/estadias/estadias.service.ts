@@ -123,6 +123,20 @@ export class EstadiasService {
   }
 
   /** Contas abertas de várias unidades de uma vez (para o painel). */
+  /** Entradas e saídas de hoje (fuso de São Paulo), para o resumo do painel. */
+  async contagemHoje(empresaId: string, ambienteIds: string[]) {
+    if (!ambienteIds.length) return { entradas: 0, saidas: 0 };
+    const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: FUSO });
+    const ini = new Date(`${hoje}T00:00:00-03:00`);
+    const [entradas, saidas] = await Promise.all([
+      this.repo.createQueryBuilder('e').where('e.empresaId = :emp', { emp: empresaId }).andWhere('e.ambienteId IN (:...a)', { a: ambienteIds })
+        .andWhere(`e.status <> 'cancelada'`).andWhere('e.entradaEm >= :ini', { ini }).getCount(),
+      this.repo.createQueryBuilder('e').where('e.empresaId = :emp', { emp: empresaId }).andWhere('e.ambienteId IN (:...a)', { a: ambienteIds })
+        .andWhere(`e.status = 'fechada'`).andWhere('e.saidaEm >= :ini', { ini }).getCount(),
+    ]);
+    return { entradas, saidas };
+  }
+
   /** Última conta fechada de cada unidade (suíte paga esperando a saída: código do ticket para reimprimir). */
   async ultimasFechadas(empresaId: string, unidadeIds: string[]) {
     const r = new Map<string, Estadia>();
