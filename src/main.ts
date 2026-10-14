@@ -10,6 +10,8 @@ async function bootstrap() {
   const exp = app as any;
   exp.useBodyParser('json', { limit: '3mb' });
   exp.useBodyParser('urlencoded', { limit: '3mb', extended: true });
+  // restaurar backup: o arquivo vai inteiro no corpo (application/octet-stream)
+  exp.useBodyParser('raw', { type: 'application/octet-stream', limit: '300mb' });
 
   app.setGlobalPrefix('api');
 

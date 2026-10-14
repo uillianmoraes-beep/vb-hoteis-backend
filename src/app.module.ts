@@ -38,6 +38,7 @@ import { EnxovalModule } from './enxoval/enxoval.module';
 import { EstoqueModule } from './estoque/estoque.module';
 import { ComprasModule } from './compras/compras.module';
 import { CobrancaModule } from './cobranca/cobranca.module';
+import { BackupModule } from './backup/backup.module';
 import { ManutencaoModule } from './manutencao/manutencao.module';
 
 @Module({
@@ -88,6 +89,7 @@ import { ManutencaoModule } from './manutencao/manutencao.module';
     EstoqueModule,
     ComprasModule,
     CobrancaModule,
+    BackupModule,
     ManutencaoModule,
   ],
   providers: [
