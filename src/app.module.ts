@@ -39,6 +39,7 @@ import { EstoqueModule } from './estoque/estoque.module';
 import { ComprasModule } from './compras/compras.module';
 import { CobrancaModule } from './cobranca/cobranca.module';
 import { BackupModule } from './backup/backup.module';
+import { ServidorLocalModule } from './servidor-local/servidor-local.module';
 import { ManutencaoModule } from './manutencao/manutencao.module';
 
 @Module({
@@ -90,6 +91,7 @@ import { ManutencaoModule } from './manutencao/manutencao.module';
     ComprasModule,
     CobrancaModule,
     BackupModule,
+    ServidorLocalModule,
     ManutencaoModule,
   ],
   providers: [

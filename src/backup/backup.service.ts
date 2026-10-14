@@ -237,14 +237,30 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
 
     // cópia de segurança do estado atual antes de restaurar
     await this.guardar(u.empresaId, 'manual', `${u.nome} (antes de restaurar)`, null);
+    const registros = await this.aplicarDados(dados);
+    await this.logar(u.empresaId, 'restauracao', `Restaurou o backup de ${String(dados.geradoEm).slice(0, 16).replace('T', ' ')} (${registros} registros)`, u.nome);
+    return { ok: true, registros, geradoEm: dados.geradoEm };
+  }
+
+  /** abre um arquivo de backup (usado também na ativação do servidor local) */
+  abrir(arquivo: Buffer, senha?: string | null) {
+    const dados = desempacotar(arquivo, senha);
+    if (dados?.formato !== FORMATO || !dados.tabelas) throw new BadRequestException('Arquivo de backup inválido.');
+    return dados as { empresaId: string; geradoEm: string; tabelas: Record<string, Record<string, unknown>[]> };
+  }
+
+  /** troca os dados da empresa do backup pelos do arquivo (numa transação) */
+  async aplicarDados(dados: { empresaId: string; tabelas: Record<string, Record<string, unknown>[]> }): Promise<number> {
+    this.mapaCache = null;
     const m = await this.mapa();
+    const empresaId = dados.empresaId;
     let registros = 0;
     await this.ds.transaction(async (q) => {
       // desliga chaves estrangeiras e gatilhos só nesta transação (restaurar em qualquer ordem)
       await q.query(`SET LOCAL session_replication_role = replica`);
-      for (const r of m.rotas) await q.query(`DELETE FROM ${ident(r.tabela)} x WHERE ${r.where}`, [u.empresaId]);
-      await q.query(`DELETE FROM empresas WHERE id = $1`, [u.empresaId]);
-      for (const [tabela, linhas] of Object.entries(dados.tabelas as Record<string, Record<string, unknown>[]>)) {
+      for (const r of m.rotas) await q.query(`DELETE FROM ${ident(r.tabela)} x WHERE ${r.where}`, [empresaId]);
+      await q.query(`DELETE FROM empresas WHERE id = $1`, [empresaId]);
+      for (const [tabela, linhas] of Object.entries(dados.tabelas)) {
         const atuais = m.colunas.get(tabela);
         if (!atuais || !Array.isArray(linhas) || !linhas.length) continue;
         const cols = Object.keys(linhas[0]).filter((c) => atuais.has(c));
@@ -258,8 +274,7 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
       }
     });
     this.mapaCache = null;
-    await this.logar(u.empresaId, 'restauracao', `Restaurou o backup de ${String(dados.geradoEm).slice(0, 16).replace('T', ' ')} (${registros} registros)`, u.nome);
-    return { ok: true, registros, geradoEm: dados.geradoEm };
+    return registros;
   }
 
   // ---------------- rotina automática ----------------

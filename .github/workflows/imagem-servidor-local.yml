@@ -1,0 +1,27 @@
+name: Imagem do servidor local
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  imagem:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: instalacao/Dockerfile.api
+          push: true
+          build-args: VB_VERSAO=${{ github.sha }}
+          tags: |
+            ghcr.io/uillianmoraes-beep/vb-hoteis-backend:latest
+            ghcr.io/uillianmoraes-beep/vb-hoteis-backend:${{ github.sha }}

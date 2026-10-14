@@ -1,0 +1,66 @@
+# VB Soluções Hoteleiras · servidor local (funciona sem internet)
+# Sobe tudo com:  docker compose up -d   (na pasta onde está este arquivo e o .env)
+services:
+  banco:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: vbhoteis
+      POSTGRES_USER: vbhoteis
+      POSTGRES_PASSWORD: ${SENHA_BANCO}
+    volumes:
+      - dados:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vbhoteis -d vbhoteis"]
+      interval: 10s
+      retries: 10
+
+  api:
+    image: ghcr.io/uillianmoraes-beep/vb-hoteis-backend:latest
+    restart: always
+    depends_on:
+      banco:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://vbhoteis:${SENHA_BANCO}@banco:5432/vbhoteis
+      DATABASE_SSL: "false"
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRA_EM: 12h
+      VB_MODO: local
+      VB_NUVEM_URL: ${VB_NUVEM_URL:-https://vb-hoteis-backend-production.up.railway.app}
+      VB_BACKUP_DIR: /backups
+      TZ: America/Sao_Paulo
+    volumes:
+      - ${PASTA_BACKUP:-./backups}:/backups
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  web:
+    image: ghcr.io/uillianmoraes-beep/vb-hoteis-frontend:latest
+    restart: always
+    depends_on: [api]
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
+
+  proxy:
+    image: caddy:2-alpine
+    restart: always
+    depends_on: [api, web]
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+  # atualiza a API e as telas sozinho de madrugada (quando há internet)
+  atualizador:
+    image: containrrr/watchtower
+    restart: always
+    command: --label-enable --cleanup --schedule "0 30 4 * * *"
+    environment:
+      TZ: America/Sao_Paulo
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DOCKER_CONFIG_JSON:-~/.docker/config.json}:/config.json:ro
+
+volumes:
+  dados:

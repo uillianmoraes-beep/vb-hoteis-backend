@@ -1,0 +1,42 @@
+import { Body, Controller, Get, Headers, HttpCode, Ip, Param, ParseUUIDPipe, Post, Res } from '@nestjs/common';
+import { ServidorLocalService } from './servidor-local.service';
+import { Publico } from '../common/decorators/publico.decorator';
+import { Requer } from '../common/decorators/requer.decorator';
+
+@Controller()
+export class ServidorLocalController {
+  constructor(private readonly service: ServidorLocalService) {}
+
+  // ----- nuvem: usadas pelos servidores locais -----
+  @Publico() @Get('publico/servidor-local/chave-publica')
+  chave() { return this.service.chavePublica(); }
+
+  @Publico() @Post('publico/servidor-local/licenca/:empresaId') @HttpCode(200)
+  licenca(@Param('empresaId') id: string, @Headers('x-servidor-token') token: string | undefined, @Body() corpo: { versao?: string }, @Ip() ip: string, @Headers('x-forwarded-for') fwd?: string) {
+    return this.service.emitirLicenca(id, token, { versao: corpo?.versao, ip: (fwd?.split(',')[0] ?? ip ?? '').trim() });
+  }
+
+  @Publico() @Get('publico/servidor-local/dados/:empresaId')
+  async dados(@Param('empresaId') id: string, @Headers('x-servidor-token') token: string | undefined, @Res() res: any) {
+    const b = await this.service.dadosIniciais(id, token);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.end(b);
+  }
+
+  // ----- /vb (chave mestra) -----
+  @Publico() @Post('licenca/:empresaId/servidor-local') @HttpCode(200)
+  gerar(@Headers('x-chave-mestra') chave: string | undefined, @Param('empresaId', ParseUUIDPipe) id: string) { return this.service.gerarCodigo(chave, id); }
+
+  @Publico() @Get('licenca/servidores-locais')
+  servidores(@Headers('x-chave-mestra') chave?: string) { return this.service.situacaoServidores(chave); }
+
+  // ----- servidor local -----
+  @Publico() @Get('servidor-local/status')
+  status() { return this.service.status(); }
+
+  @Publico() @Post('servidor-local/ativar') @HttpCode(200)
+  ativar(@Body() corpo: { codigo?: string; nuvemUrl?: string }) { return this.service.ativar(String(corpo?.codigo ?? ''), corpo?.nuvemUrl); }
+
+  @Post('servidor-local/renovar') @HttpCode(200) @Requer('empresa.editar')
+  async renovar() { await this.service.renovar(); return this.service.status(); }
+}
