@@ -47,7 +47,7 @@ export class CobrancaService {
     return !!(c.ativo && c.chaveCripto);
   }
 
-  private webhookUrl(base: string, empresaId: string) { return `${base.replace(/\/$/, '')}/publico/asaas/${empresaId}`; }
+  private webhookUrl(base: string, empresaId: string) { return `${base.replace(/\/$/, '')}/api/publico/asaas/${empresaId}`; }
 
   // ---------------- configuração ----------------
 
