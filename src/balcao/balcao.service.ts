@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { CaixaService } from '../caixa/caixa.service';
 import { DespertadorDto, VendaAvulsaDto } from './balcao.dto';
 import { UsuarioToken } from '../common/permissoes';
+import { ImpressaoService } from '../impressao/impressao.service';
 import { baixarConsumo } from '../estoque/estoque.core';
 
 const c = (v: number | string | null | undefined) => Math.round(Number(v ?? 0) * 100);
@@ -11,7 +12,7 @@ const brl = (cent: number) => `R$ ${(cent / 100).toFixed(2).replace('.', ',')}`;
 
 @Injectable()
 export class BalcaoService {
-  constructor(private readonly ds: DataSource, private readonly caixa: CaixaService) {}
+  constructor(private readonly ds: DataSource, private readonly caixa: CaixaService, private readonly impressao: ImpressaoService) {}
 
   /* ---------- venda avulsa (fora da conta) ---------- */
 
@@ -60,6 +61,7 @@ export class BalcaoService {
       }
       return (Array.isArray(v) ? v[0] : v)?.id as string;
     });
+    void this.impressao.producao(u.empresaId, { ambienteId: dto.ambienteId, local: 'Venda avulsa', origem: 'venda', usuario: u.nome, itens: itens.map((i) => ({ produtoId: i.produtoId, nome: i.nome, quantidade: i.quantidade })) });
     return { id, total: r(total), troco: r(troco), itens };
   }
 

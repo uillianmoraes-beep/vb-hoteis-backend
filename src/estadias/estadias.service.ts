@@ -30,6 +30,7 @@ import {
   LancarItemDto, MudarFormaDto, TransferirDto, TrocarCobrancaDto,
 } from './estadias.dto';
 import { StatusUnidade, UsuarioToken, temPermissao } from '../common/permissoes';
+import { ImpressaoService } from '../impressao/impressao.service';
 import { calcularConta, centavos, minutosAteHorario, reais, ResultadoCalc } from './calculadora';
 
 export interface ContaCalculada extends ResultadoCalc {
@@ -86,6 +87,7 @@ export class EstadiasService {
     private readonly gorjetas: GorjetasService,
     private readonly cortesias: CortesiasService,
     private readonly faturamento: FaturamentoService,
+    private readonly impressao: ImpressaoService,
     private readonly ds: DataSource,
   ) {}
 
@@ -400,7 +402,7 @@ export class EstadiasService {
     return this.detalhe(u, id);
   }
 
-  async lancarItem(u: UsuarioToken, id: string, dto: LancarItemDto) {
+  async lancarItem(u: UsuarioToken, id: string, dto: LancarItemDto, opcoes: { semImpressao?: boolean } = {}) {
     const e = await this.buscarAberta(u, id);
     let descricao = dto.descricao?.trim() ?? '';
     let preco = dto.precoUnitario;
@@ -427,6 +429,10 @@ export class EstadiasService {
       const qtd = Number.isInteger(dto.quantidade) ? dto.quantidade : dto.quantidade.toFixed(3);
       await this.registrar(m, u, e.id, 'consumo', `${qtd}× ${descricao} · ${brl(totalC)}`);
     });
+    // comanda de preparo nas impressoras do bar/cozinha (se houver)
+    if (!opcoes.semImpressao) {
+      void this.impressao.producao(u.empresaId, { ambienteId: e.ambienteId, unidadeId: e.unidadeId, origem: 'consumo', usuario: u.nome, itens: [{ produtoId, nome: descricao, quantidade: dto.quantidade }] });
+    }
     return this.detalhe(u, id);
   }
 

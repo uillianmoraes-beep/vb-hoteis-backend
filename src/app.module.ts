@@ -40,6 +40,7 @@ import { ComprasModule } from './compras/compras.module';
 import { CobrancaModule } from './cobranca/cobranca.module';
 import { BackupModule } from './backup/backup.module';
 import { ServidorLocalModule } from './servidor-local/servidor-local.module';
+import { ImpressaoModule } from './impressao/impressao.module';
 import { ManutencaoModule } from './manutencao/manutencao.module';
 
 @Module({
@@ -92,6 +93,7 @@ import { ManutencaoModule } from './manutencao/manutencao.module';
     CobrancaModule,
     BackupModule,
     ServidorLocalModule,
+    ImpressaoModule,
     ManutencaoModule,
   ],
   providers: [

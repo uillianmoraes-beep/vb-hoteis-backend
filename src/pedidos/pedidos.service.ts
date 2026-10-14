@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { DataSource } from 'typeorm';
 import { NovoPedidoDto, RecusarPedidoDto } from './pedidos.dto';
 import { UsuarioToken } from '../common/permissoes';
+import { ImpressaoService } from '../impressao/impressao.service';
 import { EstadiasService } from '../estadias/estadias.service';
 
 interface ItemPedido { produtoId: string; nome: string; quantidade: number; preco: number }
@@ -14,7 +15,7 @@ const fmt = (p: Record<string, unknown>) => ({
 
 @Injectable()
 export class PedidosService {
-  constructor(private readonly ds: DataSource, private readonly estadias: EstadiasService) {}
+  constructor(private readonly ds: DataSource, private readonly estadias: EstadiasService, private readonly impressao: ImpressaoService) {}
 
   /* ---------------- cliente (QR code, sem login) ---------------- */
 
@@ -119,12 +120,18 @@ export class PedidosService {
     try {
       for (const i of p.itens as ItemPedido[]) {
         if (!(i.preco > 0)) continue; // serviço sem custo (toalha, cobertor, limpeza): só atender
-        await this.estadias.lancarItem(u, p.estadia_id, { produtoId: i.produtoId, quantidade: i.quantidade, precoUnitario: i.preco });
+        await this.estadias.lancarItem(u, p.estadia_id, { produtoId: i.produtoId, quantidade: i.quantidade, precoUnitario: i.preco }, { semImpressao: true });
       }
     } catch (e) {
       await this.ds.query(`UPDATE pedidos SET status = 'novo', aceito_por = NULL, aceito_em = NULL WHERE id = $1`, [id]);
       throw e;
     }
+    // ticket do pedido inteiro (com os serviços, ex.: toalha) nas impressoras
+    const [un] = await this.ds.query(`SELECT ambiente_id FROM unidades WHERE id = $1`, [p.unidade_id ?? p.unidadeId]);
+    void this.impressao.producao(u.empresaId, {
+      ambienteId: un?.ambiente_id ?? null, unidadeId: p.unidade_id ?? p.unidadeId, titulo: 'PEDIDO', origem: 'pedido', usuario: u.nome, obs: p.observacao ?? null,
+      itens: (p.itens as ItemPedido[]).map((i) => ({ produtoId: i.produtoId, nome: i.nome, quantidade: i.quantidade })),
+    });
     return { ok: true };
   }
 
