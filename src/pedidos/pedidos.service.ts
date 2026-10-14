@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { NovoPedidoDto, RecusarPedidoDto } from './pedidos.dto';
 import { UsuarioToken } from '../common/permissoes';
 import { ImpressaoService } from '../impressao/impressao.service';
+import { enviarParaLocal } from '../servidor-local/ponte.core';
 import { EstadiasService } from '../estadias/estadias.service';
 
 interface ItemPedido { produtoId: string; nome: string; quantidade: number; preco: number }
@@ -69,8 +70,10 @@ export class PedidosService {
       else itens.push({ produtoId: i.produtoId, nome: String(p.nome), quantidade: i.quantidade, preco: Number(p.preco) });
     }
     const total = Math.round(itens.reduce((s, i) => s + i.preco * i.quantidade * 100, 0)) / 100;
-    await this.ds.query(`INSERT INTO pedidos (empresa_id, unidade_id, estadia_id, itens, total, observacao) VALUES ($1,$2,$3,$4::jsonb,$5,$6)`,
+    const [novo] = await this.ds.query(`INSERT INTO pedidos (empresa_id, unidade_id, estadia_id, itens, total, observacao) VALUES ($1,$2,$3,$4::jsonb,$5,$6) RETURNING *`,
       [un.empresa_id, un.id, un.estadia_id, JSON.stringify(itens), total.toFixed(2), dto.observacao?.trim() || null]);
+    // empresa com servidor local: o pedido feito pela internet vai para lá pela ponte
+    await enviarParaLocal(this.ds, un.empresa_id, 'pedido', { pedido: novo });
     return { ok: true };
   }
 

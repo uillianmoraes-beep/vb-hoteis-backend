@@ -6,6 +6,7 @@ import { UsuarioToken } from '../common/permissoes';
 import { soDigitos } from '../common/cnpj';
 import { FaturamentoService } from '../faturamento/faturamento.service';
 import { Asaas, ErroAsaas, type AmbienteAsaas } from './asaas';
+import { enviarParaLocal } from '../servidor-local/ponte.core';
 
 /** guardado em empresas.cobranca (a chave vai criptografada) */
 interface ConfigCobranca {
@@ -47,7 +48,11 @@ export class CobrancaService {
     return !!(c.ativo && c.chaveCripto);
   }
 
-  private webhookUrl(base: string, empresaId: string) { return `${base.replace(/\/$/, '')}/api/publico/asaas/${empresaId}`; }
+  private webhookUrl(base: string, empresaId: string) {
+    // no servidor local o Asaas avisa a nuvem, que repassa pela ponte
+    const b = (process.env.VB_MODO || '').toLowerCase() === 'local' ? (process.env.VB_NUVEM_URL || 'https://vb-hoteis-backend-production.up.railway.app') : base;
+    return `${b.replace(/\/$/, '')}/api/publico/asaas/${empresaId}`;
+  }
 
   // ---------------- configuração ----------------
 
@@ -212,6 +217,13 @@ export class CobrancaService {
     const a = Buffer.from(token ?? '');
     const b = Buffer.from(c.webhookToken ?? '');
     if (!c.webhookToken || a.length !== b.length || !timingSafeEqual(a, b)) throw new ForbiddenException('Token inválido.');
+    // empresa com servidor local: o aviso vai para o servidor local processar
+    if (await enviarParaLocal(this.ds, empresaId, 'asaas', corpo)) return { ok: true, encaminhado: true };
+    return this.processarPagamento(empresaId, corpo);
+  }
+
+  /** aplica o aviso do Asaas (chamado direto ou pelo servidor local ao buscar os eventos da nuvem) */
+  async processarPagamento(empresaId: string, corpo: { event?: string; payment?: { id?: string; status?: string; value?: number; netValue?: number; billingType?: string; paymentDate?: string | null; clientPaymentDate?: string | null } }) {
     const ev = corpo?.event ?? '';
     const pag = corpo?.payment;
     if (!pag?.id) return { ok: true };

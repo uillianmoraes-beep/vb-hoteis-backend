@@ -263,18 +263,60 @@ export class BackupService implements OnModuleInit, OnModuleDestroy {
       for (const [tabela, linhas] of Object.entries(dados.tabelas)) {
         const atuais = m.colunas.get(tabela);
         if (!atuais || !Array.isArray(linhas) || !linhas.length) continue;
-        const cols = Object.keys(linhas[0]).filter((c) => atuais.has(c));
-        if (!cols.length) continue;
-        const lista = cols.map(ident).join(', ');
-        for (let i = 0; i < linhas.length; i += 500) {
-          const lote = linhas.slice(i, i + 500);
-          await q.query(`INSERT INTO ${ident(tabela)} (${lista}) SELECT ${lista} FROM json_populate_recordset(NULL::${ident(tabela)}, $1::json)`, [JSON.stringify(lote)]);
-          registros += lote.length;
-        }
+        registros += await this.inserir(q, tabela, linhas, atuais);
       }
     });
     this.mapaCache = null;
     return registros;
+  }
+
+  /** troca só algumas tabelas da empresa (espelho vindo do servidor local) */
+  async aplicarParcial(empresaId: string, tabelas: Record<string, Record<string, unknown>[]>, permitidas: string[]): Promise<number> {
+    const m = await this.mapa();
+    let registros = 0;
+    await this.ds.transaction(async (q) => {
+      await q.query(`SET LOCAL session_replication_role = replica`);
+      for (const tabela of permitidas) {
+        const rota = m.rotas.find((r) => r.tabela === tabela);
+        const atuais = m.colunas.get(tabela);
+        if (!rota || !atuais || !Array.isArray(tabelas[tabela])) continue;
+        await q.query(`DELETE FROM ${ident(tabela)} x WHERE ${rota.where}`, [empresaId]);
+        registros += await this.inserir(q, tabela, tabelas[tabela], atuais);
+      }
+    });
+    return registros;
+  }
+
+  /** insere linhas (mesmas colunas da tabela atual), ignorando as que já existem */
+  async inserir(q: { query: (s: string, p?: unknown[]) => Promise<any> }, tabela: string, linhas: Record<string, unknown>[], atuais?: Set<string>, ignorarRepetidas = false): Promise<number> {
+    if (!linhas.length) return 0;
+    const cols = atuais ?? (await this.mapa()).colunas.get(tabela);
+    if (!cols) return 0;
+    const lista = Object.keys(linhas[0]).filter((c) => cols.has(c)).map(ident).join(', ');
+    if (!lista) return 0;
+    let n = 0;
+    for (let i = 0; i < linhas.length; i += 500) {
+      const lote = linhas.slice(i, i + 500);
+      await q.query(`INSERT INTO ${ident(tabela)} (${lista}) SELECT ${lista} FROM json_populate_recordset(NULL::${ident(tabela)}, $1::json)${ignorarRepetidas ? ' ON CONFLICT DO NOTHING' : ''}`, [JSON.stringify(lote)]);
+      n += lote.length;
+    }
+    return n;
+  }
+
+  /** backup recebido de um servidor local (cópia externa na nuvem) */
+  async guardarRecebido(empresaId: string, arquivo: Buffer) {
+    const protegido = arquivo.subarray(0, 5).equals(MAGIA_SENHA);
+    await this.ds.query(
+      `INSERT INTO backups_arquivos (empresa_id, tipo, tamanho, tabelas, registros, protegido, conteudo, criado_por) VALUES ($1,'servidor',$2,0,0,$3,$4,'Servidor local')`,
+      [empresaId, arquivo.length, protegido, arquivo]);
+    await this.ds.query(
+      `DELETE FROM backups_arquivos WHERE empresa_id = $1 AND tipo = 'servidor' AND id NOT IN (SELECT id FROM backups_arquivos WHERE empresa_id = $1 AND tipo = 'servidor' ORDER BY criado_em DESC LIMIT 7)`, [empresaId]);
+  }
+
+  /** último backup automático (para o servidor local mandar à nuvem) */
+  async ultimoAutomatico(empresaId: string): Promise<{ conteudo: Buffer; criadoEm: Date } | null> {
+    const [b] = await this.ds.query(`SELECT conteudo, criado_em FROM backups_arquivos WHERE empresa_id = $1 AND tipo = 'auto' ORDER BY criado_em DESC LIMIT 1`, [empresaId]);
+    return b ? { conteudo: b.conteudo, criadoEm: b.criado_em } : null;
   }
 
   // ---------------- rotina automática ----------------

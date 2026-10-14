@@ -37,6 +37,11 @@ export class AuthService {
 
     const empresa = await this.empresas.findOne({ where: { id: usuario.empresaId } });
     if (!empresa || !empresa.ativo) throw new UnauthorizedException('Acesso da empresa suspenso.');
+    // empresa que passou para o servidor local: na nuvem só fica o espelho (reserva online, comanda)
+    if ((process.env.VB_MODO || '').toLowerCase() !== 'local') {
+      const [sl] = await this.usuarios.query(`SELECT servidor_local->>'ativadoEm' AS ativado FROM empresas WHERE id = $1`, [empresa.id]);
+      if (sl?.ativado) throw new UnauthorizedException('Esta empresa trabalha com o servidor local. Entre pelo endereço do servidor na rede do hotel (ex.: http://192.168.0.10).');
+    }
 
     const payload: UsuarioToken = {
       sub: usuario.id,

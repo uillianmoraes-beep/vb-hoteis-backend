@@ -75,7 +75,7 @@ export class ServidorLocalService implements OnModuleInit, OnModuleDestroy {
     return l.map((x: Record<string, any>) => ({ id: x.id, nome: x.nome, temCodigo: x.tem, ...(x.servidor_local ?? {}) }));
   }
 
-  private async empresaPorToken(empresaId: string, token?: string) {
+  async empresaPorToken(empresaId: string, token?: string) {
     if (!/^[0-9a-f-]{36}$/i.test(empresaId || '') || !/^[0-9a-f]{64}$/.test(token || '')) throw new ForbiddenException('Código inválido.');
     const [e] = await this.ds.query(`SELECT id, nome, modulos, ativo, servidor_token_hash FROM empresas WHERE id = $1`, [empresaId]);
     if (!e?.servidor_token_hash) throw new ForbiddenException('Código inválido.');

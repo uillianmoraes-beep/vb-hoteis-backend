@@ -4,6 +4,7 @@ import { randomBytes } from 'crypto';
 import { UsuarioToken } from '../common/permissoes';
 import { ConfigReservaOnlineDto, ReservaPublicaDto } from './reservas.dto';
 import { CobrancaService } from '../cobranca/cobranca.service';
+import { enviarParaLocal } from '../servidor-local/ponte.core';
 
 interface Q { query: (sql: string, params?: unknown[]) => Promise<any> }
 
@@ -244,6 +245,10 @@ export class ReservaOnlineService {
     const pix = sinalPct > 0
       ? await this.cobranca.pixReserva(a.empresa_id, { reservaId: r.id, numero: r.numero, nome: dto.nome.trim(), cpf: dto.documento ?? '', telefone: dto.telefone, email: dto.email, valor: r2((r.total * sinalPct) / 100) })
       : null;
+    // empresa com servidor local: a reserva (e a cobrança do sinal) vai para lá pela ponte
+    const [linha] = await this.ds.query(`SELECT * FROM reservas WHERE id = $1`, [r.id]);
+    const cobrancas = await this.ds.query(`SELECT * FROM cobrancas WHERE tipo = 'reserva_sinal' AND referencia_id = $1`, [r.id]);
+    await enviarParaLocal(this.ds, a.empresa_id, 'reserva', { reserva: linha, cobrancas });
     return {
       codigo: r.codigo, numero: r.numero, status, total: r.total, noites: n, categoria: r.categoria,
       quarto: dto.unidadeId ? r.quarto.codigo : null, sinal: sinalPct > 0 ? r2((r.total * sinalPct) / 100) : 0, pix,
