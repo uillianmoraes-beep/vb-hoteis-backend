@@ -23,6 +23,16 @@ export class EmpresasService {
     return this.repo.save(empresa);
   }
 
+  async logo(id: string) {
+    const [e] = await this.repo.query(`SELECT logo FROM empresas WHERE id = $1`, [id]);
+    return { logo: e?.logo ?? null };
+  }
+
+  async salvarLogo(id: string, logo: string | null) {
+    await this.repo.query(`UPDATE empresas SET logo = $2 WHERE id = $1`, [id, logo]);
+    return { ok: true };
+  }
+
   /** Aceita só nome de tema simples e cores hexadecimais dos status conhecidos. */
   private limparAparencia(a: { tema?: string; cores?: Record<string, string>; menu?: string }) {
     const tema = typeof a.tema === 'string' && /^[a-z0-9-]{1,30}$/.test(a.tema) ? a.tema : 'dia';

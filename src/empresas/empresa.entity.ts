@@ -20,6 +20,8 @@ export class Empresa {
   @Column({ name: 'ultimo_uso', type: 'int', default: 0 }) ultimoUso!: number;
   /** módulos contratados (revenda); só a Virtual Barra altera */
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) modulos!: Record<string, boolean>;
+  /** logotipo (data URL) para os impressos; fora das consultas normais por ser grande */
+  @Column({ type: 'text', nullable: true, select: false }) logo?: string | null;
   @Column({ default: true }) ativo!: boolean;
   @CreateDateColumn({ name: 'criado_em', type: 'timestamptz' }) criadoEm!: Date;
   @UpdateDateColumn({ name: 'atualizado_em', type: 'timestamptz' }) atualizadoEm!: Date;
