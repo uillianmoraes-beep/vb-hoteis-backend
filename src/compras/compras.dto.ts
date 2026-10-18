@@ -57,3 +57,32 @@ export class EscolhaDto {
 export class EscolhasDto {
   @IsArray() @ArrayMaxSize(300) @ValidateNested({ each: true }) @Type(() => EscolhaDto) escolhas!: EscolhaDto[];
 }
+
+export class ItemModeloDto {
+  @IsOptional() @IsUUID() produtoId?: string | null;
+  @IsString() @MaxLength(200) descricao!: string;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(1_000_000) quantidade?: number | null;
+  @IsOptional() @IsString() @MaxLength(10) unidade?: string;
+}
+
+/** lista padrão de itens para montar cotações rápido */
+export class ModeloDto {
+  @IsString() @MaxLength(80) nome!: string;
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(300) @ValidateNested({ each: true }) @Type(() => ItemModeloDto) itens!: ItemModeloDto[];
+}
+
+export class RecebidoDto {
+  @IsUUID() itemId!: string;
+  /** quantidade que entra no estoque, na unidade do produto */
+  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(1_000_000) quantidade!: number;
+  /** custo por unidade do produto (quando a unidade da compra é outra, ex.: caixa com 12) */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 4 }) @Min(0) @Max(1_000_000) custo?: number | null;
+}
+
+/** entrada no estoque do que foi comprado de um fornecedor */
+export class ReceberDto {
+  @IsOptional() @IsUUID() localId?: string | null;
+  @IsOptional() @IsString() @MaxLength(60) documento?: string;
+  /** quantidades realmente recebidas (itemId → quantidade); ausente = a da cotação */
+  @IsOptional() @IsArray() @ArrayMaxSize(300) @ValidateNested({ each: true }) @Type(() => RecebidoDto) itens?: RecebidoDto[];
+}

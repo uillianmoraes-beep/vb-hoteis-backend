@@ -2,13 +2,19 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { DataSource } from 'typeorm';
 import { UsuarioToken } from '../common/permissoes';
 import { soDigitos } from '../common/cnpj';
-import { AdicionarFornecedoresDto, CotacaoDto, EscolhasDto, FornecedorDto, RespostaDto } from './compras.dto';
+import { moverEstoque } from '../estoque/estoque.core';
+import { AdicionarFornecedoresDto, CotacaoDto, EscolhasDto, FornecedorDto, ModeloDto, ReceberDto, RespostaDto } from './compras.dto';
 
 interface Q { query: (sql: string, params?: unknown[]) => Promise<any> }
 const num = (v: unknown) => Number(v ?? 0);
 const r2 = (v: number) => Math.round(v * 100) / 100;
 const TOKEN = `substr(md5(random()::text || clock_timestamp()::text || gen_random_uuid()::text), 1, 24)`;
 const linhas = (r: any) => (Array.isArray(r?.[0]) ? r[0] : r);
+/** mesma chave para o mesmo produto (cadastrado) ou para o mesmo texto (item avulso) */
+const CHAVE_ITEM = `COALESCE(i.produto_id::text, lower(trim(i.descricao)))`;
+const chaveItem = (i: { produto_id?: unknown; descricao?: unknown }) => (i.produto_id ? String(i.produto_id) : String(i.descricao ?? '').trim().toLowerCase());
+
+export interface UltimoPreco { preco: number; marca: string | null; fornecedor: string; data: string; comprado: boolean; numero: number }
 
 @Injectable()
 export class ComprasService {
@@ -130,6 +136,7 @@ export class ComprasService {
       `SELECT p.* FROM cotacao_precos p JOIN cotacao_fornecedores cf ON cf.id = p.cotacao_fornecedor_id WHERE cf.cotacao_id = $1`, [id]);
     const mapa = new Map<string, { preco: number | null; marca: string | null }>();
     for (const p of precos) mapa.set(`${p.cotacao_fornecedor_id}:${p.item_id}`, { preco: p.preco === null ? null : num(p.preco), marca: p.marca });
+    const ultimos = await this.ultimosPrecos(u.empresaId, id, itens.map(chaveItem));
 
     const its = itens.map((i: Record<string, unknown>) => {
       const q = num(i.quantidade);
@@ -141,7 +148,7 @@ export class ComprasService {
       const menor = validas.length ? validas.reduce((a: { preco: number }, b: { preco: number }) => (b.preco < a.preco ? b : a)) : null;
       return {
         id: i.id, produtoId: i.produto_id, descricao: i.descricao, quantidade: q, unidade: i.unidade, escolhidoId: i.escolhido_id,
-        ofertas, menorId: menor?.cotacaoFornecedorId ?? null,
+        ofertas, menorId: menor?.cotacaoFornecedorId ?? null, ultimo: ultimos.get(chaveItem(i)) ?? null,
       };
     });
     const fornecedores = cfs.map((f: Record<string, unknown>) => {
@@ -155,6 +162,7 @@ export class ComprasService {
         id: f.id, fornecedorId: f.fornecedor_id, nome: f.nome, telefone: f.telefone, email: f.email, contato: f.contato, cnpj: f.cnpj, token: f.token, status: f.status,
         respondidoEm: f.respondido_em, prazoEntrega: f.prazo_entrega, condicaoPagamento: f.condicao_pagamento, frete: num(f.frete), observacao: f.observacao,
         total: r2(total), cotados, escolhidos, totalEscolhido: r2(totalEscolhido), completo: cotados === its.length,
+        recebidoEm: f.recebido_em ?? null, recebidoPor: f.recebido_por ?? null,
       };
     });
     const totalEscolhido = r2(fornecedores.reduce((s: number, f: { totalEscolhido: number; escolhidos: number; frete: number }) => s + f.totalEscolhido + (f.escolhidos ? f.frete : 0), 0));
@@ -227,6 +235,8 @@ export class ComprasService {
 
   async reabrir(u: UsuarioToken, id: string) {
     await this.cotacao(u.empresaId, id);
+    const [rec] = await this.ds.query(`SELECT 1 FROM cotacao_fornecedores WHERE cotacao_id = $1 AND recebido_em IS NOT NULL LIMIT 1`, [id]);
+    if (rec) throw new BadRequestException('Já foi dada entrada no estoque de um pedido desta cotação. Para comprar de novo, use "Repetir cotação".');
     await this.ds.query(`UPDATE cotacoes SET status = 'aberta', fechada_em = NULL, fechada_por = NULL WHERE id = $1 AND empresa_id = $2`, [id, u.empresaId]);
     return { ok: true };
   }
@@ -255,6 +265,137 @@ export class ComprasService {
     };
   }
 
+  // ---------- histórico de preços ----------
+
+  /**
+   * Último preço de cada item (mesmo produto ou mesmo texto) em outras cotações.
+   * Sem fornecedor: prefere o que foi comprado (cotação fechada); com fornecedor: o último que ele passou.
+   */
+  private async ultimosPrecos(empresaId: string, excluirCotacao: string, chaves: string[], fornecedorId?: string): Promise<Map<string, UltimoPreco>> {
+    const mapa = new Map<string, UltimoPreco>();
+    const unicas = [...new Set(chaves.filter(Boolean))];
+    if (!unicas.length) return mapa;
+    const params: unknown[] = [empresaId, excluirCotacao, unicas];
+    if (fornecedorId) params.push(fornecedorId);
+    const l = await this.ds.query(
+      `SELECT DISTINCT ON (chave) chave, preco, marca, fornecedor, data, comprado, numero FROM (
+         SELECT ${CHAVE_ITEM} AS chave, p.preco, p.marca, f.nome AS fornecedor, c.numero,
+                COALESCE(cf.respondido_em, c.criado_em) AS data, (i.escolhido_id = cf.id AND c.status = 'fechada') AS comprado
+           FROM cotacao_itens i
+           JOIN cotacoes c ON c.id = i.cotacao_id
+           JOIN cotacao_precos p ON p.item_id = i.id
+           JOIN cotacao_fornecedores cf ON cf.id = p.cotacao_fornecedor_id
+           JOIN fornecedores f ON f.id = cf.fornecedor_id
+          WHERE c.empresa_id = $1 AND c.id <> $2 AND c.status <> 'cancelada' AND p.preco > 0
+            AND ${CHAVE_ITEM} = ANY($3::text[])${fornecedorId ? ' AND cf.fornecedor_id = $4' : ''}
+       ) x ORDER BY chave, ${fornecedorId ? '' : 'comprado DESC, '}data DESC`, params);
+    for (const r of l) {
+      mapa.set(r.chave, { preco: num(r.preco), marca: r.marca ?? null, fornecedor: r.fornecedor, data: r.data, comprado: !!r.comprado, numero: num(r.numero) });
+    }
+    return mapa;
+  }
+
+  /** preços que os distribuidores já passaram (todas as cotações), do mais novo para o mais antigo */
+  async historicoPrecos(u: UsuarioToken, busca?: string) {
+    const params: unknown[] = [u.empresaId];
+    let filtro = '';
+    if (busca?.trim()) {
+      params.push(`%${busca.trim()}%`);
+      filtro = ` AND (i.descricao ILIKE $2 OR pr.nome ILIKE $2 OR f.nome ILIKE $2 OR pr.grupo ILIKE $2)`;
+    }
+    const l = await this.ds.query(
+      `SELECT ${CHAVE_ITEM} AS chave, i.produto_id, COALESCE(pr.nome, i.descricao) AS item, i.unidade, pr.grupo,
+              f.id AS fornecedor_id, f.nome AS fornecedor, p.preco, p.marca, c.id AS cotacao_id, c.numero,
+              COALESCE(cf.respondido_em, c.criado_em) AS data, (i.escolhido_id = cf.id AND c.status = 'fechada') AS comprado
+         FROM cotacao_precos p
+         JOIN cotacao_itens i ON i.id = p.item_id
+         JOIN cotacoes c ON c.id = i.cotacao_id
+         JOIN cotacao_fornecedores cf ON cf.id = p.cotacao_fornecedor_id
+         JOIN fornecedores f ON f.id = cf.fornecedor_id
+         LEFT JOIN produtos pr ON pr.id = i.produto_id
+        WHERE c.empresa_id = $1 AND c.status <> 'cancelada' AND p.preco > 0${filtro}
+        ORDER BY data DESC LIMIT 800`, params);
+    return l.map((r: Record<string, unknown>) => ({
+      chave: r.chave, produtoId: r.produto_id ?? null, item: r.item, unidade: r.unidade, grupo: r.grupo ?? null,
+      fornecedorId: r.fornecedor_id, fornecedor: r.fornecedor, preco: num(r.preco), marca: r.marca ?? null,
+      cotacaoId: r.cotacao_id, numero: num(r.numero), data: r.data, comprado: !!r.comprado,
+    }));
+  }
+
+  // ---------- listas padrão ----------
+
+  async modelos(u: UsuarioToken) {
+    const l = await this.ds.query(`SELECT id, nome, itens, atualizado_em FROM cotacao_modelos WHERE empresa_id = $1 ORDER BY nome`, [u.empresaId]);
+    return l.map((m: Record<string, unknown>) => ({ id: m.id, nome: m.nome, itens: Array.isArray(m.itens) ? m.itens : [], atualizadoEm: m.atualizado_em }));
+  }
+
+  async salvarModelo(u: UsuarioToken, dto: ModeloDto) {
+    const nome = dto.nome.trim();
+    if (!nome) throw new BadRequestException('Dê um nome para a lista.');
+    const itens = dto.itens
+      .filter((i) => i.descricao.trim())
+      .map((i) => ({ produtoId: i.produtoId ?? null, descricao: i.descricao.trim(), quantidade: i.quantidade ?? null, unidade: (i.unidade ?? 'un').trim() || 'un' }));
+    if (!itens.length) throw new BadRequestException('A lista precisa de pelo menos um item.');
+    const [m] = await this.ds.query(
+      `INSERT INTO cotacao_modelos (empresa_id, nome, itens) VALUES ($1,$2,$3::jsonb)
+       ON CONFLICT (empresa_id, nome) DO UPDATE SET itens = EXCLUDED.itens, atualizado_em = now() RETURNING id`,
+      [u.empresaId, nome, JSON.stringify(itens)]);
+    return { id: m.id };
+  }
+
+  async excluirModelo(u: UsuarioToken, id: string) {
+    const r = await this.ds.query(`DELETE FROM cotacao_modelos WHERE id = $1 AND empresa_id = $2 RETURNING id`, [id, u.empresaId]);
+    if (!linhas(r).length) throw new NotFoundException('Lista não encontrada.');
+    return { ok: true };
+  }
+
+  // ---------- entrada no estoque ----------
+
+  /** dá entrada no estoque dos itens comprados de um fornecedor (cotação fechada), com o preço da cotação como custo */
+  async receber(u: UsuarioToken, id: string, cfId: string, dto: ReceberDto) {
+    const c = await this.cotacao(u.empresaId, id);
+    if (c.status !== 'fechada') throw new BadRequestException('Feche a cotação antes de dar entrada no estoque.');
+    const [cf] = await this.ds.query(
+      `SELECT cf.id, cf.recebido_em, f.nome FROM cotacao_fornecedores cf JOIN fornecedores f ON f.id = cf.fornecedor_id WHERE cf.id = $1 AND cf.cotacao_id = $2`, [cfId, id]);
+    if (!cf) throw new NotFoundException('Fornecedor não está nesta cotação.');
+    if (cf.recebido_em) throw new BadRequestException(`A entrada deste pedido já foi feita em ${new Date(cf.recebido_em).toLocaleDateString('pt-BR')}.`);
+    const localId = dto.localId || c.local_id;
+    if (!localId) throw new BadRequestException('Escolha em qual estoque os itens vão entrar.');
+    const [local] = await this.ds.query(`SELECT id, nome FROM estoque_locais WHERE id = $1 AND empresa_id = $2 AND ativo`, [localId, u.empresaId]);
+    if (!local) throw new BadRequestException('Local de estoque não encontrado.');
+
+    const itens = await this.ds.query(
+      `SELECT i.id, i.produto_id, i.descricao, i.quantidade, p.preco FROM cotacao_itens i
+         JOIN cotacao_precos p ON p.item_id = i.id AND p.cotacao_fornecedor_id = $2
+        WHERE i.cotacao_id = $1 AND i.escolhido_id = $2 ORDER BY i.ordem`, [id, cfId]);
+    if (!itens.length) throw new BadRequestException('Nenhum item foi comprado deste fornecedor.');
+    const prods = [...new Set(itens.filter((i: { produto_id: string | null }) => i.produto_id).map((i: { produto_id: string }) => i.produto_id))];
+    const existem = new Set<string>(prods.length
+      ? (await this.ds.query(`SELECT id FROM produtos WHERE empresa_id = $1 AND id = ANY($2::uuid[])`, [u.empresaId, prods])).map((p: { id: string }) => p.id)
+      : []);
+    const informado = new Map((dto.itens ?? []).map((x) => [x.itemId, x]));
+    const semCadastro: string[] = [];
+    let entradas = 0;
+    await this.ds.transaction(async (m) => {
+      for (const i of itens) {
+        if (!i.produto_id || !existem.has(i.produto_id)) { semCadastro.push(i.descricao); continue; }
+        const inf = informado.get(i.id);
+        const q = inf ? inf.quantidade : num(i.quantidade);
+        if (!(q > 0)) continue;
+        const custo = inf?.custo !== undefined && inf?.custo !== null ? inf.custo : num(i.preco);
+        await m.query(`UPDATE produtos SET controla_estoque = true WHERE id = $1 AND NOT controla_estoque`, [i.produto_id]);
+        await moverEstoque(m, {
+          empresaId: u.empresaId, localId: local.id, produtoId: i.produto_id, quantidade: q, tipo: 'entrada', custoUnitario: custo,
+          documento: dto.documento?.trim() || `Cotação ${c.numero}`, referencia: `cotacao:${id}:${cfId}`,
+          observacao: `Compra de ${cf.nome} (cotação nº ${c.numero})`, usuario: u.nome,
+        });
+        entradas++;
+      }
+      await m.query(`UPDATE cotacao_fornecedores SET recebido_em = now(), recebido_por = $2 WHERE id = $1`, [cfId, u.nome]);
+    });
+    return { ok: true, entradas, semCadastro, local: local.nome };
+  }
+
   // ---------- link público do fornecedor ----------
 
   private async porToken(token: string) {
@@ -270,15 +411,17 @@ export class ComprasService {
   async publico(token: string) {
     const cf = await this.porToken(token);
     const itens = await this.ds.query(
-      `SELECT i.id, i.descricao, i.quantidade, i.unidade, p.preco, p.marca FROM cotacao_itens i
+      `SELECT i.id, i.produto_id, i.descricao, i.quantidade, i.unidade, p.preco, p.marca FROM cotacao_itens i
          LEFT JOIN cotacao_precos p ON p.item_id = i.id AND p.cotacao_fornecedor_id = $2
         WHERE i.cotacao_id = $1 ORDER BY i.ordem, i.descricao`, [cf.cot_id, cf.id]);
+    const ultimos = await this.ultimosPrecos(cf.empresa_id, cf.cot_id, itens.map(chaveItem), cf.fornecedor_id);
     return {
       empresa: cf.empresa, fornecedor: cf.fornecedor, numero: cf.numero, titulo: cf.titulo,
       prazo: cf.prazo ?? null,
       observacao: cf.cot_obs, aberta: cf.cot_status === 'aberta', status: cf.status, respondidoEm: cf.respondido_em,
       prazoEntrega: cf.prazo_entrega, condicaoPagamento: cf.condicao_pagamento, frete: num(cf.frete), obsFornecedor: cf.observacao,
-      itens: itens.map((i: Record<string, unknown>) => ({ id: i.id, descricao: i.descricao, quantidade: num(i.quantidade), unidade: i.unidade, preco: i.preco === null ? null : num(i.preco), marca: i.marca })),
+      itens: itens.map((i: Record<string, unknown>) => ({ id: i.id, descricao: i.descricao, quantidade: num(i.quantidade), unidade: i.unidade, preco: i.preco === null ? null : num(i.preco), marca: i.marca,
+        ultimoPreco: ultimos.get(chaveItem(i))?.preco ?? null, ultimaMarca: ultimos.get(chaveItem(i))?.marca ?? null })),
     };
   }
 

@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { ComprasService } from './compras.service';
-import { AdicionarFornecedoresDto, CotacaoDto, EscolhasDto, FornecedorDto, RespostaDto } from './compras.dto';
+import { AdicionarFornecedoresDto, CotacaoDto, EscolhasDto, FornecedorDto, ModeloDto, ReceberDto, RespostaDto } from './compras.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { Publico } from '../common/decorators/publico.decorator';
@@ -63,4 +63,20 @@ export class ComprasController {
 
   @Get('cotacoes/:id/pedido/:cfId') @Requer('compras.gerenciar')
   pedido(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Param('cfId', ParseUUIDPipe) cfId: string) { return this.service.pedido(u, id, cfId); }
+
+  @Post('cotacoes/:id/receber/:cfId') @HttpCode(200) @Requer('compras.gerenciar')
+  receber(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Param('cfId', ParseUUIDPipe) cfId: string, @Body() dto: ReceberDto) { return this.service.receber(u, id, cfId, dto); }
+
+  // histórico de preços e listas padrão (fora de /cotacoes/:id para não confundir com o id)
+  @Get('compras/precos') @Requer('compras.gerenciar')
+  historico(@Usuario() u: UsuarioToken, @Query('busca') busca?: string) { return this.service.historicoPrecos(u, busca); }
+
+  @Get('compras/listas') @Requer('compras.gerenciar')
+  modelos(@Usuario() u: UsuarioToken) { return this.service.modelos(u); }
+
+  @Post('compras/listas') @Requer('compras.gerenciar')
+  salvarModelo(@Usuario() u: UsuarioToken, @Body() dto: ModeloDto) { return this.service.salvarModelo(u, dto); }
+
+  @Delete('compras/listas/:id') @Requer('compras.gerenciar')
+  excluirModelo(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.excluirModelo(u, id); }
 }
