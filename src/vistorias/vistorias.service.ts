@@ -193,7 +193,7 @@ export class VistoriasService {
         [u.empresaId, un.id, dto.camareiraId || null, camareira, u.nome, JSON.stringify(dto.itens), !reprovado, (dto.observacao?.trim() || null)?.slice(0, 500) ?? null]);
       await m.query(
         `UPDATE unidades SET vistoria_resultado = $2, vistoria_em = now(), frigobar_validade = COALESCE($3::date, frigobar_validade),
-           status = $4, status_desde = CASE WHEN status = $4 THEN status_desde ELSE now() END, motivo_bloqueio_id = NULL, observacao_status = $5
+           status = $4::varchar, status_desde = CASE WHEN status = $4::varchar THEN status_desde ELSE now() END, motivo_bloqueio_id = NULL, observacao_status = $5
          WHERE id = $1`, [un.id, dto.resultado, dto.frigobarValidade || null, novoStatus, obsStatus]);
       await m.query(
         `INSERT INTO unidade_eventos (empresa_id, unidade_id, status_anterior, status_novo, observacao, usuario_id, usuario_nome) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
