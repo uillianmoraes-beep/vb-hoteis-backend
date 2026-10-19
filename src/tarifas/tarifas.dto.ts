@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import {
-  ArrayMaxSize, IsArray, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, ValidateNested,
+  ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, ValidateNested,
 } from 'class-validator';
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -51,4 +51,21 @@ export class SalvarTarifasDto {
   @ValidateNested() @Type(() => RegrasDto) regras!: RegrasDto;
   @IsArray() @ArrayMaxSize(30) @ValidateNested({ each: true }) @Type(() => PeriodoDto) periodos!: PeriodoDto[];
   @IsArray() @ArrayMaxSize(20) @ValidateNested({ each: true }) @Type(() => TabelaDto) tabelas!: TabelaDto[];
+}
+
+export class DiariaCategoriaDto {
+  @IsUUID() categoriaId!: string;
+  /** diária de domingo a quinta (0 = categoria sem diária) */
+  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100000) diaria!: number;
+  /** diária de sexta e sábado (vazio = a mesma) */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100000) fimSemana?: number | null;
+  /** pessoas que a diária já inclui */
+  @IsOptional() @IsInt() @Min(1) @Max(20) pessoasIncluidas?: number;
+  /** valor por pessoa a mais, por noite */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100000) pessoaExtra?: number;
+  @IsOptional() @IsBoolean() cafeIncluso?: boolean;
+}
+
+export class SalvarDiariasDto {
+  @IsArray() @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => DiariaCategoriaDto) itens!: DiariaCategoriaDto[];
 }

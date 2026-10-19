@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Put } from '@nestjs/common';
 import { TarifasService } from './tarifas.service';
-import { SalvarTarifasDto } from './tarifas.dto';
+import { SalvarDiariasDto, SalvarTarifasDto } from './tarifas.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
@@ -13,6 +13,19 @@ export class TarifasController {
   @Requer('estadias.operar', 'estadias.entrada', 'tarifas.gerenciar')
   previa(@Usuario() u: UsuarioToken, @Param('unidadeId', ParseUUIDPipe) unidadeId: string) {
     return this.service.previa(u, unidadeId);
+  }
+
+  /** hotel/pousada: diária de cada categoria */
+  @Get('diarias/:ambienteId')
+  @Requer('tarifas.gerenciar', 'reservas.gerenciar', 'estadias.operar')
+  diarias(@Usuario() u: UsuarioToken, @Param('ambienteId', ParseUUIDPipe) ambienteId: string) {
+    return this.service.diarias(u, ambienteId);
+  }
+
+  @Put('diarias/:ambienteId')
+  @Requer('tarifas.gerenciar')
+  salvarDiarias(@Usuario() u: UsuarioToken, @Param('ambienteId', ParseUUIDPipe) ambienteId: string, @Body() dto: SalvarDiariasDto) {
+    return this.service.salvarDiarias(u, ambienteId, dto);
   }
 
   @Get(':ambienteId')

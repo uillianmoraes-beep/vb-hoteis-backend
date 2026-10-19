@@ -133,7 +133,7 @@ export class EstadiasService {
     const diaria = centavos(Number(e.diariaCombinada ?? 0));
     const hosp = centavos(Number(e.totalCombinado ?? 0)) + extras * diaria;
     return {
-      periodoNome: extras ? `Reserva + ${extras} diária(s) extra` : 'Reserva (valor combinado)',
+      periodoNome: extras ? `Diárias + ${extras} diária(s) extra` : 'Diárias (valor combinado)',
       valorHospedagem: hosp, horasAdicionais: 0, valorPessoas: 0, pessoasExtras: 0, consumo, total: hosp + consumo,
       proximaViradaMin: null, proximoNome: null, trechoInicio: 0, trechoFim: null, semPreco: false,
     };
@@ -338,9 +338,21 @@ export class EstadiasService {
     const motor = await this.tarifas.motor(u.empresaId, unidade.ambienteId);
     const agora = new Date();
     const tabela = this.tarifas.escolherTabela(motor, agora);
-    if (!tabela || motor.periodos.length === 0) {
-      throw new BadRequestException('Este ambiente ainda não tem tabela de preços. Configure em Tarifas.');
+    // hotel/pousada: cobra por diária da categoria (Tarifas › Diárias do hotel)
+    const amb = await this.ds.query(`SELECT tipo FROM ambientes WHERE id = $1`, [unidade.ambienteId]);
+    const ehHotel = amb[0]?.tipo && amb[0].tipo !== 'motel';
+    const noites = dto.noites ?? 1;
+    const pessoasEntrada = dto.pessoas ?? Math.min(2, unidade.capacidade || 2);
+    const hotel = ehHotel ? await this.tarifas.precoHotel(u.empresaId, unidade.ambienteId, unidade.categoriaId, agora, noites, pessoasEntrada) : null;
+    if (!hotel && (!tabela || motor.periodos.length === 0)) {
+      throw new BadRequestException(ehHotel
+        ? 'Esta categoria ainda não tem diária. Configure em Tarifas › Diárias do hotel.'
+        : 'Este ambiente ainda não tem tabela de preços. Configure em Tarifas.');
     }
+    // saída prevista: dia da entrada + noites (check-out até as 14h)
+    const saidaPrevista = hotel
+      ? new Intl.DateTimeFormat('sv-SE', { timeZone: FUSO }).format(new Date(agora.getTime() + noites * 86_400_000))
+      : null;
     const modalidade = dto.modalidade ?? 'periodo';
     if (modalidade === 'pernoite' && !this.tarifas.pernoiteDisponivel(motor, agora)) {
       throw new BadRequestException('Fora do horário de entrada do pernoite.');
@@ -361,12 +373,13 @@ export class EstadiasService {
           ambienteId: unidade.ambienteId,
           unidadeId: unidade.id,
           categoriaId: unidade.categoriaId,
-          tabelaId: tabela.id,
+          tabelaId: tabela?.id ?? null,
           modalidade,
           periodoMinimoId: minimo?.id ?? null,
           placa: dto.placa ? dto.placa.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10) || null : null,
-          pessoas: dto.pessoas ?? Math.min(2, unidade.capacidade || 2),
+          pessoas: pessoasEntrada,
           observacao: dto.observacao ?? null,
+          ...(hotel ? { diariaCombinada: hotel.diaria.toFixed(2), totalCombinado: hotel.total.toFixed(2), saidaPrevista } : {}),
           status: 'aberta',
           entradaEm: agora,
           usuarioEntradaId: u.sub,
@@ -376,7 +389,8 @@ export class EstadiasService {
       await this.mudarUnidade(m, u, unidade, 'ocupada', `Entrada${e.placa ? ` · ${e.placa}` : ''}`);
       if (dto.adiantamento?.length) await this.gravarAdiantamento(m, u, e.id, dto.adiantamento, 'entrada', unidade.ambienteId);
       await this.registrar(m, u, e.id, 'entrada',
-        `Uso nº ${e.numero ?? '—'} · entrada na ${unidade.codigo}${e.placa ? `, placa ${e.placa}` : ''}, ${e.pessoas} pessoa(s), tabela ${tabela.nome}`
+        `Uso nº ${e.numero ?? '—'} · entrada na ${unidade.codigo}${e.placa ? `, placa ${e.placa}` : ''}, ${e.pessoas} pessoa(s), `
+        + (hotel ? `${noites} noite(s) · diária ${brl(Math.round(hotel.diaria * 100))} · total ${brl(Math.round(hotel.total * 100))} · saída prevista ${saidaPrevista!.split('-').reverse().join('/')}` : `tabela ${tabela!.nome}`)
         + (modalidade === 'pernoite' ? ', pernoite' : minimo ? `, pacote ${minimo.nome}` : ''));
       return e;
     });

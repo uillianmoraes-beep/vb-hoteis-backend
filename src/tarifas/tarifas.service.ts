@@ -7,7 +7,7 @@ import { Unidade } from '../unidades/unidade.entity';
 import { Periodo } from './periodo.entity';
 import { TabelaPreco } from './tabela-preco.entity';
 import { Preco } from './preco.entity';
-import { SalvarTarifasDto } from './tarifas.dto';
+import { SalvarDiariasDto, SalvarTarifasDto } from './tarifas.dto';
 import { UsuarioToken } from '../common/permissoes';
 import {
   AposUltimo, PeriodoCalc, PrecosCalc, RegrasCalc, centavos, dentroDaFaixa, hhmmParaMin, partesLocais,
@@ -284,6 +284,67 @@ export class TarifasService {
         ? { nome: motor.pernoite.nome, inicio: motor.pernoite.pernoiteInicio, fim: motor.pernoite.pernoiteFim, disponivelAgora: this.pernoiteDisponivel(motor, agora) }
         : null,
       configurado: itens.length > 0 && itens.some((i) => i.valor > 0),
+      /** hotel/pousada: diária da categoria (1 noite, 2 pessoas) */
+      hotel: await this.precoHotel(u.empresaId, unidade.ambienteId, unidade.categoriaId, agora, 1, Math.min(2, unidade.capacidade || 2)),
     };
   }
+
+  // ---------- diárias do hotel/pousada ----------
+
+  /** diárias de cada categoria do ambiente (hotel/pousada) */
+  async diarias(u: UsuarioToken, ambienteId: string) {
+    const [a] = await this.ds.query(`SELECT id, nome, tipo, diarias FROM ambientes WHERE id = $1 AND empresa_id = $2`, [ambienteId, u.empresaId]);
+    if (!a) throw new NotFoundException('Ambiente não encontrado.');
+    // categorias usadas nas unidades do ambiente (e as sem unidade ainda, para poder preparar)
+    const cats: { id: string; nome: string; usadas: string }[] = await this.ds.query(
+      `SELECT c.id, c.nome, (SELECT COUNT(*) FROM unidades un WHERE un.categoria_id = c.id AND un.ambiente_id = $2 AND un.ativo) AS usadas
+         FROM categorias c WHERE c.empresa_id = $1 AND c.ativo ORDER BY c.ordem, c.nome`, [u.empresaId, ambienteId]);
+    const cfg = (a.diarias ?? {}) as Record<string, DiariaCfg>;
+    return {
+      ambiente: { id: a.id, nome: a.nome, tipo: a.tipo },
+      categorias: cats.map((c) => ({
+        id: c.id, nome: c.nome, unidades: Number(c.usadas),
+        diaria: cfg[c.id]?.diaria ?? 0, fimSemana: cfg[c.id]?.fimSemana ?? null,
+        pessoasIncluidas: cfg[c.id]?.pessoasIncluidas ?? 2, pessoaExtra: cfg[c.id]?.pessoaExtra ?? 0, cafeIncluso: cfg[c.id]?.cafeIncluso ?? false,
+      })),
+    };
+  }
+
+  async salvarDiarias(u: UsuarioToken, ambienteId: string, dto: SalvarDiariasDto) {
+    const [a] = await this.ds.query(`SELECT id FROM ambientes WHERE id = $1 AND empresa_id = $2`, [ambienteId, u.empresaId]);
+    if (!a) throw new NotFoundException('Ambiente não encontrado.');
+    const cfg: Record<string, DiariaCfg> = {};
+    for (const i of dto.itens) {
+      if (!(i.diaria > 0)) continue;
+      cfg[i.categoriaId] = {
+        diaria: i.diaria, fimSemana: i.fimSemana && i.fimSemana > 0 ? i.fimSemana : null,
+        pessoasIncluidas: i.pessoasIncluidas ?? 2, pessoaExtra: i.pessoaExtra ?? 0, cafeIncluso: !!i.cafeIncluso,
+      };
+    }
+    await this.ds.query(`UPDATE ambientes SET diarias = $2::jsonb WHERE id = $1`, [ambienteId, JSON.stringify(cfg)]);
+    return { ok: true, categorias: Object.keys(cfg).length };
+  }
+
+  /**
+   * Preço da hospedagem do hotel: soma das noites (sexta e sábado com a diária de fim de semana)
+   * + pessoa extra por noite. null = a categoria não tem diária neste ambiente.
+   */
+  async precoHotel(empresaId: string, ambienteId: string, categoriaId: string | null, entrada: Date, noites: number, pessoas: number) {
+    if (!categoriaId) return null;
+    const [a] = await this.ds.query(`SELECT diarias FROM ambientes WHERE id = $1 AND empresa_id = $2`, [ambienteId, empresaId]);
+    const c = ((a?.diarias ?? {}) as Record<string, DiariaCfg>)[categoriaId];
+    if (!c || !(c.diaria > 0)) return null;
+    let total = 0;
+    const extra = Math.max(0, pessoas - (c.pessoasIncluidas ?? 2)) * (c.pessoaExtra ?? 0);
+    for (let n = 0; n < noites; n++) {
+      const dia = new Date(entrada.getTime() + n * 86_400_000);
+      // noite de sexta ou de sábado (dia da entrada daquela noite)
+      const dsem = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', weekday: 'short' }).format(dia);
+      const fimDeSemana = dsem === 'Fri' || dsem === 'Sat';
+      total += (fimDeSemana && c.fimSemana ? c.fimSemana : c.diaria) + extra;
+    }
+    return { diaria: c.diaria + extra, total: Math.round(total * 100) / 100, cafeIncluso: !!c.cafeIncluso, fimSemana: c.fimSemana ?? null };
+  }
 }
+
+interface DiariaCfg { diaria: number; fimSemana?: number | null; pessoasIncluidas?: number; pessoaExtra?: number; cafeIncluso?: boolean }

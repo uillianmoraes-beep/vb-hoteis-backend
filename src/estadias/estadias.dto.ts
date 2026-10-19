@@ -14,6 +14,8 @@ export class AbrirEstadiaDto {
   /** pacote: cobra no mínimo este período */
   @IsOptional() @IsUUID() periodoMinimoId?: string;
   @IsOptional() @IsString() @MaxLength(500) observacao?: string;
+  /** hotel/pousada sem reserva: quantas noites (cobra a diária da categoria em Tarifas › Diárias) */
+  @IsOptional() @IsInt() @Min(1) @Max(90) noites?: number;
 }
 
 export class AutorizacaoDto {
