@@ -64,6 +64,20 @@ export class UnidadesService {
     if (!ok) throw new BadRequestException('Ambiente inválido.');
   }
 
+  /**
+   * A categoria tem que ser do ambiente da unidade. Categoria ainda sem ambiente passa a ser deste
+   * (é a primeira vez que ela é usada).
+   */
+  private async validarCategoria(empresaId: string, categoriaId: string | null | undefined, ambienteId: string) {
+    if (!categoriaId) return;
+    const [c] = await this.ds.query(
+      `SELECT c.nome, c.ambiente_id, a.nome AS ambiente FROM categorias c LEFT JOIN ambientes a ON a.id = c.ambiente_id
+        WHERE c.id = $1 AND c.empresa_id = $2 AND c.ativo`, [categoriaId, empresaId]);
+    if (!c) throw new BadRequestException('Categoria inválida.');
+    if (!c.ambiente_id) await this.ds.query(`UPDATE categorias SET ambiente_id = $2 WHERE id = $1`, [categoriaId, ambienteId]);
+    else if (c.ambiente_id !== ambienteId) throw new BadRequestException(`A categoria ${c.nome} é do ${c.ambiente}. Escolha uma categoria deste ambiente.`);
+  }
+
   private async validarCodigoLivre(empresaId: string, codigo: string, ignorarId?: string) {
     const existente = await this.repo.findOne({ where: { empresaId, codigo } });
     if (existente && existente.id !== ignorarId) {
@@ -74,6 +88,7 @@ export class UnidadesService {
   async criar(u: UsuarioToken, dto: CriarUnidadeDto) {
     await this.validarAmbiente(u.empresaId, dto.ambienteId);
     await this.validarCodigoLivre(u.empresaId, dto.codigo);
+    await this.validarCategoria(u.empresaId, dto.categoriaId, dto.ambienteId);
     const unidade = this.repo.create({
       ...dto,
       empresaId: u.empresaId,
@@ -87,6 +102,7 @@ export class UnidadesService {
     if (dto.ate < dto.de) throw new BadRequestException('O número final deve ser maior que o inicial.');
     if (dto.ate - dto.de > 499) throw new BadRequestException('Máximo de 500 unidades por vez.');
     await this.validarAmbiente(u.empresaId, dto.ambienteId);
+    await this.validarCategoria(u.empresaId, dto.categoriaId, dto.ambienteId);
 
     const digitos = dto.digitos ?? 2;
     const codigos: string[] = [];
@@ -120,6 +136,10 @@ export class UnidadesService {
     if (dto.ambienteId) await this.validarAmbiente(u.empresaId, dto.ambienteId);
     if (dto.ambientePadraoId) await this.validarAmbiente(u.empresaId, dto.ambientePadraoId);
     if (dto.codigo && dto.codigo !== unidade.codigo) await this.validarCodigoLivre(u.empresaId, dto.codigo, id);
+    // mudou de ambiente sem dizer a categoria: a do ambiente antigo sai
+    const ambienteNovo = dto.ambientePadraoId ?? dto.ambienteId ?? unidade.ambientePadraoId;
+    if (dto.categoriaId === undefined && ambienteNovo !== unidade.ambientePadraoId && unidade.categoriaId) dto.categoriaId = null;
+    if (dto.categoriaId) await this.validarCategoria(u.empresaId, dto.categoriaId, ambienteNovo);
 
     const { plantaX, plantaY, ...resto } = dto;
     Object.assign(unidade, resto);
@@ -137,6 +157,11 @@ export class UnidadesService {
     if (!dto.ambienteId && !dto.tipo && !dto.categoriaId) throw new BadRequestException('Escolha o que mudar.');
     if (dto.ambienteId) await this.validarAmbiente(u.empresaId, dto.ambienteId);
     const lista = await this.repo.find({ where: { empresaId: u.empresaId, id: In(dto.ids) } });
+    if (dto.categoriaId) {
+      const destinos = new Set(dto.ambienteId ? [dto.ambienteId] : lista.map((x) => x.ambientePadraoId));
+      if (destinos.size > 1) throw new BadRequestException('As unidades escolhidas são de ambientes diferentes: mude a categoria de um ambiente por vez.');
+      await this.validarCategoria(u.empresaId, dto.categoriaId, [...destinos][0]);
+    }
     const comConta: string[] = [];
     let n = 0;
     for (const un of lista) {
@@ -146,7 +171,12 @@ export class UnidadesService {
         continue;
       }
       const mud: Partial<Unidade> = {};
-      if (dto.ambienteId) { mud.ambienteId = dto.ambienteId; mud.ambientePadraoId = dto.ambienteId; }
+      if (dto.ambienteId) {
+        mud.ambienteId = dto.ambienteId;
+        mud.ambientePadraoId = dto.ambienteId;
+        // a categoria do ambiente antigo não vale no novo
+        if (!dto.categoriaId && un.ambientePadraoId !== dto.ambienteId) mud.categoriaId = null;
+      }
       if (dto.tipo) mud.tipo = dto.tipo;
       if (dto.categoriaId) mud.categoriaId = dto.categoriaId;
       await this.repo.update({ id: un.id }, mud);

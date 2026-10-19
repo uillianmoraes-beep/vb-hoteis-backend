@@ -121,10 +121,10 @@ export class SeedService implements OnApplicationBootstrap {
           m.create(Ambiente, { empresaId, nome: 'Hotel', tipo: 'hotel', cor: '#0E77DA', ordem: 2 }),
         ]);
         const [standard, luxo, hidro, quarto] = await m.save([
-          m.create(Categoria, { empresaId, nome: 'Standard', tipoUnidade: 'suite', ordem: 1 }),
-          m.create(Categoria, { empresaId, nome: 'Luxo', tipoUnidade: 'suite', ordem: 2 }),
-          m.create(Categoria, { empresaId, nome: 'Hidro', tipoUnidade: 'suite', ordem: 3 }),
-          m.create(Categoria, { empresaId, nome: 'Quarto Standard', tipoUnidade: 'quarto', ordem: 4 }),
+          m.create(Categoria, { empresaId, ambienteId: motel.id, nome: 'Standard', tipoUnidade: 'suite', ordem: 1 }),
+          m.create(Categoria, { empresaId, ambienteId: motel.id, nome: 'Luxo', tipoUnidade: 'suite', ordem: 2 }),
+          m.create(Categoria, { empresaId, ambienteId: motel.id, nome: 'Hidro', tipoUnidade: 'suite', ordem: 3 }),
+          m.create(Categoria, { empresaId, ambienteId: hotel.id, nome: 'Quarto Standard', tipoUnidade: 'quarto', ordem: 4 }),
         ]);
 
         const suites = Array.from({ length: 12 }, (_, i) => {

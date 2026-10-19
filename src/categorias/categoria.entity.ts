@@ -5,6 +5,8 @@ import { TipoUnidade } from '../common/permissoes';
 export class Categoria {
   @PrimaryGeneratedColumn('uuid') id!: string;
   @Column({ name: 'empresa_id', type: 'uuid' }) empresaId!: string;
+  /** ambiente dono da categoria (motel, hotel…); vazio = ainda sem ambiente, aparece em todos */
+  @Column({ name: 'ambiente_id', type: 'uuid', nullable: true }) ambienteId!: string | null;
   @Column({ length: 80 }) nome!: string;
   @Column({ type: 'text', nullable: true }) descricao!: string | null;
   @Column({ name: 'tipo_unidade', type: 'varchar', length: 20, default: 'suite' }) tipoUnidade!: TipoUnidade;

@@ -62,7 +62,7 @@ export class TarifasService {
     const periodos = await this.periodos.find({ where: { ambienteId, ativo: true }, order: { ordem: 'ASC', criadoEm: 'ASC' } });
     const tabelas = await this.tabelas.find({ where: { ambienteId, ativo: true }, order: { prioridade: 'DESC', criadoEm: 'ASC' } });
     const precos = tabelas.length ? await this.precos.find({ where: { tabelaId: In(tabelas.map((t) => t.id)) } }) : [];
-    const categorias = await this.categorias.find({ where: { empresaId: u.empresaId, ativo: true }, order: { ordem: 'ASC', nome: 'ASC' } });
+    const categorias = await this.categoriasDoAmbiente(u.empresaId, ambienteId);
     return {
       ambiente: { id: ambiente.id, nome: ambiente.nome, tipo: ambiente.tipo },
       regras: regrasPadrao(ambiente.regras),
@@ -293,6 +293,19 @@ export class TarifasService {
 
   // ---------- diárias do hotel/pousada ----------
 
+  /**
+   * Categorias que a tela de tarifas do ambiente mostra: as do próprio ambiente, as ainda sem ambiente
+   * e as das unidades que estão neste ambiente agora (unidade mudada de ambiente continua com preço).
+   */
+  private async categoriasDoAmbiente(empresaId: string, ambienteId: string): Promise<Categoria[]> {
+    return this.categorias.createQueryBuilder('c')
+      .where('c.empresaId = :empresaId AND c.ativo = true', { empresaId })
+      .andWhere(`(c.ambienteId = :ambienteId OR c.ambienteId IS NULL
+                 OR c.id IN (SELECT un.categoria_id FROM unidades un WHERE un.ambiente_id = :ambienteId AND un.ativo AND un.categoria_id IS NOT NULL))`, { ambienteId })
+      .orderBy('c.ordem', 'ASC').addOrderBy('c.nome', 'ASC')
+      .getMany();
+  }
+
   /** diárias de cada categoria do ambiente (hotel/pousada) */
   async diarias(u: UsuarioToken, ambienteId: string) {
     const [a] = await this.ds.query(`SELECT id, nome, tipo, diarias FROM ambientes WHERE id = $1 AND empresa_id = $2`, [ambienteId, u.empresaId]);
@@ -300,7 +313,9 @@ export class TarifasService {
     // categorias usadas nas unidades do ambiente (e as sem unidade ainda, para poder preparar)
     const cats: { id: string; nome: string; usadas: string }[] = await this.ds.query(
       `SELECT c.id, c.nome, (SELECT COUNT(*) FROM unidades un WHERE un.categoria_id = c.id AND un.ambiente_id = $2 AND un.ativo) AS usadas
-         FROM categorias c WHERE c.empresa_id = $1 AND c.ativo ORDER BY c.ordem, c.nome`, [u.empresaId, ambienteId]);
+         FROM categorias c WHERE c.empresa_id = $1 AND c.ativo
+          AND (c.ambiente_id = $2 OR c.ambiente_id IS NULL OR EXISTS (SELECT 1 FROM unidades un WHERE un.categoria_id = c.id AND un.ambiente_id = $2 AND un.ativo))
+        ORDER BY c.ordem, c.nome`, [u.empresaId, ambienteId]);
     const cfg = (a.diarias ?? {}) as Record<string, DiariaCfg>;
     return {
       ambiente: { id: a.id, nome: a.nome, tipo: a.tipo },

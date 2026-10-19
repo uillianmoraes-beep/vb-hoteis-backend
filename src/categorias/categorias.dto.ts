@@ -1,7 +1,9 @@
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Matches, MaxLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, ValidateIf } from 'class-validator';
 import { TIPOS_UNIDADE, TipoUnidade } from '../common/permissoes';
 
 export class CriarCategoriaDto {
+  /** ambiente da categoria: a do hotel não aparece no motel e vice-versa */
+  @IsOptional() @IsUUID() ambienteId?: string;
   @IsString() @MaxLength(80) nome!: string;
   @IsOptional() @IsString() descricao?: string;
   @IsOptional() @IsIn(TIPOS_UNIDADE as unknown as string[]) tipoUnidade?: TipoUnidade;
@@ -10,6 +12,7 @@ export class CriarCategoriaDto {
 }
 
 export class AtualizarCategoriaDto {
+  @IsOptional() @IsUUID() ambienteId?: string;
   @IsOptional() @IsString() @MaxLength(80) nome?: string;
   @IsOptional() @IsString() descricao?: string;
   @IsOptional() @IsIn(TIPOS_UNIDADE as unknown as string[]) tipoUnidade?: TipoUnidade;

@@ -10,8 +10,8 @@ export class CategoriasController {
   constructor(private readonly service: CategoriasService) {}
 
   @Get()
-  listar(@Usuario() u: UsuarioToken, @Query('inativos') inativos?: string) {
-    return this.service.listar(u.empresaId, inativos === 'true');
+  listar(@Usuario() u: UsuarioToken, @Query('inativos') inativos?: string, @Query('ambienteId') ambienteId?: string) {
+    return this.service.listar(u.empresaId, inativos === 'true', ambienteId && /^[0-9a-f-]{36}$/i.test(ambienteId) ? ambienteId : undefined);
   }
 
   @Post()
