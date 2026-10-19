@@ -98,6 +98,8 @@ export class CaixaService {
       resgates[m.forma] = (resgates[m.forma] ?? 0) + c(m.valor);
       if (m.forma !== 'dinheiro') esperado[m.forma] = (esperado[m.forma] ?? 0) + c(m.valor);
     }
+    // devolução em cartão/pix (ex.: entrada cancelada com pagamento antecipado) sai da forma dela
+    for (const mv of movs.filter((x) => x.tipo === 'despesa' && x.forma !== 'dinheiro')) esperado[mv.forma] = (esperado[mv.forma] ?? 0) - c(mv.valor);
     // gorjeta a mais no cartão/pix entra na maquininha daquela forma
     for (const g of gorjs) if (g.origem === 'adicional') esperado[g.forma] = (esperado[g.forma] ?? 0) + c(g.valor);
     const gorjDinheiro = gorjs.filter((g) => g.forma === 'dinheiro');
@@ -324,7 +326,31 @@ export class CaixaService {
     const unis = ests.length ? await this.unidades.find({ where: { id: In([...new Set(ests.map((e) => e.unidadeId))]) } }) : [];
     const mapE = new Map(ests.map((e) => [e.id, e]));
     const mapU = new Map(unis.map((x) => [x.id, x.codigo]));
+    // ocorrências do turno no ambiente: estornos, cancelamentos, devoluções, correções, trocas de suíte e de cobrança
+    const fim = t.fechadoEm ?? new Date();
+    const ocorrencias: { criado_em: Date; tipo: string; descricao: string; usuario_nome: string | null; codigo: string; numero: number | null }[] = await this.ds.query(
+      `SELECT ev.criado_em, ev.tipo, ev.descricao, ev.usuario_nome, un.codigo, es.numero
+         FROM estadia_eventos ev JOIN estadias es ON es.id = ev.estadia_id JOIN unidades un ON un.id = es.unidade_id
+        WHERE ev.empresa_id = $1 AND es.ambiente_id = $2 AND ev.criado_em BETWEEN $3 AND $4
+          AND ev.tipo IN ('estorno','cancelamento','devolucao','correcao','transferencia','cobranca')
+        ORDER BY ev.criado_em`, [u.empresaId, t.ambienteId, t.abertoEm, fim]);
+    const estornos: { qtd: string; valor: string }[] = await this.ds.query(
+      `SELECT COUNT(*) AS qtd, COALESCE(SUM(it.total), 0) AS valor FROM estadia_itens it JOIN estadias es ON es.id = it.estadia_id
+        WHERE it.empresa_id = $1 AND es.ambiente_id = $2 AND it.status = 'estornado' AND it.estornado_em BETWEEN $3 AND $4`, [u.empresaId, t.ambienteId, t.abertoEm, fim]);
+    // descontos, acréscimos e cortesias das contas recebidas neste turno
+    const ajustes = ests.filter((e) => Number(e.desconto) > 0 || Number(e.acrescimo) > 0).map((e) => ({
+      unidade: mapU.get(e.unidadeId) ?? '—', uso: e.numero, desconto: Number(e.desconto), acrescimo: Number(e.acrescimo),
+      motivo: e.motivoAjuste, autorizadoPor: e.autorizadoPor, cortesia: e.cortesiaNome, usuario: e.usuarioSaidaNome,
+    }));
+    const NOME_OC: Record<string, string> = { estorno: 'Estorno', cancelamento: 'Cancelamento', devolucao: 'Devolução', correcao: 'Correção', transferencia: 'Troca de suíte', cobranca: 'Troca de cobrança' };
     return {
+      ocorrencias: ocorrencias.map((o) => ({ hora: o.criado_em, tipo: NOME_OC[o.tipo] ?? o.tipo, descricao: o.descricao, usuario: o.usuario_nome, unidade: o.codigo, uso: o.numero })),
+      ajustes,
+      totais: {
+        estornos: Number(estornos[0]?.qtd ?? 0), valorEstornado: Number(estornos[0]?.valor ?? 0),
+        cancelamentos: ocorrencias.filter((o) => o.tipo === 'cancelamento').length,
+        descontos: Math.round(ajustes.reduce((s2, a) => s2 + a.desconto, 0) * 100) / 100,
+      },
       turno: {
         ...t, trocoInicial: Number(t.trocoInicial), diferenca: t.diferenca === null ? null : Number(t.diferenca),
         fundoProximo: t.fundoProximo === null ? null : Number(t.fundoProximo), retirado: t.retirado === null ? null : Number(t.retirado),

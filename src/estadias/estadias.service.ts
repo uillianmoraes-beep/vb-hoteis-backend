@@ -779,13 +779,41 @@ export class EstadiasService {
     const libX = await this.liberarAcao(u, 'estadias.cancelar', 'cancelar entradas', dto.autorizacao);
     if (libX) dto.motivo = `${dto.motivo.trim()} · liberado por ${libX}`;
     const unidade = await this.unidades.findOneOrFail({ where: { id: e.unidadeId } });
+    // o que foi consumido volta ao estoque e o que foi pago antes (entrada/adiantado) é devolvido
+    const ativos = await this.itens.find({ where: { estadiaId: e.id, status: 'ativo' } });
+    const pagos = await this.pagamentos.find({ where: { estadiaId: e.id } });
+    const devolver = pagos.filter((p) => p.forma !== 'faturado' && p.forma !== 'penhora' && Number(p.valor) > 0);
+    const turnoId = devolver.length ? await this.caixa.turnoParaRecebimento(u.empresaId, e.ambienteId) : null;
     await this.ds.transaction(async (m) => {
+      for (const it of ativos) {
+        await m.update(EstadiaItem, { id: it.id }, { status: 'estornado', motivoEstorno: `Entrada cancelada: ${dto.motivo.trim()}`, estornadoPor: u.nome, estornadoEm: new Date() });
+        await devolverConsumo(m, u.empresaId, `item:${it.id}`, u.nome);
+      }
+      if (ativos.length) {
+        await this.registrar(m, u, id, 'estorno', `Entrada cancelada: ${ativos.length} item(ns) estornado(s), produtos de volta ao estoque (${ativos.map((i) => i.descricao).join(', ')})`);
+      }
+      for (const p of devolver) {
+        // a devolução sai do caixa do turno, na mesma forma em que foi paga (cartão/pix: estorne na maquininha/banco)
+        if (turnoId) {
+          await m.insert(CaixaMovimento, {
+            empresaId: u.empresaId, turnoId, caixa: 'principal', tipo: 'despesa', forma: p.forma, valor: p.valor,
+            descricao: `Devolução · entrada cancelada · ${unidade.codigo}${e.numero ? ` · uso ${e.numero}` : ''}`, categoria: 'Devolução ao cliente',
+            usuarioId: u.sub, usuarioNome: u.nome, autorizadoPor: libX ?? null, cnpj: null,
+          });
+        }
+        await this.registrar(m, u, id, 'devolucao', `Devolver ao cliente ${brl(centavos(p.valor))} (${NOMES_FORMA[p.forma] ?? p.forma})${turnoId ? ' · lançado no caixa' : ''}`);
+      }
       await m.update(Estadia, { id }, {
         status: 'cancelada', saidaEm: new Date(), motivoAjuste: dto.motivo.trim(), usuarioSaidaId: u.sub, usuarioSaidaNome: u.nome,
       });
       await this.registrar(m, u, id, 'cancelamento', `Entrada cancelada: ${dto.motivo.trim()}`);
       await this.mudarUnidade(m, u, unidade, dto.destino ?? 'livre', `Entrada cancelada: ${dto.motivo.trim()}`);
     });
-    return { ok: true };
+    return {
+      ok: true,
+      itensEstornados: ativos.length,
+      devolver: devolver.map((p) => ({ forma: p.forma, valor: Number(p.valor) })),
+      lancadoNoCaixa: !!turnoId,
+    };
   }
 }
