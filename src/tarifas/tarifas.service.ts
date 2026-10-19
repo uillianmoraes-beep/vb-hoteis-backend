@@ -284,6 +284,8 @@ export class TarifasService {
         ? { nome: motor.pernoite.nome, inicio: motor.pernoite.pernoiteInicio, fim: motor.pernoite.pernoiteFim, disponivelAgora: this.pernoiteDisponivel(motor, agora) }
         : null,
       configurado: itens.length > 0 && itens.some((i) => i.valor > 0),
+      tipoAmbiente: (await this.ds.query(`SELECT tipo FROM ambientes WHERE id = $1`, [unidade.ambienteId]))[0]?.tipo ?? null,
+      semCategoria: !unidade.categoriaId,
       /** hotel/pousada: diária da categoria (1 noite, 2 pessoas) */
       hotel: await this.precoHotel(u.empresaId, unidade.ambienteId, unidade.categoriaId, agora, 1, Math.min(2, unidade.capacidade || 2)),
     };
