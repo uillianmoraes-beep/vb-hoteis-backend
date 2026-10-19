@@ -52,6 +52,16 @@ export class NotaFiscalDto {
   @IsOptional() @IsEmail() @MaxLength(160) email?: string;
 }
 
+/** quem paga cada parte da conta (para as notas saírem separadas) */
+export class PagadorDto {
+  @IsIn(['empresa', 'hospede']) tipo!: 'empresa' | 'hospede';
+  /** empresa: hospedagem, consumo ou tudo; o hóspede fica com o resto */
+  @IsIn(['hospedagem', 'consumo', 'tudo', 'resto']) parte!: 'hospedagem' | 'consumo' | 'tudo' | 'resto';
+  @IsOptional() @IsString() @MaxLength(120) nome?: string;
+  /** CPF ou CNPJ (só números) */
+  @IsOptional() @IsString() @MaxLength(18) documento?: string;
+}
+
 export class FecharEstadiaDto {
   /** pagamentos que somam o total (pode dividir em várias formas) */
   @IsArray() @ArrayMaxSize(10) @ValidateNested({ each: true }) @Type(() => PagamentoDto) pagamentos!: PagamentoDto[];
@@ -64,6 +74,8 @@ export class FecharEstadiaDto {
   @IsOptional() @IsUUID() cortesiaId?: string;
   /** hotel (com cadastro do hóspede): dados para a nota. No motel não vai. */
   @IsOptional() @ValidateNested() @Type(() => NotaFiscalDto) nota?: NotaFiscalDto;
+  /** conta dividida entre pagadores (empresa × hóspede): uma nota para cada parte */
+  @IsOptional() @IsArray() @ArrayMaxSize(2) @ValidateNested({ each: true }) @Type(() => PagadorDto) pagadores?: PagadorDto[];
 }
 
 export class CancelarEstadiaDto {

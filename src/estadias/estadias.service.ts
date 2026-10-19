@@ -629,6 +629,7 @@ export class EstadiasService {
 
     // pagamentos: com o que já foi pago na entrada, precisam somar exatamente o total
     const pags = this.lerPagamentos(dto.pagamentos ?? []);
+    for (const pg of dto.pagadores ?? []) documentoFiscal(pg.documento); // CPF/CNPJ errado avisa antes de gravar
     if (pags.some((p) => p.forma === 'penhora' && p.penhoraItem.length < 2)) throw new BadRequestException('Na penhora, diga qual objeto o cliente deixou (ex.: celular, relógio).');
     const anteriores = await this.pagamentos.find({ where: { estadiaId: e.id } });
     const adiantado = anteriores.reduce((s, p) => s + centavos(Number(p.valor)), 0);
@@ -703,6 +704,26 @@ export class EstadiasService {
         notaEmail: dto.nota?.email?.trim() || null,
         notaSolicitadaEm: controlaNotas && total > 0 ? new Date() : null,
       });
+      // pagador separado: uma nota a emitir para cada parte (empresa × hóspede)
+      if (controlaNotas && total > 0 && dto.pagadores?.length) {
+        const hosp = conta.valorHospedagem + conta.valorPessoas;
+        const empresa = dto.pagadores.find((x) => x.tipo === 'empresa');
+        const hospede = dto.pagadores.find((x) => x.tipo === 'hospede');
+        const parteEmp = !empresa ? 0 : Math.min(total, empresa.parte === 'hospedagem' ? hosp : empresa.parte === 'consumo' ? conta.consumo : total);
+        const partes = [
+          ...(empresa && parteEmp > 0 ? [{ p: empresa, valor: parteEmp }] : []),
+          ...(total - parteEmp > 0 ? [{ p: hospede ?? { tipo: 'hospede' as const, parte: 'resto' as const }, valor: total - parteEmp }] : []),
+        ];
+        for (const x of partes) {
+          await m.query(
+            `INSERT INTO estadia_notas (empresa_id, estadia_id, pagador, nome, documento, parte, valor) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            [u.empresaId, e.id, x.p.tipo, x.p.nome?.trim() || null, documentoFiscal(x.p.documento) ?? null,
+              x.p.tipo === 'empresa' ? x.p.parte : empresa ? (empresa.parte === 'hospedagem' ? 'consumo' : empresa.parte === 'consumo' ? 'hospedagem' : 'resto') : 'tudo', reais(x.valor)]);
+        }
+        if (partes.length) {
+          await this.registrar(m, u, id, 'nota', `Notas separadas: ${partes.map((x) => `${x.p.tipo === 'empresa' ? `empresa${x.p.nome ? ` (${x.p.nome})` : ''}` : 'hóspede'} ${brl(x.valor)}`).join(' · ')}`);
+        }
+      }
       const resumoPag = pags.length
         ? pags.map((p) => `${NOMES_FORMA[p.forma] ?? p.forma} ${brl(p.valor)}${p.troco ? ` (${p.trocoDestino === 'gorjeta' ? `gorjeta ${brl(p.troco)} p/ ${p.gorjetaPara}` : `troco ${brl(p.troco)}`})` : ''}`).join(' + ')
         : 'cortesia';
