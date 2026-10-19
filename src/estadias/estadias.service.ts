@@ -1,7 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, In, Repository } from 'typeorm';
-import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
 import { Estadia, FormaPagamento } from './estadia.entity';
 import { EstadiaItem } from './estadia-item.entity';
@@ -31,6 +30,7 @@ import {
 } from './estadias.dto';
 import { StatusUnidade, UsuarioToken, temPermissao } from '../common/permissoes';
 import { ImpressaoService } from '../impressao/impressao.service';
+import { AutorizacaoEntrada, liberarPermissao, quemLibera, registrarLiberacao } from '../common/liberacao';
 import { calcularConta, centavos, minutosAteHorario, reais, ResultadoCalc } from './calculadora';
 
 export interface ContaCalculada extends ResultadoCalc {
@@ -132,8 +132,14 @@ export class EstadiasService {
     const extras = dif < 0 || (dif === 0 && hora < 14) ? 0 : dif + (hora >= 14 ? 1 : 0);
     const diaria = centavos(Number(e.diariaCombinada ?? 0));
     const hosp = centavos(Number(e.totalCombinado ?? 0)) + extras * diaria;
+    // quantas diárias: as combinadas (total ÷ diária) + as que passaram da saída prevista
+    const combinadas = diaria > 0 ? Math.max(1, Math.round(centavos(Number(e.totalCombinado ?? 0)) / diaria)) : 1;
+    const n = combinadas + extras;
+    const saidaBr = saida.split('-').reverse().slice(0, 2).join('/');
     return {
-      periodoNome: extras ? `Diárias + ${extras} diária(s) extra` : 'Diárias (valor combinado)',
+      periodoNome: extras
+        ? `${n} diárias (${extras} além da saída de ${saidaBr})`
+        : `${n} diária${n > 1 ? 's' : ''} · saída ${saidaBr}`,
       valorHospedagem: hosp, horasAdicionais: 0, valorPessoas: 0, pessoasExtras: 0, consumo, total: hosp + consumo,
       proximaViradaMin: null, proximoNome: null, trechoInicio: 0, trechoFim: null, semPreco: false,
     };
@@ -256,8 +262,11 @@ export class EstadiasService {
       this.unidades.findOne({ where: { id: e.unidadeId }, relations: { categoria: true } }),
     ]);
     const precos = this.tarifas.precosDe(motor, e.tabelaId, e.categoriaId);
+    const [amb] = await this.ds.query(`SELECT tipo FROM ambientes WHERE id = $1`, [e.ambienteId]);
     return {
       ...this.formatar(e, this.calcular(e, motor, consumo)),
+      /** motel | hotel | pousada… (a tela e o cupom dizem "Quarto" e mostram diárias no hotel) */
+      tipoAmbiente: (amb?.tipo as string | undefined) ?? null,
       unidade: unidade ? { id: unidade.id, codigo: unidade.codigo, categoria: unidade.categoria?.nome ?? null } : null,
       itens: itens.map((i) => ({ ...i, quantidade: Number(i.quantidade), precoUnitario: Number(i.precoUnitario), total: Number(i.total) })),
       pagamentos: pagamentos.map((p) => ({ ...p, valor: Number(p.valor), troco: Number(p.troco), valorRecebido: p.valorRecebido ? Number(p.valorRecebido) : null })),
@@ -455,7 +464,7 @@ export class EstadiasService {
     const item = await this.itens.findOne({ where: { id: itemId, estadiaId: e.id } });
     if (!item) throw new NotFoundException('Item não encontrado.');
     if (item.status === 'estornado') throw new BadRequestException('Este item já foi estornado.');
-    const libE = await this.liberarAcao(u, 'estadias.estornar', 'estornar itens', dto.autorizacao);
+    const libE = await this.liberarAcao(u, 'estadias.estornar', 'estornar itens', dto.autorizacao, { ambienteId: e.ambienteId, estadiaId: e.id, detalhe: dto.motivo });
     if (libE) dto.motivo = `${dto.motivo.trim()} · liberado por ${libE}`;
     await this.ds.transaction(async (m) => {
       await m.update(EstadiaItem, { id: item.id }, { status: 'estornado', motivoEstorno: dto.motivo.trim(), estornadoPor: u.nome, estornadoEm: new Date() });
@@ -533,7 +542,7 @@ export class EstadiasService {
 
   async corrigir(u: UsuarioToken, id: string, dto: CorrigirEstadiaDto) {
     const e = await this.buscarAberta(u, id);
-    const libC = await this.liberarAcao(u, 'estadias.corrigir', 'corrigir a entrada', dto.autorizacao);
+    const libC = await this.liberarAcao(u, 'estadias.corrigir', 'corrigir a entrada', dto.autorizacao, { ambienteId: e.ambienteId, estadiaId: e.id, detalhe: dto.motivo });
     if (libC) dto.motivo = `${dto.motivo.trim()} · liberado por ${libC}`;
     const motor = await this.tarifas.motor(u.empresaId, e.ambienteId);
     const mudancas: string[] = [];
@@ -565,26 +574,11 @@ export class EstadiasService {
    * Ação que o perfil não tem: pede login e senha de alguém que tenha a permissão.
    * Retorna o nome de quem liberou (ou null se o próprio usuário pode).
    */
-  private async liberarAcao(u: UsuarioToken, permissao: string, nomeAcao: string, aut?: { login: string; senha: string }) {
-    if (temPermissao(u, permissao)) return null;
-    if (!aut) throw new ForbiddenException(`Seu perfil não pode ${nomeAcao}. Peça para alguém com permissão liberar com login e senha.`);
-    const quem = await this.usuarios
-      .createQueryBuilder('x')
-      .addSelect('x.senhaHash')
-      .leftJoinAndSelect('x.perfil', 'perfil')
-      .where('lower(x.login) = lower(:l)', { l: aut.login.trim() })
-      .andWhere('x.empresaId = :e', { e: u.empresaId })
-      .getOne();
-    if (!quem || !quem.ativo || !(await bcrypt.compare(aut.senha, quem.senhaHash))) {
-      throw new ForbiddenException('Login ou senha de quem libera estão incorretos.');
-    }
-    const perms = quem.perfil?.permissoes ?? [];
-    if (!perms.includes('*') && !perms.includes(permissao)) throw new ForbiddenException(`${quem.nome} também não pode ${nomeAcao}.`);
-    if (quem.id === u.sub) throw new ForbiddenException('A liberação precisa ser de outra pessoa.');
-    return quem.nome;
+  private async liberarAcao(u: UsuarioToken, permissao: string, nomeAcao: string, aut?: AutorizacaoEntrada, ctx: { ambienteId?: string; estadiaId?: string; detalhe?: string; valor?: number } = {}) {
+    return liberarPermissao(this.ds, u, permissao, nomeAcao, aut, ctx);
   }
 
-  private async conferirLimite(u: UsuarioToken, total: number, desconto: number, acrescimo: number, dto: FecharEstadiaDto) {
+  private async conferirLimite(u: UsuarioToken, total: number, desconto: number, acrescimo: number, dto: FecharEstadiaDto, ctx: { ambienteId?: string; estadiaId?: string } = {}) {
     const pct = (v: number) => (total > 0 ? (v / total) * 100 : v > 0 ? 100 : 0);
     const precisa = (limites: { descontoPercentual?: number; acrescimoPercentual?: number; cortesia?: boolean } | undefined) => {
       const l = limites ?? {};
@@ -598,23 +592,22 @@ export class EstadiasService {
     const meu = await this.perfis.findOne({ where: { id: u.perfilId } });
     if (!precisa(meu?.limites)) return null;
 
-    if (!dto.autorizacao) {
-      throw new ForbiddenException('Passa do seu limite de desconto/acréscimo. Peça para alguém com permissão liberar com login e senha.');
+    if (!dto.autorizacao || (!dto.autorizacao.pin && !dto.autorizacao.login)) {
+      throw new ForbiddenException('Passa do seu limite de desconto/acréscimo. Peça a senha de liberação do gerente.');
     }
-    const quem = await this.usuarios
-      .createQueryBuilder('x')
-      .addSelect('x.senhaHash')
-      .leftJoinAndSelect('x.perfil', 'perfil')
-      .where('lower(x.login) = lower(:l)', { l: dto.autorizacao.login.trim() })
-      .andWhere('x.empresaId = :e', { e: u.empresaId })
-      .getOne();
-    if (!quem || !quem.ativo || !(await bcrypt.compare(dto.autorizacao.senha, quem.senhaHash))) {
-      throw new ForbiddenException('Login ou senha de quem libera estão incorretos.');
-    }
-    const ehAdmin = (quem.perfil?.permissoes ?? []).includes('*');
-    if (!ehAdmin && precisa(quem.perfil?.limites)) {
+    const quem = await quemLibera(this.ds, u.empresaId, dto.autorizacao);
+    const ehAdmin = quem.permissoes.includes('*');
+    if (!ehAdmin && precisa(quem.limites)) {
       throw new ForbiddenException(`${quem.nome} também não tem limite para esse valor.`);
     }
+    if (quem.id === u.sub) throw new ForbiddenException('A liberação precisa ser de outra pessoa.');
+    const partes = [desconto > 0 ? `desconto de ${brl(desconto)} (${pct(desconto).toFixed(1).replace('.', ',')}%)` : '', acrescimo > 0 ? `acréscimo de ${brl(acrescimo)}` : ''].filter(Boolean);
+    await registrarLiberacao(this.ds, u, quem, {
+      acao: desconto > 0 ? 'desconto acima do limite' : 'acréscimo acima do limite',
+      ambienteId: ctx.ambienteId, estadiaId: ctx.estadiaId,
+      detalhe: [partes.join(' e '), dto.motivo?.trim()].filter(Boolean).join(' · '),
+      valor: (desconto > 0 ? desconto : acrescimo) / 100, meio: dto.autorizacao.pin ? 'pin' : 'login',
+    });
     return quem.nome;
   }
 
@@ -636,8 +629,8 @@ export class EstadiasService {
     const acrescimo = centavos(dto.acrescimo ?? 0);
     if (desconto > conta.total + acrescimo) throw new BadRequestException('O desconto é maior que a conta.');
     if (!cortesia && (desconto > 0 || acrescimo > 0) && !dto.motivo?.trim()) throw new BadRequestException('Informe o motivo do desconto ou acréscimo.');
-    let autorizadoPor = await this.conferirLimite(u, conta.total, cortesia ? 0 : desconto, acrescimo, dto);
-    if (cortesia?.exigeSenha) autorizadoPor = (await this.liberarAcao(u, 'cortesias.gerenciar', `usar a cortesia ${cortesia.nome}`, dto.autorizacao)) ?? autorizadoPor;
+    let autorizadoPor = await this.conferirLimite(u, conta.total, cortesia ? 0 : desconto, acrescimo, dto, { ambienteId: e.ambienteId, estadiaId: e.id });
+    if (cortesia?.exigeSenha) autorizadoPor = (await this.liberarAcao(u, 'cortesias.gerenciar', `usar a cortesia ${cortesia.nome}`, dto.autorizacao, { ambienteId: e.ambienteId, estadiaId: e.id, valor: desconto / 100 })) ?? autorizadoPor;
     if (cortesia && !dto.motivo?.trim()) dto.motivo = `Cortesia ${cortesia.nome} (${cortesia.pct}%)`;
     const total = conta.total - desconto + acrescimo;
 
@@ -763,7 +756,7 @@ export class EstadiasService {
     if (!formas.includes(p.forma)) throw new BadRequestException(`Pagamento em ${NOMES_FORMA[p.forma] ?? p.forma} não pode ter a forma trocada.`);
     if (p.forma === dto.forma) throw new BadRequestException('O pagamento já está nessa forma.');
     if (Number(p.troco) > 0) throw new BadRequestException('Este pagamento teve troco em dinheiro; para trocar a forma, estorne e lance de novo.');
-    const autorizadoPor = await this.liberarAcao(u, 'pagamentos.corrigir', 'mudar a forma de pagamento', dto.autorizacao);
+    const autorizadoPor = await this.liberarAcao(u, 'pagamentos.corrigir', 'mudar a forma de pagamento', dto.autorizacao, { estadiaId: p.estadiaId, detalhe: dto.motivo, valor: Number(p.valor) });
     const e = await this.repo.findOne({ where: { id: p.estadiaId, empresaId: u.empresaId } });
     if (!e) throw new NotFoundException('Conta não encontrada.');
     const turno = p.turnoId ? await this.ds.getRepository(CaixaTurno).findOne({ where: { id: p.turnoId } }) : null;
@@ -790,7 +783,7 @@ export class EstadiasService {
 
   async cancelar(u: UsuarioToken, id: string, dto: CancelarEstadiaDto) {
     const e = await this.buscarAberta(u, id);
-    const libX = await this.liberarAcao(u, 'estadias.cancelar', 'cancelar entradas', dto.autorizacao);
+    const libX = await this.liberarAcao(u, 'estadias.cancelar', 'cancelar entradas', dto.autorizacao, { ambienteId: e.ambienteId, estadiaId: e.id, detalhe: dto.motivo });
     if (libX) dto.motivo = `${dto.motivo.trim()} · liberado por ${libX}`;
     const unidade = await this.unidades.findOneOrFail({ where: { id: e.unidadeId } });
     // o que foi consumido volta ao estoque e o que foi pago antes (entrada/adiantado) é devolvido

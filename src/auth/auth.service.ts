@@ -141,4 +141,58 @@ export class AuthService {
     await this.usuarios.update({ id: u.sub }, { senhaHash: await bcrypt.hash(novaSenha, 10) });
     return { ok: true };
   }
+
+  /* ---------- senha de liberação (gerente libera só com números, sem login) ---------- */
+
+  async meuPin(u: UsuarioToken) {
+    const [r] = await this.usuarios.query(`SELECT pin_hash IS NOT NULL AS tem, pin_definido_em FROM usuarios WHERE id = $1`, [u.sub]);
+    return { temPin: !!r?.tem, definidoEm: r?.pin_definido_em ?? null };
+  }
+
+  async definirMeuPin(u: UsuarioToken, senhaAtual: string, pin?: string | null) {
+    const usuario = await this.buscarComSenha('u.id = :valor', u.sub);
+    if (!usuario || !(await bcrypt.compare(senhaAtual, usuario.senhaHash))) throw new BadRequestException('Senha de entrada incorreta.');
+    const novo = (pin ?? '').trim();
+    if (!novo) {
+      await this.usuarios.query(`UPDATE usuarios SET pin_hash = NULL, pin_definido_em = NULL WHERE id = $1`, [u.sub]);
+      return { ok: true, temPin: false };
+    }
+    if (!/^\d{4,8}$/.test(novo)) throw new BadRequestException('A senha de liberação tem de 4 a 8 números.');
+    const seq = '01234567890123456789';
+    const desc = '98765432109876543210';
+    if (/^(\d)\1+$/.test(novo) || seq.includes(novo) || desc.includes(novo)) {
+      throw new BadRequestException('Senha fácil demais (números repetidos ou em sequência). Escolha outra.');
+    }
+    // não pode repetir a de outra pessoa da empresa (senão não dá para saber quem liberou)
+    const outros: { pin_hash: string }[] = await this.usuarios.query(
+      `SELECT pin_hash FROM usuarios WHERE empresa_id = $1 AND id <> $2 AND pin_hash IS NOT NULL`, [u.empresaId, u.sub]);
+    for (const o of outros) {
+      if (await bcrypt.compare(novo, o.pin_hash)) throw new BadRequestException('Essa senha já é usada por outra pessoa. Escolha outra.');
+    }
+    await this.usuarios.query(`UPDATE usuarios SET pin_hash = $2, pin_definido_em = now() WHERE id = $1`, [u.sub, await bcrypt.hash(novo, 10)]);
+    return { ok: true, temPin: true };
+  }
+
+  /** gerente apaga a senha de liberação de alguém (ex.: funcionário saiu ou esqueceu) */
+  async removerPin(u: UsuarioToken, usuarioId: string) {
+    await this.usuarios.query(`UPDATE usuarios SET pin_hash = NULL, pin_definido_em = NULL WHERE id = $1 AND empresa_id = $2`, [usuarioId, u.empresaId]);
+    return { ok: true };
+  }
+
+  /** histórico de liberações: quem pediu, quem liberou, o quê, quanto */
+  async liberacoes(u: UsuarioToken, f: { de: string; ate: string; ambienteId?: string }) {
+    const params: unknown[] = [u.empresaId, f.de, f.ate];
+    let w = '';
+    if (f.ambienteId) { params.push(f.ambienteId); w = ` AND l.ambiente_id = $${params.length}::uuid`; }
+    const l = await this.usuarios.query(
+      `SELECT l.id, l.criado_em, l.pedido_por, l.liberado_por, l.acao, l.detalhe, l.valor, l.meio, a.nome AS ambiente, un.codigo AS unidade, e.numero AS uso
+         FROM liberacoes l LEFT JOIN ambientes a ON a.id = l.ambiente_id LEFT JOIN estadias e ON e.id = l.estadia_id LEFT JOIN unidades un ON un.id = e.unidade_id
+        WHERE l.empresa_id = $1 AND l.criado_em >= ($2::date)::timestamp AT TIME ZONE 'America/Sao_Paulo'
+          AND l.criado_em < ($3::date + 1)::timestamp AT TIME ZONE 'America/Sao_Paulo'${w}
+        ORDER BY l.criado_em DESC LIMIT 2000`, params);
+    return l.map((x: Record<string, unknown>) => ({
+      id: x.id, criadoEm: x.criado_em, pedidoPor: x.pedido_por, liberadoPor: x.liberado_por, acao: x.acao, detalhe: x.detalhe,
+      valor: x.valor == null ? null : Number(x.valor), meio: x.meio, ambiente: x.ambiente, unidade: x.unidade, uso: x.uso,
+    }));
+  }
 }

@@ -1,8 +1,5 @@
 import { Type } from 'class-transformer';
-import {
-  ArrayMaxSize, IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsISO8601, IsNumber, IsOptional, IsString, IsUUID,
-  Max, MaxLength, Min, MinLength, ValidateNested,
-} from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEmail, IsISO8601, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 
 export class AbrirEstadiaDto {
   @IsUUID() unidadeId!: string;
@@ -19,8 +16,10 @@ export class AbrirEstadiaDto {
 }
 
 export class AutorizacaoDto {
-  @IsString() @MinLength(3) @MaxLength(120) login!: string;
-  @IsString() @MinLength(1) @MaxLength(72) senha!: string;
+  /** senha de liberação do gerente (só números). Com ela não precisa de login. */
+  @ValidateIf((o) => !!o.pin) @Matches(/^\d{4,8}$/, { message: 'A senha de liberação tem de 4 a 8 números.' }) pin?: string;
+  @ValidateIf((o) => !o.pin) @IsString() @MinLength(3) @MaxLength(120) login?: string;
+  @ValidateIf((o) => !o.pin) @IsString() @MinLength(1) @MaxLength(72) senha?: string;
 }
 
 export const FORMAS_RECEBIMENTO = ['dinheiro', 'pix', 'debito', 'credito', 'faturado', 'penhora'] as const;

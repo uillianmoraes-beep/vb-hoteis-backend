@@ -1,9 +1,11 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsIn, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsIn, IsNumber, IsObject, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 
 export class AutorizacaoCaixaDto {
-  @IsString() @MinLength(3) @MaxLength(120) login!: string;
-  @IsString() @MinLength(1) @MaxLength(72) senha!: string;
+  /** senha de liberação do gerente (só números). Com ela não precisa de login. */
+  @ValidateIf((o) => !!o.pin) @Matches(/^\d{4,8}$/, { message: 'A senha de liberação tem de 4 a 8 números.' }) pin?: string;
+  @ValidateIf((o) => !o.pin) @IsString() @MinLength(3) @MaxLength(120) login?: string;
+  @ValidateIf((o) => !o.pin) @IsString() @MinLength(1) @MaxLength(72) senha?: string;
 }
 
 export class AbrirTurnoDto {

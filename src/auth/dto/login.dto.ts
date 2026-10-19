@@ -17,3 +17,9 @@ export class EntrarAmbienteDto {
   /** obrigatória na troca */
   @IsOptional() @IsString() @MaxLength(72) senha?: string;
 }
+
+export class MeuPinDto {
+  @IsString() @MinLength(1) @MaxLength(72) senhaAtual!: string;
+  /** só números, 4 a 8. Vazio/nulo remove a senha de liberação. */
+  @IsOptional() @IsString() @MaxLength(8) pin?: string | null;
+}

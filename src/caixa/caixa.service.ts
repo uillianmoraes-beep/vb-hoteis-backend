@@ -1,7 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Repository } from 'typeorm';
-import * as bcrypt from 'bcryptjs';
 import { CaixaMovimento, CaixaTurno, Valores } from './caixa.entity';
 import { AbrirTurnoDto, BaixarPenhoraDto, ConfigCaixaDto, FecharTurnoDto, LancamentoAdmDto, MovimentoDto, ResgatarPenhoraDto } from './caixa.dto';
 import { EstadiaPagamento } from '../estadias/estadia-pagamento.entity';
@@ -15,6 +14,7 @@ import { Penhora } from './penhora.entity';
 import { moduloAtivo } from '../common/modulos';
 import { cnpjDoAmbiente, cnpjDoForm } from '../common/cnpj';
 import { UsuarioToken, temPermissao } from '../common/permissoes';
+import { AutorizacaoEntrada, liberarPermissao } from '../common/liberacao';
 
 const FORMAS = ['dinheiro', 'pix', 'debito', 'credito', 'faturado', 'penhora'] as const;
 /** formas que são dinheiro de verdade (penhora é objeto; faturado é a receber) */
@@ -65,16 +65,8 @@ export class CaixaService {
   }
 
   /** Liberação por senha de quem tem a permissão (ex.: sangria). */
-  private async liberar(u: UsuarioToken, permissao: string, acao: string, aut?: { login: string; senha: string }) {
-    if (temPermissao(u, permissao)) return null;
-    if (!aut) throw new ForbiddenException(`Seu perfil não pode ${acao}. Peça para alguém com permissão liberar com login e senha.`);
-    const quem = await this.usuarios.createQueryBuilder('x').addSelect('x.senhaHash').leftJoinAndSelect('x.perfil', 'perfil')
-      .where('lower(x.login) = lower(:l)', { l: aut.login.trim() }).andWhere('x.empresaId = :e', { e: u.empresaId }).getOne();
-    if (!quem || !quem.ativo || !(await bcrypt.compare(aut.senha, quem.senhaHash))) throw new ForbiddenException('Login ou senha de quem libera estão incorretos.');
-    const perms = quem.perfil?.permissoes ?? [];
-    if (!perms.includes('*') && !perms.includes(permissao)) throw new ForbiddenException(`${quem.nome} também não pode ${acao}.`);
-    if (quem.id === u.sub) throw new ForbiddenException('A liberação precisa ser de outra pessoa.');
-    return quem.nome;
+  private async liberar(u: UsuarioToken, permissao: string, acao: string, aut?: AutorizacaoEntrada, ctx: { ambienteId?: string; detalhe?: string; valor?: number } = {}) {
+    return liberarPermissao(this.ds, u, permissao, acao, aut, ctx);
   }
 
   /** Totais do turno: recebido por forma, gorjetas, movimentos e o esperado na gaveta. */
@@ -221,7 +213,7 @@ export class CaixaService {
     await this.exigirModulo(u);
     const t = await this.turnoAberto(u, id);
     let autorizadoPor: string | null = null;
-    if (dto.tipo === 'sangria') autorizadoPor = await this.liberar(u, 'caixa.sangria', 'fazer sangria', dto.autorizacao);
+    if (dto.tipo === 'sangria') autorizadoPor = await this.liberar(u, 'caixa.sangria', 'fazer sangria', dto.autorizacao, { ambienteId: t.ambienteId, detalhe: dto.descricao?.trim() || undefined, valor: dto.valor });
     const categoria = dto.categoria?.trim() || null;
     if (dto.tipo === 'despesa' && !dto.descricao?.trim() && !categoria) throw new BadRequestException('Diga do que foi a saída.');
     if (dto.tipo !== 'reforco') {

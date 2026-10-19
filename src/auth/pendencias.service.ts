@@ -1,0 +1,146 @@
+import { Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import { UsuarioToken, temPermissao } from '../common/permissoes';
+
+export interface Pendencia {
+  chave: string;
+  /** alerta = resolver agora · aviso = hoje · info = só para saber */
+  nivel: 'alerta' | 'aviso' | 'info';
+  titulo: string;
+  detalhe?: string;
+  quantidade: number;
+  /** tela onde resolve */
+  link: string;
+}
+
+const HOJE = `(now() AT TIME ZONE 'America/Sao_Paulo')::date`;
+
+/**
+ * Pendências mostradas logo depois do login (e no sino do topo): o que ficou para trás
+ * e o que precisa de atenção hoje no ambiente em que a pessoa entrou.
+ * Cada item só aparece para quem tem a permissão de resolver.
+ */
+@Injectable()
+export class PendenciasService {
+  constructor(private readonly ds: DataSource) {}
+
+  async listar(u: UsuarioToken, ambienteId?: string): Promise<Pendencia[]> {
+    const pode = (...p: string[]) => p.some((x) => temPermissao(u, x));
+    const amb = ambienteId && /^[0-9a-f-]{36}$/i.test(ambienteId) ? ambienteId : null;
+    // ambientes que o usuário enxerga
+    const permitidos = u.ambientesIds?.length ? u.ambientesIds : null;
+    const out: Pendencia[] = [];
+
+    /** roda uma contagem; erro em uma não derruba as outras */
+    const contar = async (sql: string, params: unknown[]): Promise<{ n: number; nomes: string }> => {
+      try {
+        const [r] = await this.ds.query(sql, params);
+        return { n: Number(r?.n ?? 0), nomes: r?.nomes ?? '' };
+      } catch {
+        return { n: 0, nomes: '' };
+      }
+    };
+    /** filtro de ambiente para uma coluna (ambiente atual ou os permitidos) */
+    const filtroAmb = (col: string, params: unknown[]) => {
+      if (amb) { params.push(amb); return ` AND ${col} = $${params.length}::uuid`; }
+      if (permitidos) { params.push(permitidos); return ` AND ${col} = ANY($${params.length}::uuid[])`; }
+      return '';
+    };
+    const add = (p: Omit<Pendencia, 'quantidade'>, r: { n: number; nomes: string }, comNomes = true) => {
+      if (r.n > 0) out.push({ ...p, quantidade: r.n, detalhe: [p.detalhe, comNomes && r.nomes ? r.nomes : ''].filter(Boolean).join(' · ') || undefined });
+    };
+    const lista = (expr: string) => `string_agg(DISTINCT ${expr}, ', ')`;
+
+    if (pode('painel.ver', 'reservas.gerenciar', 'estadias.operar')) {
+      // hotel: hóspede que já devia ter saído
+      let p: unknown[] = [u.empresaId];
+      add({ chave: 'saidas-atrasadas', nivel: 'alerta', titulo: 'Hóspedes com saída vencida', detalhe: 'a data de saída já passou e a conta continua aberta', link: '/painel' },
+        await contar(`SELECT count(*) AS n, ${lista('un.codigo')} AS nomes FROM estadias e JOIN unidades un ON un.id = e.unidade_id
+          WHERE e.empresa_id = $1 AND e.status IN ('aberta','conta_entregue') AND e.saida_prevista < ${HOJE}${filtroAmb('e.ambiente_id', p)}`, p));
+      p = [u.empresaId];
+      add({ chave: 'saidas-hoje', nivel: 'aviso', titulo: 'Saídas previstas para hoje', link: '/painel' },
+        await contar(`SELECT count(*) AS n, ${lista('un.codigo')} AS nomes FROM estadias e JOIN unidades un ON un.id = e.unidade_id
+          WHERE e.empresa_id = $1 AND e.status IN ('aberta','conta_entregue') AND e.saida_prevista = ${HOJE}${filtroAmb('e.ambiente_id', p)}`, p));
+      // despertador que passou da hora
+      p = [u.empresaId];
+      add({ chave: 'despertadores', nivel: 'alerta', titulo: 'Despertadores atrasados', link: '/painel' },
+        await contar(`SELECT count(*) AS n, ${lista('un.codigo')} AS nomes FROM despertadores d JOIN unidades un ON un.id = d.unidade_id
+          WHERE d.empresa_id = $1 AND d.status = 'pendente' AND d.horario < now()${filtroAmb('un.ambiente_id', p)}`, p));
+      // limpeza demorando e unidades bloqueadas
+      p = [u.empresaId];
+      add({ chave: 'limpeza-demorada', nivel: 'aviso', titulo: 'Em limpeza há mais de 1h30', link: '/governanca' },
+        await contar(`SELECT count(*) AS n, ${lista('un.codigo')} AS nomes FROM unidades un
+          WHERE un.empresa_id = $1 AND un.ativo AND un.status = 'limpeza' AND un.status_desde < now() - interval '90 minutes'${filtroAmb('un.ambiente_id', p)}`, p));
+      p = [u.empresaId];
+      add({ chave: 'bloqueadas', nivel: 'info', titulo: 'Unidades bloqueadas', link: '/painel' },
+        await contar(`SELECT count(*) AS n, ${lista('un.codigo')} AS nomes FROM unidades un
+          WHERE un.empresa_id = $1 AND un.ativo AND un.status = 'bloqueada'${filtroAmb('un.ambiente_id', p)}`, p));
+      // manutenção
+      p = [u.empresaId];
+      add({ chave: 'manutencao-erro', nivel: 'alerta', titulo: 'Chamados de manutenção que não foram enviados', detalhe: 'abra Manutenção e reenvie', link: '/manutencao' },
+        await contar(`SELECT count(*) AS n, '' AS nomes FROM chamados_manutencao c WHERE c.empresa_id = $1 AND c.status = 'erro'${filtroAmb('c.ambiente_id', p)}`, p), false);
+      p = [u.empresaId];
+      add({ chave: 'manutencao-abertos', nivel: 'info', titulo: 'Chamados de manutenção em aberto', link: '/manutencao' },
+        await contar(`SELECT count(*) AS n, '' AS nomes FROM chamados_manutencao c WHERE c.empresa_id = $1 AND c.status NOT IN ('concluida','cancelada','removida','erro')${filtroAmb('c.ambiente_id', p)}`, p), false);
+    }
+
+    if (pode('reservas.gerenciar', 'painel.ver')) {
+      let p: unknown[] = [u.empresaId];
+      add({ chave: 'reservas-pendentes', nivel: 'alerta', titulo: 'Reservas aguardando confirmação', detalhe: 'pedidos novos (site / telefone)', link: '/reservas' },
+        await contar(`SELECT count(*) AS n, ${lista('r.hospede')} AS nomes FROM reservas r WHERE r.empresa_id = $1 AND r.status = 'pendente' AND r.saida >= ${HOJE}${filtroAmb('r.ambiente_id', p)}`, p));
+      p = [u.empresaId];
+      add({ chave: 'reservas-noshow', nivel: 'alerta', titulo: 'Reservas com chegada vencida', detalhe: 'faça o check-in ou marque não compareceu', link: '/reservas' },
+        await contar(`SELECT count(*) AS n, ${lista('r.hospede')} AS nomes FROM reservas r WHERE r.empresa_id = $1 AND r.status IN ('pendente','confirmada') AND r.chegada < ${HOJE}${filtroAmb('r.ambiente_id', p)}`, p));
+      p = [u.empresaId];
+      add({ chave: 'reservas-hoje', nivel: 'aviso', titulo: 'Chegadas de hoje', link: '/reservas' },
+        await contar(`SELECT count(*) AS n, ${lista('r.hospede')} AS nomes FROM reservas r WHERE r.empresa_id = $1 AND r.status IN ('pendente','confirmada') AND r.chegada = ${HOJE}${filtroAmb('r.ambiente_id', p)}`, p));
+    }
+
+    if (pode('estadias.operar')) {
+      const p: unknown[] = [u.empresaId];
+      add({ chave: 'pedidos', nivel: 'alerta', titulo: 'Pedidos da comanda esperando', link: '/comanda' },
+        await contar(`SELECT count(*) AS n, ${lista('un.codigo')} AS nomes FROM pedidos x JOIN unidades un ON un.id = x.unidade_id
+          WHERE x.empresa_id = $1 AND x.status = 'novo'${filtroAmb('un.ambiente_id', p)}`, p));
+    }
+
+    if (pode('caixa.principal', 'caixa.adm')) {
+      let p: unknown[] = [u.empresaId];
+      add({ chave: 'caixa-antigo', nivel: 'alerta', titulo: 'Caixa aberto há mais de 24 horas', detalhe: 'confira e feche o turno', link: '/caixa' },
+        await contar(`SELECT count(*) AS n, ${lista(`a.nome || ' (turno ' || t.numero || ')'`)} AS nomes FROM caixa_turnos t JOIN ambientes a ON a.id = t.ambiente_id
+          WHERE t.empresa_id = $1 AND t.status = 'aberto' AND t.aberto_em < now() - interval '24 hours'${filtroAmb('t.ambiente_id', p)}`, p));
+      p = [u.empresaId];
+      add({ chave: 'penhoras', nivel: 'info', titulo: 'Penhoras em aberto', detalhe: 'objetos esperando o cliente voltar para pagar', link: '/penhoras' },
+        await contar(`SELECT count(*) AS n, '' AS nomes FROM penhoras x WHERE x.empresa_id = $1 AND x.status = 'aberta'${filtroAmb('x.ambiente_id', p)}`, p), false);
+    }
+
+    if (pode('notas.gerenciar')) {
+      const p: unknown[] = [u.empresaId];
+      add({ chave: 'notas', nivel: 'aviso', titulo: 'Notas fiscais para emitir', link: '/notas' },
+        await contar(`SELECT count(*) AS n, '' AS nomes FROM estadia_notas n JOIN estadias e ON e.id = n.estadia_id
+          WHERE n.empresa_id = $1 AND n.status = 'pendente'${filtroAmb('e.ambiente_id', p)}`, p), false);
+    }
+
+    if (pode('despesas.gerenciar')) {
+      add({ chave: 'pagar-vencidas', nivel: 'alerta', titulo: 'Contas a pagar vencidas', link: '/despesas' },
+        await contar(`SELECT count(*) AS n, '' AS nomes FROM contas_pagar WHERE empresa_id = $1 AND status = 'aberta' AND vencimento < ${HOJE}`, [u.empresaId]), false);
+      add({ chave: 'pagar-hoje', nivel: 'aviso', titulo: 'Contas a pagar vencendo hoje', link: '/despesas' },
+        await contar(`SELECT count(*) AS n, ${lista('descricao')} AS nomes FROM contas_pagar WHERE empresa_id = $1 AND status = 'aberta' AND vencimento = ${HOJE}`, [u.empresaId]));
+    }
+
+    if (pode('faturamento.gerenciar')) {
+      add({ chave: 'receber-vencidas', nivel: 'aviso', titulo: 'Contas a receber vencidas', detalhe: 'clientes faturados em atraso', link: '/faturamento' },
+        await contar(`SELECT count(*) AS n, '' AS nomes FROM contas_receber WHERE empresa_id = $1 AND status = 'aberta' AND vencimento < ${HOJE}`, [u.empresaId]), false);
+    }
+
+    if (pode('estoque.gerenciar', 'compras.gerenciar')) {
+      const p: unknown[] = [u.empresaId];
+      const w = amb ? (p.push(amb), ` AND (l.ambiente_id IS NULL OR l.ambiente_id = $2::uuid)`) : '';
+      add({ chave: 'estoque-minimo', nivel: 'aviso', titulo: 'Produtos abaixo do estoque mínimo', detalhe: 'veja em Estoque › Saldos ou monte uma cotação', link: '/estoque' },
+        await contar(`SELECT count(DISTINCT s.produto_id) AS n, '' AS nomes FROM estoque_saldos s JOIN estoque_locais l ON l.id = s.local_id
+          WHERE l.empresa_id = $1 AND l.ativo AND s.minimo > 0 AND s.quantidade < s.minimo${w}`, p), false);
+    }
+
+    const ordem = { alerta: 0, aviso: 1, info: 2 };
+    return out.sort((a, b) => ordem[a.nivel] - ordem[b.nivel]);
+  }
+}
