@@ -5,6 +5,7 @@ import { Unidade } from '../unidades/unidade.entity';
 import { Ambiente } from '../ambientes/ambiente.entity';
 import { STATUS_UNIDADE, StatusUnidade, UsuarioToken } from '../common/permissoes';
 import { EstadiasService } from '../estadias/estadias.service';
+import { lerConfig } from '../vistorias/vistorias.service';
 
 /**
  * Tempos de alerta da faixa "Precisa de você agora" (em minutos).
@@ -20,7 +21,8 @@ const ALERTA_MINUTOS: Partial<Record<StatusUnidade, number>> = {
 export interface AlertaPainel {
   unidadeId: string;
   codigo: string;
-  tipo: 'limpeza_demorada' | 'vistoria_aguardando' | 'conta_aguardando' | 'bloqueada' | 'vira_periodo' | 'saiu_sem_fechar' | 'paga_sem_sair' | 'despertador';
+  tipo: 'limpeza_demorada' | 'vistoria_aguardando' | 'conta_aguardando' | 'bloqueada' | 'vira_periodo' | 'saiu_sem_fechar' | 'paga_sem_sair' | 'despertador'
+    | 'vistoria_reprovada' | 'vistoria_ressalva' | 'frigobar_validade' | 'sem_vistoria';
   mensagem: string;
   minutos: number;
   urgencia: number;
@@ -57,6 +59,14 @@ export class PainelService {
     const contas = await this.estadias.abertasComConta(u.empresaId, lista.map((x) => x.id));
     const pagas = await this.estadias.ultimasFechadas(u.empresaId, lista.filter((x) => x.status === 'paga').map((x) => x.id));
     const agora = Date.now();
+    // vistoria: avisos configurados em cada ambiente (dias sem vistoria, validade do frigobar)
+    const cfgVist = new Map<string, ReturnType<typeof lerConfig>>();
+    if (lista.length) {
+      const cfgs: { id: string; config_vistoria: unknown }[] = await this.ambientes.query(
+        `SELECT id, config_vistoria FROM ambientes WHERE empresa_id = $1`, [u.empresaId]);
+      for (const c of cfgs) cfgVist.set(c.id, lerConfig(c.config_vistoria));
+    }
+    const hojeMs = Date.parse(`${new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' })}T12:00:00Z`);
     const resumo = Object.fromEntries(STATUS_UNIDADE.map((s) => [s, 0])) as Record<StatusUnidade, number>;
     const alertas: AlertaPainel[] = [];
 
@@ -88,6 +98,25 @@ export class PainelService {
         alertas.push({ unidadeId: x.id, codigo: x.codigo, tipo: 'vira_periodo', minutos: aberta.conta.proximaViradaMin,
           mensagem: `vira ${aberta.conta.proximoNome ?? 'o período'} em ${aberta.conta.proximaViradaMin} min`, urgencia: 3 });
       }
+      const cv = cfgVist.get(x.ambienteId);
+      if (x.status === 'vistoria' && x.observacaoStatus?.startsWith('Reprovada na vistoria')) {
+        alertas.push({ unidadeId: x.id, codigo: x.codigo, tipo: 'vistoria_reprovada', minutos,
+          mensagem: 'Reprovada na vistoria: decidir limpeza ou manutenção', urgencia: 3 });
+      }
+      if (x.status === 'livre' && x.vistoriaResultado === 'ressalva' && x.observacaoStatus?.startsWith('Liberada com ressalva')) {
+        alertas.push({ unidadeId: x.id, codigo: x.codigo, tipo: 'vistoria_ressalva', minutos, mensagem: x.observacaoStatus.slice(0, 120), urgencia: 1 });
+      }
+      if (x.frigobarValidade && cv && cv.validadeAvisoDias > 0) {
+        const dias = Math.round((Date.parse(`${String(x.frigobarValidade).slice(0, 10)}T12:00:00Z`) - hojeMs) / 86_400_000);
+        if (dias <= cv.validadeAvisoDias) {
+          alertas.push({ unidadeId: x.id, codigo: x.codigo, tipo: 'frigobar_validade', minutos: 0,
+            mensagem: dias < 0 ? `Frigobar com produto vencido há ${-dias} dia(s)` : dias === 0 ? 'Frigobar: produto vence hoje' : `Frigobar: produto vence em ${dias} dia(s)`, urgencia: dias <= 0 ? 3 : 1 });
+        }
+      }
+      if (x.status === 'livre' && cv && cv.diasSemVistoria > 0 && x.vistoriaEm && (agora - new Date(x.vistoriaEm).getTime()) / 86_400_000 >= cv.diasSemVistoria) {
+        const d = Math.floor((agora - new Date(x.vistoriaEm).getTime()) / 86_400_000);
+        alertas.push({ unidadeId: x.id, codigo: x.codigo, tipo: 'sem_vistoria', minutos: d * 1440, mensagem: `Sem vistoria há ${d} dias`, urgencia: 1 });
+      }
       if (x.status === 'bloqueada') {
         alertas.push({ unidadeId: x.id, codigo: x.codigo, tipo: 'bloqueada', minutos,
           mensagem: `Bloqueada: ${x.motivoBloqueio?.nome ?? 'sem motivo'}`, urgencia: 1 });
@@ -110,6 +139,8 @@ export class PainelService {
         observacaoStatus: x.observacaoStatus,
         plantaX: x.plantaX !== null ? Number(x.plantaX) : null,
         plantaY: x.plantaY !== null ? Number(x.plantaY) : null,
+        /** selo da última vistoria no cartão */
+        vistoria: x.vistoriaResultado ? { resultado: x.vistoriaResultado, em: x.vistoriaEm } : null,
         estadia: aberta
           ? {
               id: aberta.estadia.id,

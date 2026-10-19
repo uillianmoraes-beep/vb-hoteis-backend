@@ -21,11 +21,12 @@ cd "$PASTA"
 if [ ! -f .env ]; then
   read -rp "Pasta dos backups (HD externo/NAS) [${PASTA}/backups]: " PASTA_BACKUP
   PASTA_BACKUP=${PASTA_BACKUP:-$PASTA/backups}
-  mkdir -p "$PASTA_BACKUP"
+  mkdir -p "$PASTA_BACKUP" "$PASTA/fotos"
   cat > .env <<ENV
 SENHA_BANCO=$(openssl rand -hex 24)
 JWT_SECRET=$(openssl rand -hex 48)
 PASTA_BACKUP=$PASTA_BACKUP
+PASTA_FOTOS=$PASTA/fotos
 DOCKER_CONFIG_JSON=/root/.docker/config.json
 ENV
   chmod 600 .env

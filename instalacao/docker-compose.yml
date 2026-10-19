@@ -29,9 +29,12 @@ services:
       VB_MODO: local
       VB_NUVEM_URL: ${VB_NUVEM_URL:-https://vb-hoteis-backend-production.up.railway.app}
       VB_BACKUP_DIR: /backups
+      # fotos das vistorias e das piscinas (o banco guarda só o caminho)
+      VB_FOTOS_DIR: /fotos
       TZ: America/Sao_Paulo
     volumes:
       - ${PASTA_BACKUP:-./backups}:/backups
+      - ${PASTA_FOTOS:-./fotos}:/fotos
     labels:
       - com.centurylinklabs.watchtower.enable=true
 

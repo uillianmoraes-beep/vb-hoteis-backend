@@ -36,6 +36,10 @@ export class Unidade {
   motivoBloqueio?: MotivoBloqueio | null;
   @Column({ name: 'observacao_status', type: 'text', nullable: true }) observacaoStatus!: string | null;
 
+  /** última vistoria (selo no Painel) e a validade mais próxima do frigobar */
+  @Column({ name: 'vistoria_resultado', type: 'varchar', length: 10, nullable: true }) vistoriaResultado!: 'aprovado' | 'ressalva' | 'reprovado' | null;
+  @Column({ name: 'vistoria_em', type: 'timestamptz', nullable: true }) vistoriaEm!: Date | null;
+  @Column({ name: 'frigobar_validade', type: 'date', nullable: true }) frigobarValidade!: string | null;
   @Column({ type: 'int', default: 0 }) ordem!: number;
   @Column({ name: 'planta_x', type: 'numeric', precision: 8, scale: 2, nullable: true }) plantaX!: string | null;
   @Column({ name: 'planta_y', type: 'numeric', precision: 8, scale: 2, nullable: true }) plantaY!: string | null;

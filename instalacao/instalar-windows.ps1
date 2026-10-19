@@ -18,11 +18,13 @@ if (-not (Test-Path ".env")) {
   $PastaBackup = Read-Host "Pasta dos backups (HD externo/NAS) [C:\VB-Hoteis\backups]"
   if (-not $PastaBackup) { $PastaBackup = "C:\VB-Hoteis\backups" }
   New-Item -ItemType Directory -Force -Path $PastaBackup | Out-Null
+  New-Item -ItemType Directory -Force -Path "$Pasta\fotos" | Out-Null
   $cfg = "$env:USERPROFILE\.docker\config.json"
   @(
     "SENHA_BANCO=$(Aleatorio 48)",
     "JWT_SECRET=$(Aleatorio 96)",
     "PASTA_BACKUP=$($PastaBackup -replace '\\','/')",
+    "PASTA_FOTOS=$("$Pasta\fotos" -replace '\\','/')",
     "DOCKER_CONFIG_JSON=$($cfg -replace '\\','/')"
   ) | Set-Content -Encoding ASCII ".env"
   Write-Host "Arquivo .env criado em $Pasta (guarde uma cópia em lugar seguro)."

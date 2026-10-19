@@ -44,6 +44,11 @@ export const PERMISSOES = {
   'funcionarios.gerenciar': 'Funcionários: cadastro, crachá e itens da revisão',
   'funcionarios.financeiro': 'Ficha financeira dos funcionários (vales, descontos, pagamentos e gorjetas)',
   'empresa.editar': 'Editar dados da empresa',
+  'vistorias.fazer': 'Vistoriadoras: fazer a vistoria das suítes e quartos (fotos, checklist, frigobar)',
+  'vistorias.decidir': 'Vistorias: decidir as reprovadas (limpeza ou manutenção) e dar ciência das ressalvas',
+  'vistorias.configurar': 'Vistorias: cadastros (checklist, fotos obrigatórias, piscinas e hidros)',
+  'vistorias.relatorio': 'Vistorias: histórico e baixar a planilha com as fotos',
+  'piscinas.registrar': 'Piscinas e hidros: registrar medição, limpeza e produtos usados',
 } as const;
 
 export type Permissao = keyof typeof PERMISSOES;
@@ -60,6 +65,7 @@ export const GRUPOS_PERMISSAO: { grupo: string; permissoes: Permissao[] }[] = [
   { grupo: 'Notas fiscais', permissoes: ['notas.gerenciar'] },
   { grupo: 'Satisfação', permissoes: ['avaliacoes.ver'] },
   { grupo: 'Cadastros', permissoes: ['unidades.gerenciar', 'categorias.gerenciar', 'ambientes.gerenciar', 'motivos.gerenciar'] },
+  { grupo: 'Vistoriadoras / Revisões', permissoes: ['vistorias.fazer', 'vistorias.decidir', 'vistorias.configurar', 'vistorias.relatorio', 'piscinas.registrar'] },
   { grupo: 'Equipe e empresa', permissoes: ['usuarios.gerenciar', 'perfis.gerenciar', 'empresa.editar', 'funcionarios.gerenciar', 'funcionarios.financeiro'] },
 ];
 

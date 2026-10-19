@@ -42,6 +42,7 @@ import { BackupModule } from './backup/backup.module';
 import { ServidorLocalModule } from './servidor-local/servidor-local.module';
 import { ImpressaoModule } from './impressao/impressao.module';
 import { ManutencaoModule } from './manutencao/manutencao.module';
+import { VistoriasModule } from './vistorias/vistorias.module';
 
 @Module({
   imports: [
@@ -95,6 +96,7 @@ import { ManutencaoModule } from './manutencao/manutencao.module';
     ServidorLocalModule,
     ImpressaoModule,
     ManutencaoModule,
+    VistoriasModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },
