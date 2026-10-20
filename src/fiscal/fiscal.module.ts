@@ -4,11 +4,13 @@ import { RegraFiscal } from './regra-fiscal.entity';
 import { Empresa } from '../empresas/empresa.entity';
 import { FiscalService } from './fiscal.service';
 import { FiscalController } from './fiscal.controller';
+import { NcmService } from './ncm.service';
+import { NcmController } from './ncm.controller';
 
 @Module({
   imports: [TypeOrmModule.forFeature([RegraFiscal, Empresa])],
-  providers: [FiscalService],
-  controllers: [FiscalController],
+  providers: [FiscalService, NcmService],
+  controllers: [FiscalController, NcmController],
   exports: [FiscalService],
 })
 export class FiscalModule {}
