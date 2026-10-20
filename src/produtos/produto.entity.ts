@@ -14,6 +14,8 @@ export class Produto {
   @Column({ type: 'numeric', precision: 10, scale: 2, default: 0 }) preco!: string;
   /** custo digitado (vale enquanto não há custo pelas entradas do estoque) */
   @Column({ type: 'numeric', precision: 10, scale: 2, nullable: true }) custo!: string | null;
+  /** ficha técnica: quantas porções a receita rende */
+  @Column({ name: 'ficha_rendimento', type: 'numeric', precision: 10, scale: 3, default: 1 }) fichaRendimento!: string;
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) fiscal!: DadosFiscais;
   @Column({ default: false }) frigobar!: boolean;
   @Column({ name: 'controla_estoque', default: false }) controlaEstoque!: boolean;

@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Produto } from './produto.entity';
-import { AtualizarProdutoDto, CriarProdutoDto } from './produtos.dto';
+import { AtualizarProdutoDto, CriarProdutoDto, SalvarFichaDto } from './produtos.dto';
 import { limparFiscal } from '../common/fiscal';
 
 @Injectable()
@@ -25,7 +25,60 @@ export class ProdutosService {
       `SELECT produto_id AS id, SUM(quantidade * custo_medio) FILTER (WHERE quantidade > 0) / NULLIF(SUM(quantidade) FILTER (WHERE quantidade > 0), 0) AS medio,
               MAX(custo_medio) AS ultimo FROM estoque_saldos WHERE produto_id = ANY($1::uuid[]) GROUP BY produto_id`, [lista.map((p) => p.id)]) : [];
     const mapa = new Map(custos.map((x) => [x.id, Number(x.medio ?? 0) || Number(x.ultimo ?? 0)]));
-    return lista.map((p) => ({ ...p, custoEstoque: Math.round((mapa.get(p.id) ?? 0) * 100) / 100 || null }));
+    // ficha técnica: custo do prato = soma dos insumos (custo do estoque ou o digitado) ÷ rendimento
+    const fichas: { produto_id: string; n: number; custo: string }[] = lista.length ? await this.repo.query(
+      `SELECT pi.produto_id, COUNT(*)::int AS n, SUM(pi.quantidade * COALESCE(NULLIF(c.custo_estoque, 0), i.custo, 0)) AS custo
+         FROM produto_insumos pi JOIN produtos i ON i.id = pi.insumo_id
+         LEFT JOIN LATERAL (SELECT COALESCE(SUM(quantidade * custo_medio) FILTER (WHERE quantidade > 0) / NULLIF(SUM(quantidade) FILTER (WHERE quantidade > 0), 0), MAX(custo_medio)) AS custo_estoque
+                              FROM estoque_saldos WHERE produto_id = i.id) c ON true
+        WHERE pi.produto_id = ANY($1::uuid[]) GROUP BY pi.produto_id`, [lista.map((p) => p.id)]) : [];
+    const mapaFicha = new Map(fichas.map((f) => [f.produto_id, f]));
+    return lista.map((p) => {
+      const f = mapaFicha.get(p.id);
+      const rend = Number(p.fichaRendimento) > 0 ? Number(p.fichaRendimento) : 1;
+      return {
+        ...p, custoEstoque: Math.round((mapa.get(p.id) ?? 0) * 100) / 100 || null,
+        insumos: f?.n ?? 0, custoFicha: f ? Math.round((Number(f.custo) / rend) * 100) / 100 : null,
+      };
+    });
+  }
+
+  /** ficha técnica do produto: insumos com unidade e custo */
+  async ficha(empresaId: string, id: string) {
+    const p = await this.buscar(empresaId, id);
+    const itens: { insumo_id: string; nome: string; unidade: string; quantidade: string; custo: string | null; controla_estoque: boolean }[] = await this.repo.query(
+      `SELECT pi.insumo_id, i.nome, i.unidade, pi.quantidade, i.controla_estoque,
+              COALESCE(NULLIF((SELECT COALESCE(SUM(quantidade * custo_medio) FILTER (WHERE quantidade > 0) / NULLIF(SUM(quantidade) FILTER (WHERE quantidade > 0), 0), MAX(custo_medio))
+                                 FROM estoque_saldos WHERE produto_id = i.id), 0), i.custo) AS custo
+         FROM produto_insumos pi JOIN produtos i ON i.id = pi.insumo_id WHERE pi.produto_id = $1 ORDER BY i.nome`, [p.id]);
+    return {
+      rendimento: Number(p.fichaRendimento) || 1,
+      itens: itens.map((i) => ({ insumoId: i.insumo_id, nome: i.nome, unidade: i.unidade, quantidade: Number(i.quantidade), custoUnitario: i.custo === null ? null : Math.round(Number(i.custo) * 10000) / 10000, controlaEstoque: i.controla_estoque })),
+    };
+  }
+
+  async salvarFicha(empresaId: string, id: string, dto: SalvarFichaDto) {
+    const p = await this.buscar(empresaId, id);
+    const ids = [...new Set(dto.itens.map((i) => i.insumoId))];
+    if (ids.length !== dto.itens.length) throw new BadRequestException('Há ingrediente repetido na ficha.');
+    if (ids.includes(p.id)) throw new BadRequestException('O produto não pode ser ingrediente dele mesmo.');
+    if (ids.length) {
+      const ok: { id: string; nome: string; tem_ficha: boolean }[] = await this.repo.query(
+        `SELECT i.id, i.nome, EXISTS (SELECT 1 FROM produto_insumos x WHERE x.produto_id = i.id) AS tem_ficha FROM produtos i WHERE i.id = ANY($1::uuid[]) AND i.empresa_id = $2`, [ids, empresaId]);
+      if (ok.length !== ids.length) throw new BadRequestException('Ingrediente não encontrado.');
+      const composto = ok.find((x) => x.tem_ficha);
+      if (composto) throw new BadRequestException(`"${composto.nome}" já tem ficha técnica: use os ingredientes dele direto.`);
+    }
+    await this.repo.manager.transaction(async (m) => {
+      await m.query(`DELETE FROM produto_insumos WHERE produto_id = $1`, [p.id]);
+      for (const i of dto.itens) {
+        await m.query(`INSERT INTO produto_insumos (empresa_id, produto_id, insumo_id, quantidade) VALUES ($1,$2,$3,$4)`, [empresaId, p.id, i.insumoId, i.quantidade]);
+      }
+      // ingredientes passam a controlar estoque; o prato com ficha não baixa ele mesmo
+      if (ids.length) await m.query(`UPDATE produtos SET controla_estoque = true WHERE id = ANY($1::uuid[]) AND NOT controla_estoque AND tipo = 'produto'`, [ids]);
+      await m.query(`UPDATE produtos SET ficha_rendimento = $2 WHERE id = $1`, [p.id, dto.rendimento]);
+    });
+    return this.ficha(empresaId, id);
   }
 
   async buscar(empresaId: string, id: string) {

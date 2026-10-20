@@ -1,6 +1,6 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { ProdutosService } from './produtos.service';
-import { AtualizarProdutoDto, CriarProdutoDto } from './produtos.dto';
+import { AtualizarProdutoDto, CriarProdutoDto, SalvarFichaDto } from './produtos.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
@@ -19,6 +19,19 @@ export class ProdutosController {
   @Requer('produtos.gerenciar')
   criar(@Usuario() u: UsuarioToken, @Body() dto: CriarProdutoDto) {
     return this.service.criar(u.empresaId, dto);
+  }
+
+  /** ficha técnica (ingredientes que baixam do estoque ao vender) */
+  @Get(':id/ficha')
+  @Requer('produtos.gerenciar')
+  ficha(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.ficha(u.empresaId, id);
+  }
+
+  @Put(':id/ficha')
+  @Requer('produtos.gerenciar')
+  salvarFicha(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: SalvarFichaDto) {
+    return this.service.salvarFicha(u.empresaId, id, dto);
   }
 
   @Patch(':id')

@@ -67,8 +67,22 @@ export async function moverEstoque(m: Q, mv: Movimento): Promise<number> {
 export async function baixarConsumo(m: Q, empresaId: string, ambienteId: string | null | undefined, produtoId: string | null | undefined, quantidade: number,
   ref: { referencia: string; observacao?: string; usuario?: string; tipo?: 'consumo' | 'venda' }) {
   if (!produtoId || !(quantidade > 0)) return;
-  const [p] = await m.query(`SELECT controla_estoque FROM produtos WHERE id = $1 AND empresa_id = $2`, [produtoId, empresaId]);
-  if (!p?.controla_estoque) return;
+  const [p] = await m.query(`SELECT nome, controla_estoque, ficha_rendimento FROM produtos WHERE id = $1 AND empresa_id = $2`, [produtoId, empresaId]);
+  if (!p) return;
+  // ficha técnica: baixa os insumos da receita (proporcional ao rendimento) em vez do próprio produto
+  const insumos: { insumo_id: string; quantidade: string; controla_estoque: boolean }[] = await m.query(
+    `SELECT pi.insumo_id, pi.quantidade, i.controla_estoque FROM produto_insumos pi JOIN produtos i ON i.id = pi.insumo_id WHERE pi.produto_id = $1`, [produtoId]);
+  if (insumos.length) {
+    const localFicha = await localDoAmbiente(m, empresaId, ambienteId);
+    const rend = Number(p.ficha_rendimento) > 0 ? Number(p.ficha_rendimento) : 1;
+    for (const i of insumos) {
+      if (!i.controla_estoque) continue;
+      await moverEstoque(m, { empresaId, localId: localFicha, produtoId: i.insumo_id, quantidade: -n3((Number(i.quantidade) / rend) * quantidade), tipo: ref.tipo ?? 'consumo',
+        referencia: ref.referencia, observacao: `${ref.observacao ? `${ref.observacao} · ` : ''}ficha de ${p.nome}`, usuario: ref.usuario });
+    }
+    return;
+  }
+  if (!p.controla_estoque) return;
   const localId = await localDoAmbiente(m, empresaId, ambienteId);
   await moverEstoque(m, { empresaId, localId, produtoId, quantidade: -quantidade, tipo: ref.tipo ?? 'consumo', referencia: ref.referencia, observacao: ref.observacao, usuario: ref.usuario });
 }

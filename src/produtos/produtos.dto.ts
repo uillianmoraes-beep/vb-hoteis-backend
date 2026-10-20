@@ -1,4 +1,5 @@
-import { IsBoolean, IsIn, IsObject, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsObject, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 
 export class CriarProdutoDto {
   @IsString() @MaxLength(120) nome!: string;
@@ -29,4 +30,16 @@ export class AtualizarProdutoDto {
   @IsOptional() @IsBoolean() controlaEstoque?: boolean;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(1_000_000) estoqueMinimo?: number;
   @IsOptional() @IsString() @MaxLength(8) unidade?: string;
+}
+
+export class InsumoFichaDto {
+  @IsUUID() insumoId!: string;
+  /** quantidade na unidade do insumo (ex.: 0,250 kg), para a receita inteira */
+  @IsNumber({ maxDecimalPlaces: 4 }) @Min(0.0001) @Max(100000) quantidade!: number;
+}
+
+export class SalvarFichaDto {
+  /** quantas porções a receita rende (1 = a ficha é de uma porção) */
+  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) @Max(10000) rendimento!: number;
+  @IsArray() @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => InsumoFichaDto) itens!: InsumoFichaDto[];
 }
