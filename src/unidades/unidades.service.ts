@@ -174,6 +174,10 @@ export class UnidadesService {
       if (dto.ambienteId) {
         mud.ambienteId = dto.ambienteId;
         mud.ambientePadraoId = dto.ambienteId;
+        // mudou de vez: deixa de ser empréstimo
+        mud.categoriaPadraoId = null;
+        mud.emprestadaEm = null;
+        mud.emprestimoAuto = false;
         // a categoria do ambiente antigo não vale no novo
         if (!dto.categoriaId && un.ambientePadraoId !== dto.ambienteId) mud.categoriaId = null;
       }

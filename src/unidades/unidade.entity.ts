@@ -20,6 +20,12 @@ export class Unidade {
   @Column({ name: 'ambiente_padrao_id', type: 'uuid' }) ambientePadraoId!: string;
 
   @Column({ name: 'categoria_id', type: 'uuid', nullable: true }) categoriaId!: string | null;
+
+  /** emprestada a outro ambiente: a categoria de origem fica guardada para a volta */
+  @Column({ name: 'categoria_padrao_id', type: 'uuid', nullable: true }) categoriaPadraoId!: string | null;
+  @Column({ name: 'emprestada_em', type: 'timestamptz', nullable: true }) emprestadaEm!: Date | null;
+  /** emprestada pelo empréstimo automático (volta sozinha no fim da janela) */
+  @Column({ name: 'emprestimo_auto', type: 'boolean', default: false }) emprestimoAuto!: boolean;
   @ManyToOne(() => Categoria, { nullable: true }) @JoinColumn({ name: 'categoria_id' }) categoria?: Categoria | null;
 
   @Column({ length: 20 }) codigo!: string;
