@@ -84,7 +84,7 @@ export class ProdutosService {
    * Importa a planilha: cria os produtos novos e atualiza os que já existem (mesmo código de barras, código ou nome),
    * só com o que estiver preenchido. `simular` devolve a prévia sem gravar. Saldo inicial entra no estoque.
    */
-  async importar(empresaId: string, usuario: string, arquivoBase64: string, simular: boolean) {
+  async importar(empresaId: string, usuario: string, arquivoBase64: string, simular: boolean, padroes: { usadoEm?: string[]; localId?: string } = {}) {
     let linhas: LinhaLida[];
     try {
       linhas = await lerPlanilha(Buffer.from(arquivoBase64, 'base64'));
@@ -140,7 +140,8 @@ export class ProdutosService {
       }
       let localId: string | null = null;
       if (saldo && saldo > 0) {
-        const loc = l.local ? locs.find((x) => sem(x.nome) === sem(l.local!)) : (locs.find((x) => !x.ambiente_id) ?? locs[0]);
+        const padraoLocal = padroes.localId ? locs.find((x) => x.id === padroes.localId) : undefined;
+        const loc = l.local ? locs.find((x) => sem(x.nome) === sem(l.local!)) : (padraoLocal ?? locs.find((x) => !x.ambiente_id) ?? locs[0]);
         if (!loc) erros.push(l.local ? `local "${l.local}" não encontrado` : 'não há local de estoque para o saldo');
         else localId = loc.id;
       }
@@ -172,7 +173,8 @@ export class ProdutosService {
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
             [empresaId, r.nome, d.codigo ?? null, d.barras ?? null, d.grupo ?? null, tipo, d.uso ?? 'venda', (d.uso === 'interno' ? 0 : d.preco ?? 0).toFixed(2),
               d.custo !== undefined ? d.custo.toFixed(2) : null, d.controla ?? tipo === 'produto', d.minimo ?? 0, d.unidade ?? 'un',
-              d.ambientesIds && d.ambientesIds.length ? d.ambientesIds : null, !!d.frigobar, !!d.ressarcimento]);
+              // "Usado em" em branco: o que foi escolhido na tela de importar (vazio = todos)
+              ((d.ambientesIds === undefined ? padroes.usadoEm : d.ambientesIds) ?? []).length ? (d.ambientesIds === undefined ? padroes.usadoEm : d.ambientesIds) : null, !!d.frigobar, !!d.ressarcimento]);
           id = novo.id as string;
         } else {
           // só o que veio preenchido

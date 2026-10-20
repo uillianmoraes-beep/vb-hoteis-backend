@@ -35,7 +35,7 @@ export class ProdutosController {
   @HttpCode(200)
   @Requer('produtos.gerenciar')
   importar(@Usuario() u: UsuarioToken, @Body() dto: ImportarProdutosDto) {
-    return this.service.importar(u.empresaId, u.nome, dto.arquivo, !!dto.simular);
+    return this.service.importar(u.empresaId, u.nome, dto.arquivo, !!dto.simular, { usadoEm: dto.usadoEm, localId: dto.localId });
   }
 
   @Get('grupos')

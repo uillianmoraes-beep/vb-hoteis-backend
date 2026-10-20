@@ -67,4 +67,8 @@ export class ImportarProdutosDto {
   /** arquivo .xlsx em base64 */
   @IsString() @MaxLength(4_000_000) arquivo!: string;
   @IsOptional() @IsBoolean() simular?: boolean;
+  /** para as linhas com "Usado em" em branco (produtos novos): ambientes; vazio = todos */
+  @IsOptional() @IsArray() @ArrayMaxSize(50) @IsUUID('all', { each: true }) usadoEm?: string[];
+  /** para as linhas com "Local do saldo" em branco */
+  @IsOptional() @IsUUID() localId?: string;
 }

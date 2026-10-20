@@ -13,6 +13,8 @@ const VAZIAS = new Set(['de', 'da', 'do', 'das', 'dos', 'com', 'sem', 'e', 'em',
 export interface SugestaoNcm {
   ncm: string; descricao: string; completa: string | null; motivo: string | null; cest: string | null;
   substituicaoTributaria: boolean; fonte: 'ia' | 'tabela';
+  /** a melhor opção (a primeira da IA, ou a única/mais forte da tabela) */
+  recomendada?: boolean;
 }
 
 /** O que a IA devolve (formato fixo, validado). */
@@ -79,10 +81,11 @@ export class NcmService {
     if (!palavras.length) return [];
     // raiz da palavra (cerveja/cervejas, refrigerante/refrigerantes)
     const raizes = palavras.map((p) => (p.length > 5 ? p.slice(0, p.length - 2) : p));
-    const casos = raizes.map((_, i) => `(CASE WHEN busca LIKE $${i + 1} THEN 1 ELSE 0 END)`).join(' + ');
+    // só no começo de uma palavra: "cola" não casa com "hortícolas"
+    const casos = raizes.map((_, i) => `(CASE WHEN busca ~ $${i + 1} THEN 1 ELSE 0 END)`).join(' + ');
     const l: { codigo: string; descricao: string; completa: string; pontos: number }[] = await this.ds.query(
-      `SELECT codigo, descricao, completa, ${casos} AS pontos FROM ncm WHERE ${raizes.map((_, i) => `busca LIKE $${i + 1}`).join(' OR ')}
-        ORDER BY pontos DESC, length(completa) LIMIT ${limite}`, raizes.map((r) => `%${r}%`));
+      `SELECT codigo, descricao, completa, ${casos} AS pontos FROM ncm WHERE ${raizes.map((_, i) => `busca ~ $${i + 1}`).join(' OR ')}
+        ORDER BY pontos DESC, length(completa) LIMIT ${limite}`, raizes.map((r) => `\\m${r.replace(/[^a-z0-9]/g, '')}`));
     // a maioria das palavras; se nenhum item tiver, os que têm alguma (marca no nome: "Cerveja Heineken")
     const minimo = Math.max(1, Math.ceil(raizes.length / 2));
     const fortes = l.filter((x) => Number(x.pontos) >= minimo);
@@ -101,13 +104,21 @@ export class NcmService {
       if (x) return { sugestoes: [{ ncm: x.codigo, descricao: x.descricao, completa: x.completa, motivo: null, cest: null, substituicaoTributaria: false, fonte: 'tabela' }], ia: !!this.ia, vigencia: v?.vigencia ?? null };
     }
     const candidatos = await this.naTabela(t);
+    const nPalavras = new Set(sem(t).split(/[^a-z0-9]+/).filter((p) => p.length >= 3 && !VAZIAS.has(p) && !/^\d+$/.test(p))).size;
     const daTabela: SugestaoNcm[] = candidatos.slice(0, 6).map((x) => ({
       ncm: x.codigo, descricao: x.descricao, completa: x.completa, motivo: null, cest: null, substituicaoTributaria: false, fonte: 'tabela',
     }));
     const daIa = this.ia ? await this.sugerirIa(t, candidatos).catch((e) => { this.log.warn(`IA indisponível: ${e instanceof Error ? e.message : e}`); return []; }) : [];
     // IA primeiro; depois o que a tabela achou e a IA não repetiu
     const vistos = new Set(daIa.map((s) => s.ncm));
-    return { sugestoes: [...daIa, ...daTabela.filter((s) => !vistos.has(s.ncm))].slice(0, 8), ia: !!this.ia, vigencia: v?.vigencia ?? null };
+    // com a IA respondendo, da tabela só entra o que tem todas as palavras (o resto vira ruído)
+    const tabelaFiltrada = daIa.length
+      ? daTabela.filter((s, i) => !vistos.has(s.ncm) && Number(candidatos[i]?.pontos ?? 0) >= Math.min(nPalavras, 2))
+      : daTabela;
+    const lista = [...daIa, ...tabelaFiltrada].slice(0, 8);
+    // a melhor opção: a primeira da IA; sem IA, a primeira da tabela se casou todas as palavras
+    if (lista[0] && (lista[0].fonte === 'ia' || Number(candidatos[0]?.pontos ?? 0) >= nPalavras)) lista[0] = { ...lista[0], recomendada: true };
+    return { sugestoes: lista, ia: !!this.ia, vigencia: v?.vigencia ?? null };
   }
 
   /** pede ao Claude até 3 NCM para o produto, com o motivo; confere cada código na tabela oficial */
