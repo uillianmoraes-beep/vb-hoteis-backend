@@ -146,6 +146,28 @@ export class EmprestimoService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  /** faixa do Painel: empréstimos automáticos que saem deste ambiente ou chegam nele */
+  async resumoPainel(u: UsuarioToken, ambienteId: string) {
+    const ambs: { id: string; nome: string; emprestimo: EmprestimoAuto | null }[] = await this.ds.query(
+      `SELECT id, nome, emprestimo FROM ambientes WHERE empresa_id = $1 AND ativo AND emprestimo IS NOT NULL`, [u.empresaId]);
+    const nomes = new Map<string, string>(
+      (await this.ds.query(`SELECT id, nome FROM ambientes WHERE empresa_id = $1`, [u.empresaId]) as { id: string; nome: string }[]).map((a) => [a.id, a.nome]));
+    const t = minutoDaSemana();
+    const lista = [];
+    for (const a of ambs) {
+      const c = { ...PADRAO, ...(a.emprestimo ?? {}) };
+      if (!c.ativo || !c.destinoId || (a.id !== ambienteId && c.destinoId !== ambienteId)) continue;
+      const [n] = await this.ds.query(`SELECT count(*)::int AS n FROM unidades WHERE ambiente_padrao_id = $1 AND emprestada_em IS NOT NULL`, [a.id]);
+      lista.push({
+        origemId: a.id, origem: a.nome, destinoId: c.destinoId, destino: nomes.get(c.destinoId) ?? '',
+        quartos: c.unidadeIds.length, emprestadasAgora: Number(n?.n ?? 0), agoraNaJanela: situacaoJanela(c, t).dentro,
+        inicioDia: c.inicioDia, inicioHora: c.inicioHora, fimDia: c.fimDia, fimHora: c.fimHora,
+        inicio: `${DIAS[c.inicioDia]} ${c.inicioHora}`, fim: `${DIAS[c.fimDia]} ${c.fimHora}`,
+      });
+    }
+    return lista;
+  }
+
   async salvarAuto(u: UsuarioToken, ambienteId: string, dto: EmprestimoAutoDto) {
     const a = await this.ambienteOrigem(u.empresaId, ambienteId);
     if (dto.ativo) {

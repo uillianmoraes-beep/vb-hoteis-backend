@@ -24,6 +24,13 @@ export class EmprestimoController {
     return this.service.devolver(u.empresaId, dto.ids, { id: u.sub, nome: u.nome });
   }
 
+  /** para a faixa do Painel (todos que veem o Painel) */
+  @Get('painel/:ambienteId')
+  @Requer('painel.ver')
+  painel(@Usuario() u: UsuarioToken, @Param('ambienteId', ParseUUIDPipe) ambienteId: string) {
+    return this.service.resumoPainel(u, ambienteId);
+  }
+
   @Get('auto/:ambienteId')
   @Requer('unidades.gerenciar')
   lerAuto(@Usuario() u: UsuarioToken, @Param('ambienteId', ParseUUIDPipe) ambienteId: string) {
