@@ -69,3 +69,23 @@ export class DiariaCategoriaDto {
 export class SalvarDiariasDto {
   @IsArray() @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => DiariaCategoriaDto) itens!: DiariaCategoriaDto[];
 }
+
+export class PrecoPromocaoDto {
+  @IsUUID() categoriaId!: string;
+  /** motel: o período; hotel: vazio (diária) */
+  @IsOptional() @IsUUID() periodoId?: string;
+  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100000) valor!: number;
+}
+
+export class AplicarPromocaoDto {
+  @IsUUID() ambienteId!: string;
+  @IsString() @MaxLength(60) nome!: string;
+  @IsArray() @ArrayMaxSize(7) @IsInt({ each: true }) @Min(0, { each: true }) @Max(6, { each: true }) diasSemana!: number[];
+  @IsOptional() @Matches(/^\d{2}:\d{2}$/) horaInicio?: string;
+  @IsOptional() @Matches(/^\d{2}:\d{2}$/) horaFim?: string;
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/) dataInicio?: string;
+  @Matches(/^\d{4}-\d{2}-\d{2}$/) dataFim!: string;
+  @IsOptional() @IsArray() @ArrayMaxSize(500) @ValidateNested({ each: true }) @Type(() => PrecoPromocaoDto) precos?: PrecoPromocaoDto[];
+  @IsOptional() @IsUUID() brindeProdutoId?: string;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) @Max(100) brindeQuantidade?: number;
+}

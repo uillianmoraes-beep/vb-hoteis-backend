@@ -9,7 +9,7 @@ import { limparFiscal } from '../common/fiscal';
 export class ProdutosService {
   constructor(@InjectRepository(Produto) private readonly repo: Repository<Produto>) {}
 
-  listar(empresaId: string, opcoes: { inativos?: boolean; busca?: string } = {}) {
+  async listar(empresaId: string, opcoes: { inativos?: boolean; busca?: string } = {}) {
     const qb = this.repo.createQueryBuilder('p').where('p.empresaId = :empresaId', { empresaId });
     if (!opcoes.inativos) qb.andWhere('p.ativo = true');
     const termo = opcoes.busca?.trim();
@@ -19,7 +19,13 @@ export class ProdutosService {
         c: termo.toLowerCase(),
       });
     }
-    return qb.orderBy('p.grupo', 'ASC', 'NULLS LAST').addOrderBy('p.nome', 'ASC').limit(500).getMany();
+    const lista = await qb.orderBy('p.grupo', 'ASC', 'NULLS LAST').addOrderBy('p.nome', 'ASC').limit(500).getMany();
+    // custo pelo estoque (média ponderada dos saldos; sem saldo, o último custo médio)
+    const custos: { id: string; medio: string | null; ultimo: string | null }[] = lista.length ? await this.repo.query(
+      `SELECT produto_id AS id, SUM(quantidade * custo_medio) FILTER (WHERE quantidade > 0) / NULLIF(SUM(quantidade) FILTER (WHERE quantidade > 0), 0) AS medio,
+              MAX(custo_medio) AS ultimo FROM estoque_saldos WHERE produto_id = ANY($1::uuid[]) GROUP BY produto_id`, [lista.map((p) => p.id)]) : [];
+    const mapa = new Map(custos.map((x) => [x.id, Number(x.medio ?? 0) || Number(x.ultimo ?? 0)]));
+    return lista.map((p) => ({ ...p, custoEstoque: Math.round((mapa.get(p.id) ?? 0) * 100) / 100 || null }));
   }
 
   async buscar(empresaId: string, id: string) {
@@ -52,6 +58,7 @@ export class ProdutosService {
         nome: dto.nome.trim(),
         codigo: dto.codigo?.trim() || null,
         codigoBarras: dto.codigoBarras?.trim() || null,
+        custo: dto.custo !== undefined && dto.custo > 0 ? dto.custo.toFixed(2) : null,
         grupo: dto.grupo?.trim() || null,
         tipo: dto.tipo ?? 'produto',
         preco: dto.preco.toFixed(2),
@@ -69,6 +76,7 @@ export class ProdutosService {
     if (dto.codigo !== undefined) await this.codigoLivre(empresaId, dto.codigo, id);
     if (dto.nome !== undefined) p.nome = dto.nome.trim();
     if (dto.codigo !== undefined) p.codigo = dto.codigo?.trim() || null;
+    if (dto.custo !== undefined) p.custo = dto.custo && dto.custo > 0 ? dto.custo.toFixed(2) : null;
     if (dto.codigoBarras !== undefined) { await this.barrasLivre(empresaId, dto.codigoBarras, id); p.codigoBarras = dto.codigoBarras?.trim() || null; }
     if (dto.grupo !== undefined) p.grupo = dto.grupo?.trim() || null;
     if (dto.tipo !== undefined) p.tipo = dto.tipo;

@@ -1,13 +1,34 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Put } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { TarifasService } from './tarifas.service';
-import { SalvarDiariasDto, SalvarTarifasDto } from './tarifas.dto';
+import { AplicarPromocaoDto, SalvarDiariasDto, SalvarTarifasDto } from './tarifas.dto';
+import { PromocoesService } from './promocoes.service';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
 
 @Controller('tarifas')
 export class TarifasController {
-  constructor(private readonly service: TarifasService) {}
+  constructor(private readonly service: TarifasService, private readonly promocoes: PromocoesService) {}
+
+  /** Tarifas inteligentes: dias fracos, preço real × sugerido, ideias e promoções do ambiente */
+  @Get('inteligentes/:ambienteId')
+  @Requer('tarifas.gerenciar')
+  inteligentes(@Usuario() u: UsuarioToken, @Param('ambienteId', ParseUUIDPipe) ambienteId: string, @Query('dias') dias?: string) {
+    return this.promocoes.analise(u, ambienteId, Number(dias) || 90);
+  }
+
+  @Post('promocoes')
+  @Requer('tarifas.gerenciar')
+  aplicarPromocao(@Usuario() u: UsuarioToken, @Body() dto: AplicarPromocaoDto) {
+    return this.promocoes.aplicar(u, dto);
+  }
+
+  @Post('promocoes/:id/encerrar')
+  @HttpCode(200)
+  @Requer('tarifas.gerenciar')
+  encerrarPromocao(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
+    return this.promocoes.encerrar(u, id);
+  }
 
   @Get('previa/:unidadeId')
   @Requer('estadias.operar', 'estadias.entrada', 'tarifas.gerenciar')

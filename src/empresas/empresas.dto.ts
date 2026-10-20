@@ -4,7 +4,7 @@ export class AtualizarEmpresaDto {
   @IsOptional() @IsString() @MaxLength(150) nome?: string;
   @IsOptional() @IsString() @MaxLength(18) cnpj?: string | null;
   @IsOptional() @IsObject() vocabulario?: Record<string, string>;
-  @IsOptional() @IsObject() aparencia?: { tema?: string; cores?: Record<string, string>; menu?: string };
+  @IsOptional() @IsObject() aparencia?: { tema?: string; cores?: Record<string, string>; menu?: string; calor?: string[] };
 }
 
 export class LogoDto {

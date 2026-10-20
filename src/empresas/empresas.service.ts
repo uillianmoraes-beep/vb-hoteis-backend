@@ -34,7 +34,7 @@ export class EmpresasService {
   }
 
   /** Aceita só nome de tema simples e cores hexadecimais dos status conhecidos. */
-  private limparAparencia(a: { tema?: string; cores?: Record<string, string>; menu?: string }) {
+  private limparAparencia(a: { tema?: string; cores?: Record<string, string>; menu?: string; calor?: string[] }) {
     const tema = typeof a.tema === 'string' && /^[a-z0-9-]{1,30}$/.test(a.tema) ? a.tema : 'dia';
     const cores: Record<string, string> = {};
     for (const [st, cor] of Object.entries(a.cores ?? {})) {
@@ -44,6 +44,9 @@ export class EmpresasService {
     }
     // cor própria do menu lateral (opcional)
     const menu = typeof a.menu === 'string' && /^#[0-9a-fA-F]{6}$/.test(a.menu) ? a.menu.toUpperCase() : undefined;
-    return menu ? { tema, cores, menu } : { tema, cores };
+    // paleta do movimento (relatório Dias quentes): pouco, médio, bom, muito
+    const calor = Array.isArray(a.calor) && a.calor.length === 4 && a.calor.every((x) => typeof x === 'string' && /^#[0-9a-fA-F]{6}$/.test(x))
+      ? a.calor.map((x) => x.toUpperCase()) : undefined;
+    return { tema, cores, ...(menu ? { menu } : {}), ...(calor ? { calor } : {}) };
   }
 }

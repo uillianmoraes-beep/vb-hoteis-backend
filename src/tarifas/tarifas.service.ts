@@ -353,14 +353,23 @@ export class TarifasService {
     if (!c || !(c.diaria > 0)) return null;
     let total = 0;
     const extra = Math.max(0, pessoas - (c.pessoasIncluidas ?? 2)) * (c.pessoaExtra ?? 0);
+    // promoções do hotel (Tarifas inteligentes) com diária desta categoria
+    const promos: { dias_semana: number[]; ini: string; fim: string; valor: string }[] = await this.ds.query(
+      `SELECT dias_semana, to_char(data_inicio, 'YYYY-MM-DD') AS ini, to_char(data_fim, 'YYYY-MM-DD') AS fim, diarias->>$3 AS valor
+         FROM promocoes WHERE empresa_id = $1 AND ambiente_id = $2 AND ativo AND (diarias->>$3) IS NOT NULL ORDER BY criado_em DESC`,
+      [empresaId, ambienteId, categoriaId]);
+    let primeira: number | null = null;
     for (let n = 0; n < noites; n++) {
       const dia = new Date(entrada.getTime() + n * 86_400_000);
       // noite de sexta ou de sábado (dia da entrada daquela noite)
-      const dsem = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', weekday: 'short' }).format(dia);
-      const fimDeSemana = dsem === 'Fri' || dsem === 'Sat';
-      total += (fimDeSemana && c.fimSemana ? c.fimSemana : c.diaria) + extra;
+      const { diaSemana, data } = partesLocais(dia, FUSO);
+      const fimDeSemana = diaSemana === 5 || diaSemana === 6;
+      const promo = promos.find((p) => data >= p.ini && data <= p.fim && p.dias_semana.includes(diaSemana));
+      const valor = promo ? Number(promo.valor) : fimDeSemana && c.fimSemana ? c.fimSemana : c.diaria;
+      if (n === 0) primeira = valor;
+      total += valor + extra;
     }
-    return { diaria: c.diaria + extra, total: Math.round(total * 100) / 100, cafeIncluso: !!c.cafeIncluso, fimSemana: c.fimSemana ?? null };
+    return { diaria: (primeira ?? c.diaria) + extra, total: Math.round(total * 100) / 100, cafeIncluso: !!c.cafeIncluso, fimSemana: c.fimSemana ?? null };
   }
 }
 

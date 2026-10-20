@@ -15,6 +15,7 @@ import { Empresa } from '../empresas/empresa.entity';
 import { Ambiente } from '../ambientes/ambiente.entity';
 import { moduloAtivo } from '../common/modulos';
 import { FUSO, Motor, TarifasService } from '../tarifas/tarifas.service';
+import { PromocoesService } from '../tarifas/promocoes.service';
 import { FaturamentoService } from '../faturamento/faturamento.service';
 import { cnpjDoAmbiente } from '../common/cnpj';
 import { baixarConsumo, devolverConsumo } from '../estoque/estoque.core';
@@ -83,6 +84,7 @@ export class EstadiasService {
     @InjectRepository(Produto) private readonly produtos: Repository<Produto>,
     @InjectRepository(Empresa) private readonly empresas: Repository<Empresa>,
     private readonly tarifas: TarifasService,
+    private readonly promocoes: PromocoesService,
     private readonly caixa: CaixaService,
     private readonly gorjetas: GorjetasService,
     private readonly cortesias: CortesiasService,
@@ -403,6 +405,11 @@ export class EstadiasService {
         + (modalidade === 'pernoite' ? ', pernoite' : minimo ? `, pacote ${minimo.nome}` : ''));
       return e;
     });
+    // promoção com brinde (Tarifas inteligentes): entra na conta com preço zero
+    try {
+      const brinde = await this.promocoes.brindeDaEntrada(u.empresaId, unidade.ambienteId, tabela?.id ?? null, agora);
+      if (brinde) return await this.lancarItem(u, salva.id, { produtoId: brinde.produtoId, quantidade: brinde.quantidade, precoUnitario: 0 } as LancarItemDto);
+    } catch { /* o brinde não pode impedir a entrada */ }
     return this.detalhe(u, salva.id);
   }
 

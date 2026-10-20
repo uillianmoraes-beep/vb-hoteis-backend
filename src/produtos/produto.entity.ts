@@ -12,6 +12,8 @@ export class Produto {
   @Column({ type: 'varchar', length: 60, nullable: true }) grupo!: string | null;
   @Column({ type: 'varchar', length: 10, default: 'produto' }) tipo!: 'produto' | 'servico';
   @Column({ type: 'numeric', precision: 10, scale: 2, default: 0 }) preco!: string;
+  /** custo digitado (vale enquanto não há custo pelas entradas do estoque) */
+  @Column({ type: 'numeric', precision: 10, scale: 2, nullable: true }) custo!: string | null;
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) fiscal!: DadosFiscais;
   @Column({ default: false }) frigobar!: boolean;
   @Column({ name: 'controla_estoque', default: false }) controlaEstoque!: boolean;
