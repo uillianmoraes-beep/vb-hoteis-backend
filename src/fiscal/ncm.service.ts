@@ -15,6 +15,8 @@ export interface SugestaoNcm {
   substituicaoTributaria: boolean; fonte: 'ia' | 'tabela';
   /** a melhor opção (a primeira da IA, ou a única/mais forte da tabela) */
   recomendada?: boolean;
+  /** PIS/COFINS monofásico (bebidas frias, combustíveis, farmácia…): na revenda a alíquota é zero */
+  monofasico?: boolean;
 }
 
 /** O que a IA devolve (formato fixo, validado). */
@@ -24,6 +26,7 @@ const RespostaIa = z.object({
     motivo: z.string().describe('uma frase curta em português explicando a escolha'),
     cest: z.string().describe('7 dígitos se o item tiver CEST (substituição tributária), senão vazio'),
     substituicao_tributaria: z.boolean().describe('true se o item costuma ter ICMS por substituição tributária'),
+    monofasico: z.boolean().describe('true se PIS/COFINS são monofásicos para este NCM (ex.: refrigerantes, cervejas, águas, cosméticos, medicamentos)'),
   })),
 });
 
@@ -92,6 +95,17 @@ export class NcmService {
     return fortes.length ? fortes : l;
   }
 
+  /** regime tributário guardado da empresa */
+  async regime(empresaId: string): Promise<string | null> {
+    const [e] = await this.ds.query(`SELECT regime_tributario FROM empresas WHERE id = $1`, [empresaId]);
+    return e?.regime_tributario ?? null;
+  }
+
+  async salvarRegime(empresaId: string, regime: 'simples' | 'mei' | 'normal') {
+    await this.ds.query(`UPDATE empresas SET regime_tributario = $2 WHERE id = $1`, [empresaId, regime]);
+    return { ok: true, regime };
+  }
+
   async buscar(termo: string): Promise<{ sugestoes: SugestaoNcm[]; ia: boolean; vigencia: string | null }> {
     const t = termo.trim().slice(0, 200);
     if (t.length < 2) return { sugestoes: [], ia: !!this.ia, vigencia: null };
@@ -151,7 +165,7 @@ export class NcmService {
       const o = mapa.get(c);
       if (!o) return []; // código que não existe na tabela vigente: descarta
       const cest = s.cest.replace(/\D/g, '');
-      return [{ ncm: c, descricao: o.descricao, completa: o.completa, motivo: s.motivo, cest: cest.length === 7 ? cest : null, substituicaoTributaria: s.substituicao_tributaria, fonte: 'ia' as const }];
+      return [{ ncm: c, descricao: o.descricao, completa: o.completa, motivo: s.motivo, cest: cest.length === 7 ? cest : null, substituicaoTributaria: s.substituicao_tributaria, monofasico: s.monofasico, fonte: 'ia' as const }];
     }).slice(0, 3);
   }
 }
