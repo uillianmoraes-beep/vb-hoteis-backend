@@ -7,6 +7,8 @@ export class Produto {
   @Column({ name: 'empresa_id', type: 'uuid' }) empresaId!: string;
   @Column({ length: 120 }) nome!: string;
   @Column({ type: 'varchar', length: 30, nullable: true }) codigo!: string | null;
+  /** EAN/GTIN da embalagem (leitor ou câmera) */
+  @Column({ name: 'codigo_barras', type: 'varchar', length: 20, nullable: true }) codigoBarras!: string | null;
   @Column({ type: 'varchar', length: 60, nullable: true }) grupo!: string | null;
   @Column({ type: 'varchar', length: 10, default: 'produto' }) tipo!: 'produto' | 'servico';
   @Column({ type: 'numeric', precision: 10, scale: 2, default: 0 }) preco!: string;

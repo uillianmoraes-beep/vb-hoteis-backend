@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsIn, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 
 export class LocalDto {
   @IsString() @MaxLength(80) nome!: string;
@@ -14,6 +14,9 @@ export class ItemQtdDto {
   @IsNumber({ maxDecimalPlaces: 3 }) @Min(-1_000_000) @Max(1_000_000) quantidade!: number;
   /** custo unitário (só na entrada) */
   @IsOptional() @IsNumber({ maxDecimalPlaces: 4 }) @Min(0) @Max(1_000_000) custo?: number;
+  /** lote e validade (só na entrada) */
+  @IsOptional() @IsString() @MaxLength(40) lote?: string;
+  @IsOptional() @IsDateString() validade?: string;
 }
 
 export class EntradaDto {
@@ -36,6 +39,10 @@ export class ItemNotaDto {
   @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) @Max(100000) fator?: number;
   /** não dar entrada neste item (ex.: material de escritório) */
   @IsOptional() @IsBoolean() ignorar?: boolean;
+  /** código de barras (cEAN) da nota: preenche o do produto se estiver vazio */
+  @IsOptional() @IsString() @MaxLength(20) ean?: string;
+  @IsOptional() @IsString() @MaxLength(40) lote?: string;
+  @IsOptional() @IsDateString() validade?: string;
 }
 
 export class EntradaNotaDto {

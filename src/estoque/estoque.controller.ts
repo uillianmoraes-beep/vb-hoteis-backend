@@ -18,6 +18,7 @@ export class EstoqueController {
   @Put('locais/:id') atualizarLocal(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: LocalDto) { return this.service.atualizarLocal(u, id, dto); }
 
   @Get('saldos') saldos(@Usuario() u: UsuarioToken, @Query('cnpj') cnpj?: string, @Query('busca') busca?: string) { return this.service.saldos(u, { cnpj, busca }); }
+  @Get('validades') validades(@Usuario() u: UsuarioToken, @Query('cnpj') cnpj?: string, @Query('dias') dias?: string) { return this.service.validades(u, { cnpj, dias: dias === undefined ? undefined : Number(dias) || 0 }); }
   @Get('abaixo-minimo') abaixo(@Usuario() u: UsuarioToken, @Query('cnpj') cnpj?: string) { return this.service.abaixoDoMinimo(u, cnpj); }
 
   @Put('minimos') minimos(@Usuario() u: UsuarioToken, @Body() dto: MinimosDto) { return this.service.salvarMinimos(u, dto); }

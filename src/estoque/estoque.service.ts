@@ -83,9 +83,9 @@ export class EstoqueService {
     const ids = locais.map((l: { id: string }) => l.id);
     const params: unknown[] = [u.empresaId];
     let filtro = '';
-    if (f.busca?.trim()) { params.push(`%${f.busca.trim()}%`); filtro = ` AND (p.nome ILIKE $2 OR p.codigo ILIKE $2 OR p.grupo ILIKE $2)`; }
+    if (f.busca?.trim()) { params.push(`%${f.busca.trim()}%`, f.busca.trim()); filtro = ` AND (p.nome ILIKE $2 OR p.codigo ILIKE $2 OR p.codigo_barras = $3 OR p.grupo ILIKE $2)`; }
     const ps = await this.ds.query(
-      `SELECT p.id, p.nome, p.codigo, p.grupo, p.unidade, p.estoque_minimo, p.preco FROM produtos p
+      `SELECT p.id, p.nome, p.codigo, p.codigo_barras, p.grupo, p.unidade, p.estoque_minimo, p.preco FROM produtos p
         WHERE p.empresa_id = $1 AND p.ativo AND p.controla_estoque${filtro} ORDER BY p.grupo NULLS LAST, p.nome`, params);
     const ss = ids.length ? await this.ds.query(`SELECT * FROM estoque_saldos WHERE local_id = ANY($1::uuid[])`, [ids]) : [];
     const porProduto = new Map<string, { localId: string; q: number; c: number; m: number }[]>();
@@ -105,7 +105,7 @@ export class EstoqueService {
       const total = r3(l.reduce((s, x) => s + x.q, 0));
       const valor = r2(l.reduce((s, x) => s + Math.max(0, x.q) * x.c, 0));
       return {
-        id: p.id, nome: p.nome, codigo: p.codigo, grupo: p.grupo, unidade: p.unidade, minimo: num(p.estoque_minimo), preco: num(p.preco),
+        id: p.id, nome: p.nome, codigo: p.codigo, codigoBarras: p.codigo_barras, grupo: p.grupo, unidade: p.unidade, minimo: num(p.estoque_minimo), preco: num(p.preco),
         saldos, custos, minimos, total, valor, custoMedio: total > 0 ? r2(valor / total) : 0,
         abaixoLocal: Object.keys(minimos).filter((k) => (saldos[k] ?? 0) < minimos[k]),
         falta: r3(Math.max(faltaLocais, num(p.estoque_minimo) > 0 ? num(p.estoque_minimo) - total : 0)),
@@ -124,7 +124,8 @@ export class EstoqueService {
         if (!(i.quantidade > 0)) throw new BadRequestException(`Quantidade inválida em "${ps.get(i.produtoId)?.nome}".`);
         await m.query(`UPDATE produtos SET controla_estoque = true WHERE id = $1 AND NOT controla_estoque`, [i.produtoId]);
         await moverEstoque(m, { empresaId: u.empresaId, localId: l.id, produtoId: i.produtoId, quantidade: i.quantidade, tipo: 'entrada',
-          custoUnitario: i.custo ?? null, documento: dto.documento?.trim() || null, observacao: dto.observacao, usuario: u.nome });
+          custoUnitario: i.custo ?? null, documento: dto.documento?.trim() || null, observacao: dto.observacao, usuario: u.nome,
+          lote: i.lote, validade: i.validade?.slice(0, 10) });
       }
     });
     return { ok: true, itens: dto.itens.length };
@@ -171,7 +172,13 @@ export class EstoqueService {
         const custo = qtd > 0 ? i.valor / qtd : 0;
         await m.query(`UPDATE produtos SET controla_estoque = true WHERE id = $1 AND NOT controla_estoque`, [produtoId]);
         await moverEstoque(m, { empresaId: u.empresaId, localId: l.id, produtoId: produtoId!, quantidade: qtd, tipo: 'entrada', custoUnitario: custo,
-          documento: doc, observacao: `${dto.fornecedor ?? 'Nota'} nº ${dto.numero ?? '—'} · ${i.nome}`.slice(0, 300), usuario: u.nome });
+          documento: doc, observacao: `${dto.fornecedor ?? 'Nota'} nº ${dto.numero ?? '—'} · ${i.nome}`.slice(0, 300), usuario: u.nome,
+          lote: i.lote, validade: i.validade?.slice(0, 10) });
+        const ean = (i.ean ?? '').replace(/\D/g, '');
+        if (ean.length >= 8) {
+          await m.query(`UPDATE produtos SET codigo_barras = $2 WHERE id = $1 AND codigo_barras IS NULL
+            AND NOT EXISTS (SELECT 1 FROM produtos o WHERE o.empresa_id = $3 AND o.codigo_barras = $2)`, [produtoId, ean, u.empresaId]);
+        }
         if (fornecedor && i.codigo) {
           await m.query(
             `INSERT INTO estoque_vinculos (empresa_id, fornecedor, codigo, produto_id, fator) VALUES ($1,$2,$3,$4,$5)
@@ -304,6 +311,41 @@ export class EstoqueService {
       locais: [...locais.values()].sort((a, b) => (a.cnpj ?? '').localeCompare(b.cnpj ?? '') || a.nome.localeCompare(b.nome)),
       maisConsumidos: top.map((t: Record<string, unknown>) => ({ nome: t.nome, unidade: t.unidade, quantidade: r3(num(t.qtd)), custo: r2(num(t.custo)) })),
     };
+  }
+
+  /**
+   * Validades: para cada produto com saldo, reparte o saldo atual pelas entradas com validade,
+   * da mais nova para a mais antiga (o que saiu primeiro foi o mais antigo). Lista os lotes que
+   * ainda têm quantidade e vencem até `dias` dias a partir de hoje (inclui os já vencidos).
+   */
+  async validades(u: UsuarioToken, f: { cnpj?: string; dias?: number }) {
+    const dias = Math.min(365, Math.max(0, f.dias ?? 60));
+    const s = await this.saldos(u, { cnpj: f.cnpj });
+    const comSaldo = (s.produtos as { id: string; nome: string; grupo: string | null; unidade: string; total: number }[]).filter((p) => p.total > 0);
+    if (!comSaldo.length) return [];
+    const locais = (s.locais as { id: string }[]).map((l) => l.id);
+    const ents: { produto_id: string; quantidade: string; lote: string | null; validade: string; criado_em: Date; documento: string | null }[] = await this.ds.query(
+      `SELECT produto_id, quantidade, lote, to_char(validade, 'YYYY-MM-DD') AS validade, criado_em, documento FROM estoque_movimentos
+        WHERE empresa_id = $1 AND tipo = 'entrada' AND validade IS NOT NULL AND quantidade > 0
+          AND produto_id = ANY($2::uuid[]) AND local_id = ANY($3::uuid[]) ORDER BY criado_em DESC`,
+      [u.empresaId, comSaldo.map((p) => p.id), locais]);
+    const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const limite = new Date(Date.parse(`${hoje}T12:00:00Z`) + dias * 86_400_000).toISOString().slice(0, 10);
+    const out: { produtoId: string; nome: string; grupo: string | null; unidade: string; lote: string | null; validade: string; diasParaVencer: number; quantidade: number; entradaEm: Date; documento: string | null }[] = [];
+    for (const p of comSaldo) {
+      let resta = p.total;
+      for (const e of ents.filter((x) => x.produto_id === p.id)) {
+        if (resta <= 0) break;
+        const q = Math.min(resta, num(e.quantidade));
+        resta = r3(resta - q);
+        if (e.validade <= limite) {
+          out.push({ produtoId: p.id, nome: p.nome, grupo: p.grupo, unidade: p.unidade, lote: e.lote, validade: e.validade,
+            diasParaVencer: Math.round((Date.parse(`${e.validade}T12:00:00Z`) - Date.parse(`${hoje}T12:00:00Z`)) / 86_400_000),
+            quantidade: r3(q), entradaEm: e.criado_em, documento: e.documento });
+        }
+      }
+    }
+    return out.sort((a, b) => a.validade.localeCompare(b.validade) || a.nome.localeCompare(b.nome));
   }
 
   /** produtos abaixo do mínimo (do produto no total, ou de algum local) */

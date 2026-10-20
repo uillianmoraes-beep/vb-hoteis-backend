@@ -14,7 +14,7 @@ export class ProdutosService {
     if (!opcoes.inativos) qb.andWhere('p.ativo = true');
     const termo = opcoes.busca?.trim();
     if (termo) {
-      qb.andWhere('(lower(p.nome) LIKE :t OR lower(p.codigo) = :c OR lower(p.grupo) LIKE :t)', {
+      qb.andWhere('(lower(p.nome) LIKE :t OR lower(p.codigo) = :c OR p.codigoBarras = :c OR lower(p.grupo) LIKE :t)', {
         t: `%${termo.toLowerCase()}%`,
         c: termo.toLowerCase(),
       });
@@ -37,13 +37,21 @@ export class ProdutosService {
     if (outro && outro.id !== ignorar) throw new BadRequestException(`O código ${codigo} já é de "${outro.nome}".`);
   }
 
+  private async barrasLivre(empresaId: string, codigo: string | null | undefined, ignorar?: string) {
+    if (!codigo?.trim()) return;
+    const outro = await this.repo.findOne({ where: { empresaId, codigoBarras: codigo.trim() } });
+    if (outro && outro.id !== ignorar) throw new BadRequestException(`O código de barras ${codigo} já é de "${outro.nome}".`);
+  }
+
   async criar(empresaId: string, dto: CriarProdutoDto) {
     await this.codigoLivre(empresaId, dto.codigo);
+    await this.barrasLivre(empresaId, dto.codigoBarras);
     return this.repo.save(
       this.repo.create({
         empresaId,
         nome: dto.nome.trim(),
         codigo: dto.codigo?.trim() || null,
+        codigoBarras: dto.codigoBarras?.trim() || null,
         grupo: dto.grupo?.trim() || null,
         tipo: dto.tipo ?? 'produto',
         preco: dto.preco.toFixed(2),
@@ -61,6 +69,7 @@ export class ProdutosService {
     if (dto.codigo !== undefined) await this.codigoLivre(empresaId, dto.codigo, id);
     if (dto.nome !== undefined) p.nome = dto.nome.trim();
     if (dto.codigo !== undefined) p.codigo = dto.codigo?.trim() || null;
+    if (dto.codigoBarras !== undefined) { await this.barrasLivre(empresaId, dto.codigoBarras, id); p.codigoBarras = dto.codigoBarras?.trim() || null; }
     if (dto.grupo !== undefined) p.grupo = dto.grupo?.trim() || null;
     if (dto.tipo !== undefined) p.tipo = dto.tipo;
     if (dto.preco !== undefined) p.preco = dto.preco.toFixed(2);
