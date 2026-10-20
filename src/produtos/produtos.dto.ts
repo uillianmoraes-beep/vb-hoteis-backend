@@ -62,3 +62,9 @@ export class AmbientesEmLoteDto {
   /** usar também neste ambiente (true) ou tirar dele (false) */
   @IsBoolean() usar!: boolean;
 }
+
+export class ImportarProdutosDto {
+  /** arquivo .xlsx em base64 */
+  @IsString() @MaxLength(4_000_000) arquivo!: string;
+  @IsOptional() @IsBoolean() simular?: boolean;
+}

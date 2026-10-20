@@ -4,6 +4,8 @@ import { Repository } from 'typeorm';
 import { Produto } from './produto.entity';
 import { AmbientesEmLoteDto, AtualizarProdutoDto, CriarProdutoDto, RenomearGrupoDto, SalvarFichaDto } from './produtos.dto';
 import { limparFiscal } from '../common/fiscal';
+import { moverEstoque } from '../estoque/estoque.core';
+import { LinhaLida, lerPlanilha, planilhaModelo } from './importacao';
 
 @Injectable()
 export class ProdutosService {
@@ -69,6 +71,137 @@ export class ProdutosService {
         [empresaId, dto.produtoIds, dto.ambienteId, todos.map((x) => x.id)]);
     }
     return { ok: true, produtos: dto.produtoIds.length };
+  }
+
+  /** planilha modelo com os ambientes e locais desta empresa */
+  async modeloImportacao(empresaId: string) {
+    const ambs: { nome: string }[] = await this.repo.query(`SELECT nome FROM ambientes WHERE empresa_id = $1 AND ativo ORDER BY nome`, [empresaId]);
+    const locs: { nome: string }[] = await this.repo.query(`SELECT nome FROM estoque_locais WHERE empresa_id = $1 AND ativo ORDER BY padrao DESC, nome`, [empresaId]);
+    return planilhaModelo(ambs.map((a) => a.nome), locs.map((l) => l.nome));
+  }
+
+  /**
+   * Importa a planilha: cria os produtos novos e atualiza os que já existem (mesmo código de barras, código ou nome),
+   * só com o que estiver preenchido. `simular` devolve a prévia sem gravar. Saldo inicial entra no estoque.
+   */
+  async importar(empresaId: string, usuario: string, arquivoBase64: string, simular: boolean) {
+    let linhas: LinhaLida[];
+    try {
+      linhas = await lerPlanilha(Buffer.from(arquivoBase64, 'base64'));
+    } catch (e) {
+      throw new BadRequestException(e instanceof Error && e.message.includes('Nome') ? e.message : 'Não consegui ler o arquivo. Use a planilha modelo (.xlsx).');
+    }
+    if (!linhas.length) throw new BadRequestException('A planilha não tem produtos na aba "Produtos".');
+    if (linhas.length > 3000) throw new BadRequestException('Até 3.000 produtos por planilha.');
+    const ambs: { id: string; nome: string }[] = await this.repo.query(`SELECT id, nome FROM ambientes WHERE empresa_id = $1 AND ativo`, [empresaId]);
+    const locs: { id: string; nome: string; ambiente_id: string | null }[] =
+      await this.repo.query(`SELECT id, nome, ambiente_id FROM estoque_locais WHERE empresa_id = $1 AND ativo ORDER BY padrao DESC, criado_em`, [empresaId]);
+    const existentes: { id: string; nome: string; codigo: string | null; codigo_barras: string | null }[] =
+      await this.repo.query(`SELECT id, nome, codigo, codigo_barras FROM produtos WHERE empresa_id = $1`, [empresaId]);
+    const sem = (t: string) => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const porBarras = new Map(existentes.filter((p) => p.codigo_barras).map((p) => [p.codigo_barras!, p]));
+    const porCodigo = new Map(existentes.filter((p) => p.codigo).map((p) => [sem(p.codigo!), p]));
+    const porNome = new Map(existentes.map((p) => [sem(p.nome), p]));
+    const num = (t?: string) => {
+      if (!t) return undefined;
+      const limpo = t.replace(/R\$|\s/g, '');
+      const v = Number(/,\d{1,3}$/.test(limpo) ? limpo.replace(/\./g, '').replace(',', '.') : limpo.replace(/,/g, ''));
+      return Number.isFinite(v) ? v : NaN;
+    };
+    const simNao = (t?: string) => (t === undefined ? undefined : /^(s|sim|x|1|true|verdadeiro)$/i.test(t.trim()));
+    const UNIDADES = ['un', 'kg', 'g', 'l', 'ml', 'cx', 'pct', 'dz', 'porcao', 'garrafa'];
+    const vistos = new Set<string>();
+    const resultado = linhas.map((l) => {
+      const erros: string[] = [];
+      const nome = (l.nome ?? '').slice(0, 120);
+      if (!nome) erros.push('sem nome');
+      const chave = sem(nome);
+      if (chave && vistos.has(chave)) erros.push('nome repetido na planilha');
+      vistos.add(chave);
+      const uso = l.uso ? (/interno/i.test(l.uso) ? 'interno' as const : /venda/i.test(l.uso) ? 'venda' as const : null) : undefined;
+      if (uso === null) erros.push('"Para que serve" deve ser Venda ou Uso interno');
+      const tipo = l.tipo ? (/servi/i.test(l.tipo) ? 'servico' as const : /produt/i.test(l.tipo) ? 'produto' as const : null) : undefined;
+      if (tipo === null) erros.push('Tipo deve ser Produto ou Serviço');
+      const unidade = l.unidade ? sem(l.unidade).replace(/^lt$/, 'l').replace(/^unid?(ade)?$/, 'un') : undefined;
+      if (unidade && !UNIDADES.includes(unidade)) erros.push(`unidade "${l.unidade}" não reconhecida`);
+      const preco = num(l.preco); const custo = num(l.custo); const minimo = num(l.minimo); const saldo = num(l.saldo);
+      for (const [n, v] of [['preço de venda', preco], ['custo', custo], ['estoque mínimo', minimo], ['saldo inicial', saldo]] as const) {
+        if (v !== undefined && (Number.isNaN(v) || v < 0)) erros.push(`${n} inválido`);
+      }
+      let ambientesIds: string[] | null | undefined;
+      if (l.usadoEm) {
+        if (/^todos?$/i.test(l.usadoEm.trim())) ambientesIds = null;
+        else {
+          const nomes = l.usadoEm.split(/[;,/]/).map((x) => x.trim()).filter(Boolean);
+          const achados = nomes.map((n) => ambs.find((a) => sem(a.nome) === sem(n) || sem(a.nome).includes(sem(n))));
+          if (achados.some((x) => !x)) erros.push(`"Usado em": ambiente não encontrado (${nomes.filter((_, i) => !achados[i]).join(', ')})`);
+          ambientesIds = [...new Set(achados.filter(Boolean).map((a) => a!.id))];
+        }
+      }
+      let localId: string | null = null;
+      if (saldo && saldo > 0) {
+        const loc = l.local ? locs.find((x) => sem(x.nome) === sem(l.local!)) : (locs.find((x) => !x.ambiente_id) ?? locs[0]);
+        if (!loc) erros.push(l.local ? `local "${l.local}" não encontrado` : 'não há local de estoque para o saldo');
+        else localId = loc.id;
+      }
+      const barras = l.barras?.replace(/\D/g, '') || undefined;
+      const ja = (barras && porBarras.get(barras)) || (l.codigo && porCodigo.get(sem(l.codigo))) || porNome.get(chave);
+      return {
+        linha: l.linha, nome, acao: erros.length ? 'erro' as const : ja ? 'atualizar' as const : 'novo' as const, erros, existenteId: ja ? ja.id : null,
+        dados: {
+          uso, tipo, grupo: l.grupo?.slice(0, 60), unidade, preco, custo, codigo: l.codigo?.slice(0, 30), barras: barras?.slice(0, 20),
+          controla: simNao(l.controla), minimo, ambientesIds, frigobar: simNao(l.frigobar), ressarcimento: simNao(l.ressarcimento), saldo, localId,
+        },
+      };
+    });
+    const resumo = {
+      novos: resultado.filter((r) => r.acao === 'novo').length, atualizados: resultado.filter((r) => r.acao === 'atualizar').length,
+      erros: resultado.filter((r) => r.acao === 'erro').length,
+      linhas: resultado.map((r) => ({ linha: r.linha, nome: r.nome, acao: r.acao, erros: r.erros })),
+    };
+    if (simular) return { ...resumo, gravado: false };
+
+    await this.repo.manager.transaction(async (m) => {
+      for (const r of resultado.filter((x) => x.acao !== 'erro')) {
+        const d = r.dados;
+        let id = r.existenteId;
+        if (!id) {
+          const tipo = d.tipo ?? 'produto';
+          const [novo] = await m.query(
+            `INSERT INTO produtos (empresa_id, nome, codigo, codigo_barras, grupo, tipo, uso, preco, custo, controla_estoque, estoque_minimo, unidade, ambientes_ids, frigobar, ressarcimento)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+            [empresaId, r.nome, d.codigo ?? null, d.barras ?? null, d.grupo ?? null, tipo, d.uso ?? 'venda', (d.uso === 'interno' ? 0 : d.preco ?? 0).toFixed(2),
+              d.custo !== undefined ? d.custo.toFixed(2) : null, d.controla ?? tipo === 'produto', d.minimo ?? 0, d.unidade ?? 'un',
+              d.ambientesIds && d.ambientesIds.length ? d.ambientesIds : null, !!d.frigobar, !!d.ressarcimento]);
+          id = novo.id as string;
+        } else {
+          // só o que veio preenchido
+          const sets: string[] = [];
+          const vals: unknown[] = [id];
+          const put = (col: string, v: unknown) => { vals.push(v); sets.push(`${col} = $${vals.length}`); };
+          if (d.codigo !== undefined) put('codigo', d.codigo);
+          if (d.barras !== undefined) put('codigo_barras', d.barras);
+          if (d.grupo !== undefined) put('grupo', d.grupo);
+          if (d.tipo !== undefined) put('tipo', d.tipo);
+          if (d.uso !== undefined) put('uso', d.uso);
+          if (d.preco !== undefined) put('preco', d.preco.toFixed(2));
+          if (d.custo !== undefined) put('custo', d.custo.toFixed(2));
+          if (d.controla !== undefined) put('controla_estoque', d.controla);
+          if (d.minimo !== undefined) put('estoque_minimo', d.minimo);
+          if (d.unidade !== undefined) put('unidade', d.unidade);
+          if (d.ambientesIds !== undefined) put('ambientes_ids', d.ambientesIds && d.ambientesIds.length ? d.ambientesIds : null);
+          if (d.frigobar !== undefined) put('frigobar', d.frigobar);
+          if (d.ressarcimento !== undefined) put('ressarcimento', d.ressarcimento);
+          if (sets.length) await m.query(`UPDATE produtos SET ${sets.join(', ')}, atualizado_em = now() WHERE id = $1`, vals);
+        }
+        if (d.saldo && d.saldo > 0 && d.localId) {
+          await m.query(`UPDATE produtos SET controla_estoque = true WHERE id = $1`, [id]);
+          await moverEstoque(m, { empresaId, localId: d.localId, produtoId: id, quantidade: d.saldo, tipo: 'entrada', custoUnitario: d.custo ?? null,
+            documento: 'Importação', observacao: 'Saldo inicial (planilha)', usuario });
+        }
+      }
+    });
+    return { ...resumo, gravado: true };
   }
 
   /** grupos em uso, com quantos produtos de venda e de uso interno */

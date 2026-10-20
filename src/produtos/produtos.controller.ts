@@ -1,6 +1,6 @@
-import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query, StreamableFile } from '@nestjs/common';
 import { ProdutosService } from './produtos.service';
-import { AmbientesEmLoteDto, AtualizarProdutoDto, CriarProdutoDto, RenomearGrupoDto, SalvarFichaDto } from './produtos.dto';
+import { ImportarProdutosDto, AmbientesEmLoteDto, AtualizarProdutoDto, CriarProdutoDto, RenomearGrupoDto, SalvarFichaDto } from './produtos.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
@@ -20,6 +20,22 @@ export class ProdutosController {
   @Requer('produtos.gerenciar')
   ambientesEmLote(@Usuario() u: UsuarioToken, @Body() dto: AmbientesEmLoteDto) {
     return this.service.ambientesEmLote(u.empresaId, dto);
+  }
+
+  /** planilha modelo (Excel) para importar produtos */
+  @Get('importacao/modelo')
+  @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @Requer('produtos.gerenciar')
+  async modeloImportacao(@Usuario() u: UsuarioToken) {
+    return new StreamableFile(await this.service.modeloImportacao(u.empresaId), { disposition: 'attachment; filename="modelo-produtos.xlsx"' });
+  }
+
+  /** importa a planilha (simular = só a prévia) */
+  @Post('importacao')
+  @HttpCode(200)
+  @Requer('produtos.gerenciar')
+  importar(@Usuario() u: UsuarioToken, @Body() dto: ImportarProdutosDto) {
+    return this.service.importar(u.empresaId, u.nome, dto.arquivo, !!dto.simular);
   }
 
   @Get('grupos')
