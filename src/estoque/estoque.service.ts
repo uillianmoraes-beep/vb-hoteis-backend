@@ -348,6 +348,49 @@ export class EstoqueService {
     return out.sort((a, b) => a.validade.localeCompare(b.validade) || a.nome.localeCompare(b.nome));
   }
 
+  /**
+   * Sugestão de compra: pelo consumo médio dos últimos `dias` (vendas, consumo e saídas, menos estornos),
+   * quanto comprar para durar `cobertura` dias além do estoque mínimo, descontando o saldo atual.
+   */
+  async sugestaoCompra(u: UsuarioToken, f: { cnpj?: string; dias?: number; cobertura?: number }) {
+    const dias = Math.min(365, Math.max(7, f.dias ?? 30));
+    const cobertura = Math.min(180, Math.max(1, f.cobertura ?? 15));
+    const s = await this.saldos(u, { cnpj: f.cnpj });
+    const locais = (s.locais as { id: string }[]).map((l) => l.id);
+    const produtos = s.produtos as { id: string; nome: string; grupo: string | null; unidade: string; minimo: number; total: number; custoMedio: number; abaixoLocal: string[] }[];
+    if (!produtos.length || !locais.length) return { dias, cobertura, itens: [] };
+    const consumo: { produto_id: string; q: string; ultimo: Date | null }[] = await this.ds.query(
+      `SELECT produto_id, -SUM(quantidade) AS q, MAX(criado_em) FILTER (WHERE tipo IN ('consumo','venda')) AS ultimo FROM estoque_movimentos
+        WHERE empresa_id = $1 AND local_id = ANY($2::uuid[]) AND criado_em >= now() - ($3 || ' days')::interval
+          AND tipo IN ('consumo','venda','estorno','perda') GROUP BY produto_id`, [u.empresaId, locais, String(dias)]);
+    const mapa = new Map(consumo.map((c) => [c.produto_id, c]));
+    // último preço de compra (entrada com custo)
+    const ultimos: { produto_id: string; custo: string }[] = await this.ds.query(
+      `SELECT DISTINCT ON (produto_id) produto_id, custo_unitario AS custo FROM estoque_movimentos
+        WHERE empresa_id = $1 AND tipo = 'entrada' AND custo_unitario > 0 AND produto_id = ANY($2::uuid[]) ORDER BY produto_id, criado_em DESC`,
+      [u.empresaId, produtos.map((p) => p.id)]);
+    const custoCompra = new Map(ultimos.map((x) => [x.produto_id, num(x.custo)]));
+    const itens = produtos.map((p) => {
+      const c = mapa.get(p.id);
+      const usado = Math.max(0, num(c?.q));
+      const porDia = usado / dias;
+      const alvo = porDia * cobertura + (p.minimo || 0);
+      const saldo = p.total;
+      const comprar = Math.max(0, Math.ceil(alvo - saldo));
+      const custo = custoCompra.get(p.id) ?? p.custoMedio ?? 0;
+      return {
+        produtoId: p.id, nome: p.nome, grupo: p.grupo, unidade: p.unidade, saldo: r3(saldo), minimo: p.minimo,
+        consumoPeriodo: r3(usado), consumoDia: Math.round(porDia * 100) / 100,
+        diasRestantes: porDia > 0 ? Math.max(0, Math.floor(saldo / porDia)) : null,
+        comprar, custoUnitario: r2(custo), valorEstimado: r2(comprar * custo),
+        motivo: saldo <= 0 && usado > 0 ? 'acabou' : saldo < (p.minimo || 0) ? 'abaixo do mínimo' : comprar > 0 ? 'vai faltar' : 'ok',
+      };
+    }).filter((x) => x.comprar > 0 || x.saldo < x.minimo);
+    const ordem: Record<string, number> = { acabou: 0, 'abaixo do mínimo': 1, 'vai faltar': 2, ok: 3 };
+    itens.sort((a, b) => ordem[a.motivo] - ordem[b.motivo] || (a.diasRestantes ?? 9999) - (b.diasRestantes ?? 9999) || a.nome.localeCompare(b.nome));
+    return { dias, cobertura, itens, valorTotal: r2(itens.reduce((t, i) => t + i.valorEstimado, 0)) };
+  }
+
   /** produtos abaixo do mínimo (do produto no total, ou de algum local) */
   async abaixoDoMinimo(u: UsuarioToken, cnpj?: string) {
     const s = await this.saldos(u, { cnpj });
