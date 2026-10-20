@@ -5,6 +5,7 @@ import { moduloAtivo } from '../common/modulos';
 import { ManutencaoService } from '../manutencao/manutencao.service';
 import { ITENS_REVISAO_PADRAO } from '../funcionarios/funcionarios.service';
 import { FotosService } from './fotos.service';
+import { localDoAmbiente, moverEstoque } from '../estoque/estoque.core';
 import { ConfigVistoriaDto, DecisaoDto, VistoriaDto } from './vistorias.dto';
 
 export interface ConfigVistoria { checklist: string[]; fotos: string[]; diasSemVistoria: number; validadeAvisoDias: number }
@@ -130,6 +131,11 @@ export class VistoriasService {
       ultima: ultima ? { em: ultima.criado_em, por: ultima.vistoriadora_nome, resultado: ultima.resultado } : null,
       manutencao: await this.temManutencao(u.empresaId),
       pastaFotos: !!this.fotos.pasta,
+      // itens de avaria/reposição do cadastro (roupão, toalha, copo) para marcar o que faltou ou quebrou
+      avarias: (await this.ds.query(
+        `SELECT id, nome, preco FROM produtos WHERE empresa_id = $1 AND ativo AND ressarcimento
+            AND (ambientes_ids IS NULL OR cardinality(ambientes_ids) = 0 OR $2::uuid = ANY(ambientes_ids)) ORDER BY nome`, [u.empresaId, un.ambiente_id]))
+        .map((x: { id: string; nome: string; preco: string }) => ({ produtoId: x.id, nome: x.nome, preco: Number(x.preco) })),
     };
   }
 
@@ -172,15 +178,31 @@ export class VistoriasService {
     const obsStatus = reprovado ? `Reprovada na vistoria: ${[...problemas, dto.observacao?.trim()].filter(Boolean).join(', ')} · aguardando o adm`.slice(0, 300)
       : dto.resultado === 'ressalva' ? `Liberada com ressalva: ${[...problemas, dto.observacao?.trim()].filter(Boolean).join(', ')}`.slice(0, 300) : null;
     const camareira = dto.camareiraNome?.trim() || prep.camareira || null;
+    // avarias: o que faltou/quebrou, pelo preço de reposição do cadastro
+    const pedidos = (dto.avarias ?? []).filter((a) => a.quantidade > 0);
+    const prodAvaria: { id: string; nome: string; preco: string; controla_estoque: boolean }[] = pedidos.length
+      ? await this.ds.query(`SELECT id, nome, preco, controla_estoque FROM produtos WHERE empresa_id = $1 AND id = ANY($2::uuid[])`, [u.empresaId, pedidos.map((a) => a.produtoId)]) : [];
+    const avarias = pedidos.map((a) => {
+      const p = prodAvaria.find((x) => x.id === a.produtoId);
+      return p ? { produtoId: p.id, nome: p.nome, quantidade: a.quantidade, valor: Math.round(Number(p.preco) * a.quantidade * 100) / 100, controla: p.controla_estoque } : null;
+    }).filter((x): x is NonNullable<typeof x> => !!x);
 
     const id = await this.ds.transaction(async (m) => {
       const [v] = await m.query(
         `INSERT INTO vistorias (empresa_id, ambiente_id, unidade_id, unidade_codigo, camareira_id, camareira_nome, vistoriadora_id, vistoriadora_nome, resultado,
-           itens, reposicao, frigobar_validade, avaria, observacao, decisao)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14,$15) RETURNING id`,
+           itens, reposicao, frigobar_validade, avaria, observacao, decisao, avarias)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14,$15,$16::jsonb) RETURNING id`,
         [u.empresaId, un.ambienteId, un.id, un.codigo, dto.camareiraId || null, camareira, u.sub, u.nome, dto.resultado,
           JSON.stringify(dto.itens), JSON.stringify(reposicao), dto.frigobarValidade || null, dto.avaria?.trim() || null, dto.observacao?.trim() || null,
-          reprovado ? 'pendente' : null]);
+          reprovado ? 'pendente' : null, JSON.stringify(avarias.map(({ controla: _c, ...x }) => x))]);
+      // o que sumiu ou quebrou sai do estoque do ambiente como perda
+      if (avarias.some((a) => a.controla)) {
+        const localId = await localDoAmbiente(m, u.empresaId, un.ambienteId);
+        for (const a of avarias.filter((x) => x.controla)) {
+          await moverEstoque(m, { empresaId: u.empresaId, localId, produtoId: a.produtoId, quantidade: -a.quantidade, tipo: 'perda',
+            referencia: `vistoria:${v.id}`, observacao: `Avaria na ${un.codigo} (vistoria)`, usuario: u.nome });
+        }
+      }
       for (const f of dto.fotos) await m.query(`UPDATE fotos SET local = $3 WHERE id = $1 AND empresa_id = $2`, [f.fotoId, u.empresaId, f.local.slice(0, 60)]);
       await this.fotos.vincular(m, u.empresaId, dto.fotos.map((f) => f.fotoId), v.id);
       if (dto.avariaFotoIds?.length) {
@@ -298,6 +320,7 @@ export class VistoriasService {
     const lista = l.map((v: Record<string, unknown>) => ({
       id: v.id, criadoEm: v.criado_em, ambiente: v.ambiente, unidadeId: v.unidade_id, unidade: v.unidade_codigo, camareira: v.camareira_nome,
       vistoriadora: v.vistoriadora_nome, resultado: v.resultado, itens: v.itens, reposicao: v.reposicao,
+      avarias: (v.avarias as { nome: string; quantidade: number; valor: number }[] | null) ?? [],
       frigobarValidade: v.frigobar_validade ? String(v.frigobar_validade instanceof Date ? (v.frigobar_validade as Date).toISOString() : v.frigobar_validade).slice(0, 10) : null,
       avaria: v.avaria, observacao: v.observacao, decisao: v.decisao, decididoPor: v.decidido_por, chamado: !!v.chamado_id,
       fotos: (v.fotos as { id: string; local: string | null; origem: string }[] | null) ?? [],

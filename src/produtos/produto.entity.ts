@@ -22,6 +22,8 @@ export class Produto {
   @Column({ name: 'ficha_rendimento', type: 'numeric', precision: 10, scale: 3, default: 1 }) fichaRendimento!: string;
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" }) fiscal!: DadosFiscais;
   @Column({ default: false }) frigobar!: boolean;
+  /** avaria/reposição (roupão, copo): cobrado na conta, fora da nota fiscal */
+  @Column({ default: false }) ressarcimento!: boolean;
   @Column({ name: 'controla_estoque', default: false }) controlaEstoque!: boolean;
   @Column({ name: 'estoque_minimo', type: 'numeric', precision: 12, scale: 3, default: 0 }) estoqueMinimo!: string;
   @Column({ type: 'varchar', length: 8, default: 'un' }) unidade!: string;

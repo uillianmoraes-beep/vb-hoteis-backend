@@ -37,6 +37,11 @@ export class FotoLocalDto {
   @IsUUID() fotoId!: string;
 }
 
+export class AvariaItemDto {
+  @IsUUID() produtoId!: string;
+  @IsNumber() @Min(0.001) @Max(999) quantidade!: number;
+}
+
 export class ReposicaoDto {
   @IsUUID() produtoId!: string;
   @IsNumber() @Min(0) @Max(999) quantidade!: number;
@@ -57,6 +62,8 @@ export class VistoriaDto {
   @IsOptional() @Matches(DATA) frigobarValidade?: string;
   @IsIn(['aprovado', 'ressalva', 'reprovado']) resultado!: 'aprovado' | 'ressalva' | 'reprovado';
   @IsOptional() @IsString() @MaxLength(2000) avaria?: string;
+  /** o que faltou ou quebrou (roupão levado, copo quebrado): prejuízo pelo preço de reposição */
+  @IsOptional() @IsArray() @ArrayMaxSize(30) @ValidateNested({ each: true }) @Type(() => AvariaItemDto) avarias?: AvariaItemDto[];
   @IsOptional() @IsArray() @ArrayMaxSize(4) @IsUUID('4', { each: true }) avariaFotoIds?: string[];
   /** abre chamado no app de manutenção (só se a empresa contratou) */
   @IsOptional() @ValidateNested() @Type(() => ChamadoDto) chamado?: ChamadoDto;

@@ -33,7 +33,7 @@ export class PedidosService {
     const un = await this.unidadePorToken(token);
     // serviços sem custo (toalha extra, cobertor, limpeza) também aparecem
     const cardapio = await this.ds.query(
-      `SELECT id, nome, grupo, preco, tipo FROM produtos WHERE empresa_id = $1 AND ativo AND uso = 'venda' AND cardapio AND (preco > 0 OR tipo = 'servico') AND NOT frigobar
+      `SELECT id, nome, grupo, preco, tipo FROM produtos WHERE empresa_id = $1 AND ativo AND uso = 'venda' AND NOT ressarcimento AND cardapio AND (preco > 0 OR tipo = 'servico') AND NOT frigobar
           AND (ambientes_ids IS NULL OR cardinality(ambientes_ids) = 0 OR $2::uuid = ANY(ambientes_ids))
         ORDER BY (tipo = 'servico') DESC, grupo NULLS LAST, nome`, [un.empresa_id, un.ambiente_id]);
     // frigobar desta suíte/quarto: o que a categoria tem (ex.: presidencial com champanhe e vinho)

@@ -8,6 +8,7 @@ export interface LinhaPlanilha {
   resultado: string; itens: { item: string; ok: boolean }[]; reposicao: { nome: string; quantidade: number; semCobranca?: number }[];
   frigobarValidade: string | null; avaria: string | null; observacao: string | null; decisao: string | null; decididoPor: string | null;
   fotos: { id: string; local: string | null }[];
+  avarias?: { nome: string; quantidade: number; valor: number }[];
 }
 
 /**
@@ -48,7 +49,7 @@ export async function montarPlanilha(
       l.itens.filter((i) => !i.ok).map((i) => i.item).join('; '),
       l.reposicao.map((x) => `${x.quantidade}× ${x.nome}${x.semCobranca ? ` (${x.semCobranca} sem cobrança)` : ''}`).join('; '),
       l.frigobarValidade ? l.frigobarValidade.split('-').reverse().join('/') : '',
-      l.avaria ?? '', l.observacao ?? '',
+      [l.avaria ?? '', ...(l.avarias ?? []).map((x) => `${x.quantidade}× ${x.nome} (R$ ${x.valor.toFixed(2).replace('.', ',')})`)].filter(Boolean).join('; '), l.observacao ?? '',
       l.decisao === 'pendente' ? 'Aguardando' : l.decisao === 'limpeza' ? `Voltou p/ limpeza (${l.decididoPor ?? ''})` : l.decisao === 'manutencao' ? `Manutenção (${l.decididoPor ?? ''})` : '',
     ];
     val.forEach((v, i) => { row.getCell(i + 1).value = v; });

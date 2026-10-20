@@ -12,6 +12,7 @@ export class CriarProdutoDto {
   @IsOptional() @IsIn(['produto', 'servico']) tipo?: 'produto' | 'servico';
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(1_000_000) preco!: number;
   @IsOptional() @IsBoolean() frigobar?: boolean;
+  @IsOptional() @IsBoolean() ressarcimento?: boolean;
   @IsOptional() @IsObject() fiscal?: Record<string, unknown>;
   @IsOptional() @IsBoolean() controlaEstoque?: boolean;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(1_000_000) estoqueMinimo?: number;
@@ -30,6 +31,7 @@ export class AtualizarProdutoDto {
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(1_000_000) preco?: number;
   @IsOptional() @IsBoolean() ativo?: boolean;
   @IsOptional() @IsBoolean() frigobar?: boolean;
+  @IsOptional() @IsBoolean() ressarcimento?: boolean;
   @IsOptional() @IsObject() fiscal?: Record<string, unknown>;
   @IsOptional() @IsBoolean() controlaEstoque?: boolean;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(1_000_000) estoqueMinimo?: number;

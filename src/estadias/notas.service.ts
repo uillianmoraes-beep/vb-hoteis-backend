@@ -68,9 +68,18 @@ export class NotasService {
     const porEstadia = new Map<string, typeof partes>();
     for (const p of partes) porEstadia.set(p.estadia_id, [...(porEstadia.get(p.estadia_id) ?? []), p]);
     const NOME_PARTE: Record<string, string> = { hospedagem: 'hospedagem', consumo: 'consumo', tudo: 'conta toda', resto: 'restante' };
+    // avarias/ressarcimento (roupão, copo) ficam fora da nota: indenização, não venda
+    const ress: { estadia_id: string; v: string }[] = lista.length ? await this.repo.query(
+      `SELECT i.estadia_id, SUM(i.total) AS v FROM estadia_itens i JOIN produtos p ON p.id = i.produto_id
+        WHERE i.estadia_id = ANY($1::uuid[]) AND i.status = 'ativo' AND p.ressarcimento GROUP BY i.estadia_id`, [lista.map((e) => e.id)]) : [];
+    const ressDe = new Map(ress.map((r) => [r.estadia_id, n(r.v)]));
     const itens = lista.flatMap((e) => {
       const ps = porEstadia.get(e.id);
-      if (!ps?.length) return [this.linha(e, cod, n)];
+      if (!ps?.length) {
+        const l = this.linha(e, cod, n);
+        const r = ressDe.get(e.id) ?? 0;
+        return [r ? { ...l, consumo: Math.round((l.consumo - r) * 100) / 100, total: Math.round((l.total - r) * 100) / 100, ressarcimento: r } : l];
+      }
       // uma linha por parte (empresa / hóspede), com o documento de quem pagou
       return ps.filter((p) => p.status === status).map((p) => ({
         ...this.linha(e, cod, n),

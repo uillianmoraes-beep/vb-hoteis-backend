@@ -441,7 +441,8 @@ export class EstadiasService {
       const p = await this.produtos.findOne({ where: { id: dto.produtoId, empresaId: u.empresaId } });
       if (!p) throw new BadRequestException('Produto não encontrado.');
       produtoId = p.id;
-      descricao = p.nome;
+      // avaria/reposição: fica claro na conta e no comprovante que é ressarcimento (fora da nota)
+      descricao = p.ressarcimento ? `Ressarcimento: ${p.nome}`.slice(0, 120) : p.nome;
       if (preco === undefined) preco = Number(p.preco);
     }
     if (!descricao) throw new BadRequestException('Escolha um produto ou escreva a descrição do item.');
