@@ -11,7 +11,7 @@ const r3 = (v: number) => Math.round(v * 1000) / 1000;
 
 const TIPOS: Record<string, string> = {
   entrada: 'Entrada', consumo: 'Consumo', venda: 'Venda avulsa', transf_saida: 'Transferência (saiu)', transf_entrada: 'Transferência (entrou)',
-  ajuste: 'Ajuste de inventário', perda: 'Perda', estorno: 'Estorno',
+  ajuste: 'Ajuste de inventário', perda: 'Perda', estorno: 'Estorno', producao_saida: 'Corte (matéria-prima)', producao_entrada: 'Corte (porções)',
 };
 
 @Injectable()
@@ -362,7 +362,7 @@ export class EstoqueService {
     const consumo: { produto_id: string; q: string; ultimo: Date | null }[] = await this.ds.query(
       `SELECT produto_id, -SUM(quantidade) AS q, MAX(criado_em) FILTER (WHERE tipo IN ('consumo','venda')) AS ultimo FROM estoque_movimentos
         WHERE empresa_id = $1 AND local_id = ANY($2::uuid[]) AND criado_em >= now() - ($3 || ' days')::interval
-          AND tipo IN ('consumo','venda','estorno','perda') GROUP BY produto_id`, [u.empresaId, locais, String(dias)]);
+          AND tipo IN ('consumo','venda','estorno','perda','producao_saida') GROUP BY produto_id`, [u.empresaId, locais, String(dias)]);
     const mapa = new Map(consumo.map((c) => [c.produto_id, c]));
     // último preço de compra (entrada com custo)
     const ultimos: { produto_id: string; custo: string }[] = await this.ds.query(

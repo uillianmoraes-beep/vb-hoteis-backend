@@ -31,7 +31,7 @@ export interface Movimento {
   empresaId: string; localId: string; produtoId: string;
   /** positivo entra, negativo sai */
   quantidade: number;
-  tipo: 'entrada' | 'consumo' | 'venda' | 'transf_saida' | 'transf_entrada' | 'ajuste' | 'perda' | 'estorno';
+  tipo: 'entrada' | 'consumo' | 'venda' | 'transf_saida' | 'transf_entrada' | 'ajuste' | 'perda' | 'estorno' | 'producao_saida' | 'producao_entrada';
   /** custo de entrada (só nas entradas com custo; o resto usa o custo médio) */
   custoUnitario?: number | null;
   documento?: string | null; referencia?: string | null; observacao?: string | null; usuario?: string | null;

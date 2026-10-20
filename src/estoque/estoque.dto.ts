@@ -87,3 +87,41 @@ export class MinimosDto {
   @IsUUID() localId!: string;
   @IsArray() @ArrayMaxSize(2000) @ValidateNested({ each: true }) @Type(() => MinimoDto) itens!: MinimoDto[];
 }
+
+export class SaidaModeloDto {
+  @IsUUID() produtoId!: string;
+  /** quanto do aproveitado (depois da limpeza) vai para esta saída, em % */
+  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100) percentual!: number;
+  /** peso de cada porção em kg (ex.: bife de 380 g = 0,380); vazio = a saída é em kg */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(1000) pesoPorcao?: number | null;
+}
+
+export class ModeloCorteDto {
+  @IsString() @MaxLength(80) nome!: string;
+  @IsUUID() materiaId!: string;
+  /** perda na limpeza (gordura, nervo, osso), em % do peso */
+  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(95) perdaPct!: number;
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(30) @ValidateNested({ each: true }) @Type(() => SaidaModeloDto) saidas!: SaidaModeloDto[];
+}
+
+export class ItemCorteDto {
+  @IsUUID() produtoId!: string;
+  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(1_000_000) quantidade!: number;
+  /** peso real desta saída em kg (vazio = porções × peso da porção do modelo) */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(1_000_000) pesoKg?: number;
+  @IsOptional() @IsString() @MaxLength(40) lote?: string;
+  @IsOptional() @IsDateString() validade?: string;
+}
+
+export class LancarCorteDto {
+  @IsOptional() @IsUUID() modeloId?: string;
+  @IsUUID() localId!: string;
+  @IsUUID() materiaId!: string;
+  /** quanto saiu da matéria-prima, na unidade dela (kg ou un) */
+  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) @Max(1_000_000) quantidade!: number;
+  /** peso total da matéria-prima em kg */
+  @IsNumber({ maxDecimalPlaces: 3 }) @Min(0.001) @Max(1_000_000) pesoKg!: number;
+  @IsOptional() @IsString() @MaxLength(120) fornecedor?: string;
+  @IsOptional() @IsString() @MaxLength(300) observacao?: string;
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(30) @ValidateNested({ each: true }) @Type(() => ItemCorteDto) itens!: ItemCorteDto[];
+}

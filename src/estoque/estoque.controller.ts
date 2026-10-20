@@ -1,6 +1,7 @@
-import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { EstoqueService } from './estoque.service';
-import { EntradaDto, EntradaNotaDto, InventarioDto, LocalDto, MinimosDto, PerdaDto, TransferenciaDto } from './estoque.dto';
+import { CortesService } from './cortes.service';
+import { EntradaDto, EntradaNotaDto, InventarioDto, LancarCorteDto, LocalDto, MinimosDto, ModeloCorteDto, PerdaDto, TransferenciaDto } from './estoque.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
@@ -11,7 +12,7 @@ const dataOk = (d?: string) => (d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : undefin
 @Controller('estoque')
 @Requer('estoque.gerenciar')
 export class EstoqueController {
-  constructor(private readonly service: EstoqueService) {}
+  constructor(private readonly service: EstoqueService, private readonly cortes: CortesService) {}
 
   @Get('locais') locais(@Usuario() u: UsuarioToken) { return this.service.locais(u); }
   @Post('locais') criarLocal(@Usuario() u: UsuarioToken, @Body() dto: LocalDto) { return this.service.criarLocal(u, dto); }
@@ -20,6 +21,16 @@ export class EstoqueController {
   @Get('saldos') saldos(@Usuario() u: UsuarioToken, @Query('cnpj') cnpj?: string, @Query('busca') busca?: string) { return this.service.saldos(u, { cnpj, busca }); }
   @Get('sugestao-compra') sugestao(@Usuario() u: UsuarioToken, @Query('cnpj') cnpj?: string, @Query('dias') dias?: string, @Query('cobertura') cobertura?: string) {
     return this.service.sugestaoCompra(u, { cnpj, dias: Number(dias) || undefined, cobertura: Number(cobertura) || undefined });
+  }
+  // ---------- produção e cortes ----------
+  @Get('cortes/modelos') modelosCorte(@Usuario() u: UsuarioToken) { return this.cortes.modelos(u); }
+  @Post('cortes/modelos') criarModeloCorte(@Usuario() u: UsuarioToken, @Body() dto: ModeloCorteDto) { return this.cortes.salvarModelo(u, dto); }
+  @Put('cortes/modelos/:id') salvarModeloCorte(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ModeloCorteDto) { return this.cortes.salvarModelo(u, dto, id); }
+  @Delete('cortes/modelos/:id') apagarModeloCorte(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.cortes.apagarModelo(u, id); }
+  @Post('cortes') lancarCorte(@Usuario() u: UsuarioToken, @Body() dto: LancarCorteDto) { return this.cortes.lancar(u, dto); }
+  @Get('cortes') cortesHistorico(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string) {
+    const fim = dataOk(ate) ?? hoje();
+    return this.cortes.historico(u, { de: dataOk(de) ?? `${fim.slice(0, 8)}01`, ate: fim });
   }
   @Get('validades') validades(@Usuario() u: UsuarioToken, @Query('cnpj') cnpj?: string, @Query('dias') dias?: string) { return this.service.validades(u, { cnpj, dias: dias === undefined ? undefined : Number(dias) || 0 }); }
   @Get('abaixo-minimo') abaixo(@Usuario() u: UsuarioToken, @Query('cnpj') cnpj?: string) { return this.service.abaixoDoMinimo(u, cnpj); }
