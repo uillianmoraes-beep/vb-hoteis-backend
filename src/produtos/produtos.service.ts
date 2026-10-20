@@ -2,17 +2,21 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Produto } from './produto.entity';
-import { AtualizarProdutoDto, CriarProdutoDto, RenomearGrupoDto, SalvarFichaDto } from './produtos.dto';
+import { AmbientesEmLoteDto, AtualizarProdutoDto, CriarProdutoDto, RenomearGrupoDto, SalvarFichaDto } from './produtos.dto';
 import { limparFiscal } from '../common/fiscal';
 
 @Injectable()
 export class ProdutosService {
   constructor(@InjectRepository(Produto) private readonly repo: Repository<Produto>) {}
 
-  async listar(empresaId: string, opcoes: { inativos?: boolean; busca?: string; uso?: string } = {}) {
+  async listar(empresaId: string, opcoes: { inativos?: boolean; busca?: string; uso?: string; ambienteId?: string } = {}) {
     const qb = this.repo.createQueryBuilder('p').where('p.empresaId = :empresaId', { empresaId });
     if (!opcoes.inativos) qb.andWhere('p.ativo = true');
     if (opcoes.uso === 'venda' || opcoes.uso === 'interno') qb.andWhere('p.uso = :uso', { uso: opcoes.uso });
+    // só os usados neste ambiente (sem marcação = todos)
+    if (opcoes.ambienteId && /^[0-9a-f-]{36}$/i.test(opcoes.ambienteId)) {
+      qb.andWhere('(p.ambientesIds IS NULL OR cardinality(p.ambientesIds) = 0 OR :amb = ANY(p.ambientesIds))', { amb: opcoes.ambienteId });
+    }
     const termo = opcoes.busca?.trim();
     if (termo) {
       qb.andWhere('(lower(p.nome) LIKE :t OR lower(p.codigo) = :c OR p.codigoBarras = :c OR lower(p.grupo) LIKE :t)', {
@@ -42,6 +46,29 @@ export class ProdutosService {
         insumos: f?.n ?? 0, custoFicha: f ? Math.round((Number(f.custo) / rend) * 100) / 100 : null,
       };
     });
+  }
+
+  /**
+   * "Usar também em…" para vários produtos: põe ou tira um ambiente. Produto sem marcação (todos)
+   * que sai de um ambiente passa a valer só nos outros ambientes ativos.
+   */
+  async ambientesEmLote(empresaId: string, dto: AmbientesEmLoteDto) {
+    const [a] = await this.repo.query(`SELECT id FROM ambientes WHERE id = $1 AND empresa_id = $2`, [dto.ambienteId, empresaId]);
+    if (!a) throw new NotFoundException('Ambiente não encontrado.');
+    if (!dto.produtoIds.length) return { ok: true, produtos: 0 };
+    if (dto.usar) {
+      await this.repo.query(
+        `UPDATE produtos SET ambientes_ids = array_append(ambientes_ids, $3::uuid)
+          WHERE empresa_id = $1 AND id = ANY($2::uuid[]) AND ambientes_ids IS NOT NULL AND cardinality(ambientes_ids) > 0 AND NOT ($3::uuid = ANY(ambientes_ids))`,
+        [empresaId, dto.produtoIds, dto.ambienteId]);
+    } else {
+      const todos: { id: string }[] = await this.repo.query(`SELECT id FROM ambientes WHERE empresa_id = $1 AND ativo AND id <> $2`, [empresaId, dto.ambienteId]);
+      await this.repo.query(
+        `UPDATE produtos SET ambientes_ids = CASE WHEN ambientes_ids IS NULL OR cardinality(ambientes_ids) = 0 THEN $4::uuid[] ELSE array_remove(ambientes_ids, $3::uuid) END
+          WHERE empresa_id = $1 AND id = ANY($2::uuid[])`,
+        [empresaId, dto.produtoIds, dto.ambienteId, todos.map((x) => x.id)]);
+    }
+    return { ok: true, produtos: dto.produtoIds.length };
   }
 
   /** grupos em uso, com quantos produtos de venda e de uso interno */
@@ -129,6 +156,7 @@ export class ProdutosService {
         codigo: dto.codigo?.trim() || null,
         codigoBarras: dto.codigoBarras?.trim() || null,
         uso: dto.uso ?? 'venda',
+        ambientesIds: dto.ambientesIds?.length ? [...new Set(dto.ambientesIds)] : null,
         custo: dto.custo !== undefined && dto.custo > 0 ? dto.custo.toFixed(2) : null,
         grupo: dto.grupo?.trim() || null,
         tipo: dto.tipo ?? 'produto',
@@ -148,6 +176,7 @@ export class ProdutosService {
     if (dto.nome !== undefined) p.nome = dto.nome.trim();
     if (dto.codigo !== undefined) p.codigo = dto.codigo?.trim() || null;
     if (dto.uso !== undefined) p.uso = dto.uso;
+    if (dto.ambientesIds !== undefined) p.ambientesIds = dto.ambientesIds?.length ? [...new Set(dto.ambientesIds)] : null;
     if (dto.custo !== undefined) p.custo = dto.custo && dto.custo > 0 ? dto.custo.toFixed(2) : null;
     if (dto.codigoBarras !== undefined) { await this.barrasLivre(empresaId, dto.codigoBarras, id); p.codigoBarras = dto.codigoBarras?.trim() || null; }
     if (dto.grupo !== undefined) p.grupo = dto.grupo?.trim() || null;

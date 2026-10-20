@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { ProdutosService } from './produtos.service';
-import { AtualizarProdutoDto, CriarProdutoDto, RenomearGrupoDto, SalvarFichaDto } from './produtos.dto';
+import { AmbientesEmLoteDto, AtualizarProdutoDto, CriarProdutoDto, RenomearGrupoDto, SalvarFichaDto } from './produtos.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
@@ -11,8 +11,15 @@ export class ProdutosController {
 
   @Get()
   @Requer('produtos.gerenciar', 'estadias.operar')
-  listar(@Usuario() u: UsuarioToken, @Query('inativos') inativos?: string, @Query('busca') busca?: string, @Query('uso') uso?: string) {
-    return this.service.listar(u.empresaId, { inativos: inativos === 'true', busca, uso });
+  listar(@Usuario() u: UsuarioToken, @Query('inativos') inativos?: string, @Query('busca') busca?: string, @Query('uso') uso?: string, @Query('ambienteId') ambienteId?: string) {
+    return this.service.listar(u.empresaId, { inativos: inativos === 'true', busca, uso, ambienteId });
+  }
+
+  /** "Usar também em…" (ou tirar de) um ambiente, para vários produtos */
+  @Put('ambientes')
+  @Requer('produtos.gerenciar')
+  ambientesEmLote(@Usuario() u: UsuarioToken, @Body() dto: AmbientesEmLoteDto) {
+    return this.service.ambientesEmLote(u.empresaId, dto);
   }
 
   @Get('grupos')

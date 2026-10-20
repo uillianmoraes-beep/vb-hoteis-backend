@@ -32,6 +32,10 @@ export class EstoqueController {
     const fim = dataOk(ate) ?? hoje();
     return this.cortes.historico(u, { de: dataOk(de) ?? `${fim.slice(0, 8)}01`, ate: fim });
   }
+  @Get('reposicao') reposicao(@Usuario() u: UsuarioToken, @Query('origemId', ParseUUIDPipe) origemId: string, @Query('destinoId', ParseUUIDPipe) destinoId: string,
+    @Query('dias') dias?: string, @Query('cobertura') cobertura?: string) {
+    return this.service.reposicao(u, { origemId, destinoId, dias: Number(dias) || undefined, cobertura: Number(cobertura) || undefined });
+  }
   @Get('validades') validades(@Usuario() u: UsuarioToken, @Query('cnpj') cnpj?: string, @Query('dias') dias?: string) { return this.service.validades(u, { cnpj, dias: dias === undefined ? undefined : Number(dias) || 0 }); }
   @Get('abaixo-minimo') abaixo(@Usuario() u: UsuarioToken, @Query('cnpj') cnpj?: string) { return this.service.abaixoDoMinimo(u, cnpj); }
 

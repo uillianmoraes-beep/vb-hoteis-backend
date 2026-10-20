@@ -6,6 +6,7 @@ export class CriarProdutoDto {
   @IsOptional() @IsString() @MaxLength(30) codigo?: string;
   @IsOptional() @IsString() @MaxLength(20) codigoBarras?: string;
   @IsOptional() @IsIn(['venda', 'interno']) uso?: 'venda' | 'interno';
+  @IsOptional() @IsArray() @ArrayMaxSize(50) @IsUUID('all', { each: true }) ambientesIds?: string[] | null;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(1000000) custo?: number;
   @IsOptional() @IsString() @MaxLength(60) grupo?: string;
   @IsOptional() @IsIn(['produto', 'servico']) tipo?: 'produto' | 'servico';
@@ -22,6 +23,7 @@ export class AtualizarProdutoDto {
   @IsOptional() @IsString() @MaxLength(30) codigo?: string | null;
   @IsOptional() @IsString() @MaxLength(20) codigoBarras?: string | null;
   @IsOptional() @IsIn(['venda', 'interno']) uso?: 'venda' | 'interno';
+  @IsOptional() @IsArray() @ArrayMaxSize(50) @IsUUID('all', { each: true }) ambientesIds?: string[] | null;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(1000000) custo?: number | null;
   @IsOptional() @IsString() @MaxLength(60) grupo?: string | null;
   @IsOptional() @IsIn(['produto', 'servico']) tipo?: 'produto' | 'servico';
@@ -50,4 +52,11 @@ export class RenomearGrupoDto {
   @IsString() @MaxLength(60) de!: string;
   /** vazio = tira o grupo dos produtos */
   @IsString() @MaxLength(60) para!: string;
+}
+
+export class AmbientesEmLoteDto {
+  @IsArray() @ArrayMaxSize(1000) @IsUUID('all', { each: true }) produtoIds!: string[];
+  @IsUUID() ambienteId!: string;
+  /** usar também neste ambiente (true) ou tirar dele (false) */
+  @IsBoolean() usar!: boolean;
 }

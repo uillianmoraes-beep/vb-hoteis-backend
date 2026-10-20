@@ -391,6 +391,39 @@ export class EstoqueService {
     return { dias, cobertura, itens, valorTotal: r2(itens.reduce((t, i) => t + i.valorEstimado, 0)) };
   }
 
+  /**
+   * Reposição sugerida (ex.: Centro de distribuição → Motel): para cada produto usado no ambiente do destino,
+   * quanto mandar para cobrir o mínimo do local + `cobertura` dias de consumo, limitado ao que a origem tem.
+   */
+  async reposicao(u: UsuarioToken, f: { origemId: string; destinoId: string; dias?: number; cobertura?: number }) {
+    const o = await this.local(u.empresaId, f.origemId);
+    const d = await this.local(u.empresaId, f.destinoId);
+    const dias = Math.min(180, Math.max(7, f.dias ?? 30));
+    const cobertura = Math.min(60, Math.max(1, f.cobertura ?? 7));
+    const linhas: Record<string, unknown>[] = await this.ds.query(
+      `SELECT p.id, p.nome, p.unidade, p.grupo, COALESCE(sd.quantidade, 0) AS saldo, COALESCE(sd.minimo, 0) AS minimo, COALESCE(so.quantidade, 0) AS origem,
+              COALESCE((SELECT -SUM(mv.quantidade) FROM estoque_movimentos mv WHERE mv.local_id = $3 AND mv.produto_id = p.id
+                         AND mv.tipo IN ('consumo','venda','estorno','perda','producao_saida') AND mv.criado_em >= now() - ($4 || ' days')::interval), 0) AS usado
+         FROM produtos p
+         LEFT JOIN estoque_saldos sd ON sd.local_id = $3 AND sd.produto_id = p.id
+         LEFT JOIN estoque_saldos so ON so.local_id = $2 AND so.produto_id = p.id
+        WHERE p.empresa_id = $1 AND p.ativo AND p.controla_estoque AND p.tipo = 'produto'
+          AND ($5::uuid IS NULL OR p.ambientes_ids IS NULL OR cardinality(p.ambientes_ids) = 0 OR $5::uuid = ANY(p.ambientes_ids))
+          AND NOT EXISTS (SELECT 1 FROM produto_insumos pi WHERE pi.produto_id = p.id)
+        ORDER BY p.grupo NULLS LAST, p.nome`, [u.empresaId, o.id, d.id, String(dias), d.ambiente_id ?? null]);
+    const itens = linhas.map((x) => {
+      const porDia = Math.max(0, num(x.usado)) / dias;
+      const precisa = Math.max(0, Math.ceil(num(x.minimo) + porDia * cobertura - num(x.saldo)));
+      const origem = Math.max(0, num(x.origem));
+      return {
+        produtoId: x.id as string, nome: x.nome as string, unidade: x.unidade as string, grupo: x.grupo as string | null,
+        saldoDestino: r3(num(x.saldo)), minimo: r3(num(x.minimo)), consumoDia: Math.round(porDia * 100) / 100, saldoOrigem: r3(origem),
+        precisa, mandar: Math.min(precisa, Math.floor(origem)),
+      };
+    }).filter((x) => x.precisa > 0);
+    return { origem: o.nome, destino: d.nome, dias, cobertura, itens };
+  }
+
   /** produtos abaixo do mínimo (do produto no total, ou de algum local) */
   async abaixoDoMinimo(u: UsuarioToken, cnpj?: string) {
     const s = await this.saldos(u, { cnpj });

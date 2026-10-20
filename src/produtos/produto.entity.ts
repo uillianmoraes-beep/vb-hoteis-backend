@@ -13,6 +13,8 @@ export class Produto {
   @Column({ type: 'varchar', length: 10, default: 'produto' }) tipo!: 'produto' | 'servico';
   /** venda (aparece nas telas de venda) ou interno (ingrediente, limpeza, higiene: só estoque) */
   @Column({ type: 'varchar', length: 10, default: 'venda' }) uso!: 'venda' | 'interno';
+  /** ambientes em que o produto é usado (Motel, Hotel…); vazio/nulo = todos */
+  @Column({ name: 'ambientes_ids', type: 'uuid', array: true, nullable: true }) ambientesIds!: string[] | null;
   @Column({ type: 'numeric', precision: 10, scale: 2, default: 0 }) preco!: string;
   /** custo digitado (vale enquanto não há custo pelas entradas do estoque) */
   @Column({ type: 'numeric', precision: 10, scale: 2, nullable: true }) custo!: string | null;

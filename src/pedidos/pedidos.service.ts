@@ -22,7 +22,7 @@ export class PedidosService {
 
   private async unidadePorToken(token: string) {
     const [un] = await this.ds.query(
-      `SELECT un.id, un.codigo, un.tipo, un.empresa_id, un.categoria_id, e.nome AS empresa,
+      `SELECT un.id, un.codigo, un.tipo, un.empresa_id, un.categoria_id, un.ambiente_id, e.nome AS empresa,
               (SELECT es.id FROM estadias es WHERE es.unidade_id = un.id AND es.status = 'aberta' ORDER BY es.entrada_em DESC LIMIT 1) AS estadia_id
          FROM unidades un JOIN empresas e ON e.id = un.empresa_id WHERE un.token_pedido = $1 AND un.ativo`, [token]);
     if (!un) throw new NotFoundException('QR code inválido.');
@@ -34,7 +34,8 @@ export class PedidosService {
     // serviços sem custo (toalha extra, cobertor, limpeza) também aparecem
     const cardapio = await this.ds.query(
       `SELECT id, nome, grupo, preco, tipo FROM produtos WHERE empresa_id = $1 AND ativo AND uso = 'venda' AND cardapio AND (preco > 0 OR tipo = 'servico') AND NOT frigobar
-        ORDER BY (tipo = 'servico') DESC, grupo NULLS LAST, nome`, [un.empresa_id]);
+          AND (ambientes_ids IS NULL OR cardinality(ambientes_ids) = 0 OR $2::uuid = ANY(ambientes_ids))
+        ORDER BY (tipo = 'servico') DESC, grupo NULLS LAST, nome`, [un.empresa_id, un.ambiente_id]);
     // frigobar desta suíte/quarto: o que a categoria tem (ex.: presidencial com champanhe e vinho)
     const frigobar = un.categoria_id ? await this.ds.query(
       `SELECT p.id, p.nome, p.preco, f.quantidade FROM frigobar_categoria f JOIN produtos p ON p.id = f.produto_id
