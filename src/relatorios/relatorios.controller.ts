@@ -20,4 +20,11 @@ export class RelatoriosController {
   vendas(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string, @Query('ambienteId') ambienteId?: string, @Query('forma') forma?: string) {
     return this.service.vendas(u, { de, ate, ambienteId, forma });
   }
+
+  /** Dias e horas mais movimentados, suítes mais e menos alugadas, produtos mais vendidos e os sem venda no período. */
+  @Get('desempenho')
+  @Requer('relatorios.ver')
+  desempenho(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string, @Query('ambienteId') ambienteId?: string) {
+    return this.service.desempenho(u, { de, ate, ambienteId });
+  }
 }

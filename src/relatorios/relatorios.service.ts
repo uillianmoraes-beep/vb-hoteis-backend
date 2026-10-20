@@ -84,6 +84,81 @@ export class RelatoriosService {
     };
   }
 
+  /**
+   * Desempenho do período: movimento por dia da semana e hora (entradas), suítes da mais à menos
+   * alugada (inclusive as sem nenhum uso), produtos vendidos (conta + venda avulsa) e produtos ativos sem venda.
+   */
+  async desempenho(u: UsuarioToken, filtro: { de?: string; ate?: string; ambienteId?: string }) {
+    const ate = filtro.ate ? new Date(`${filtro.ate}T23:59:59.999-03:00`) : new Date();
+    const de = filtro.de ? new Date(`${filtro.de}T00:00:00-03:00`) : new Date(ate.getTime() - 30 * DIA);
+    const ambs: string[] = filtro.ambienteId ? [filtro.ambienteId]
+      : u.ambientesIds?.length ? u.ambientesIds
+      : (await this.ambientes.find({ where: { empresaId: u.empresaId } })).map((a) => a.id);
+    const vazio = { de, ate, diasSemana: [], calor: [], suites: [], produtos: [], semVenda: [] };
+    if (!ambs.length) return vazio;
+    const p = [u.empresaId, ambs, de, ate];
+    const tz = `AT TIME ZONE 'America/Sao_Paulo'`;
+
+    const mov: { dow: number; hora: number; n: number; receita: string }[] = await this.estadias.query(
+      `SELECT EXTRACT(DOW FROM e.entrada_em ${tz})::int AS dow, EXTRACT(HOUR FROM e.entrada_em ${tz})::int AS hora,
+              count(*)::int AS n, COALESCE(sum(e.valor_total) FILTER (WHERE e.status = 'fechada'), 0) AS receita
+         FROM estadias e WHERE e.empresa_id = $1 AND e.ambiente_id = ANY($2::uuid[]) AND e.status <> 'cancelada'
+          AND e.entrada_em BETWEEN $3 AND $4 GROUP BY 1, 2`, p);
+    const NOMES = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+    const calor = NOMES.map((_, d) => Array.from({ length: 24 }, (_, h) => Number(mov.find((m) => m.dow === d && m.hora === h)?.n ?? 0)));
+    // quantas vezes cada dia da semana aparece no período (para a média por dia)
+    const vezes = Array(7).fill(0);
+    for (let t = de.getTime() + 12 * 3600_000; t <= ate.getTime(); t += DIA) {
+      vezes[new Date(new Date(t).toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' }) + 'T12:00:00').getDay()] += 1;
+    }
+    const diasSemana = NOMES.map((nome, d) => {
+      const doDia = mov.filter((m) => m.dow === d);
+      const entradas = doDia.reduce((s, m) => s + Number(m.n), 0);
+      const receita = doDia.reduce((s, m) => s + c(m.receita), 0);
+      return { dia: d, nome, entradas, receita: r(receita), mediaEntradas: vezes[d] ? Math.round((entradas / vezes[d]) * 10) / 10 : 0, mediaReceita: vezes[d] ? r(receita / vezes[d]) : 0 };
+    });
+
+    const suites = await this.estadias.query(
+      `SELECT un.id, un.codigo, COALESCE(c.nome, 'Sem categoria') AS categoria, a.nome AS ambiente,
+              count(e.id)::int AS usos, COALESCE(sum(e.valor_total), 0) AS receita,
+              COALESCE(sum(EXTRACT(EPOCH FROM (e.saida_em - e.entrada_em)) / 60), 0) AS minutos
+         FROM unidades un LEFT JOIN categorias c ON c.id = un.categoria_id LEFT JOIN ambientes a ON a.id = un.ambiente_id
+         LEFT JOIN estadias e ON e.unidade_id = un.id AND e.status = 'fechada' AND e.saida_em BETWEEN $3 AND $4
+        WHERE un.empresa_id = $1 AND un.ambiente_id = ANY($2::uuid[]) AND un.ativo
+        GROUP BY un.id, un.codigo, c.nome, a.nome ORDER BY 5 DESC, 6 DESC, un.codigo`, p);
+
+    // produtos vendidos: itens das contas (não estornados, conta não cancelada) + vendas avulsas não canceladas
+    const produtos = await this.estadias.query(
+      `WITH v AS (
+         SELECT i.produto_id, i.quantidade::numeric AS qtd, i.total::numeric AS total
+           FROM estadia_itens i JOIN estadias e ON e.id = i.estadia_id
+          WHERE i.empresa_id = $1 AND e.ambiente_id = ANY($2::uuid[]) AND i.status = 'ativo' AND e.status <> 'cancelada'
+            AND i.produto_id IS NOT NULL AND i.criado_em BETWEEN $3 AND $4
+         UNION ALL
+         SELECT (x->>'produtoId')::uuid, (x->>'quantidade')::numeric, (x->>'total')::numeric
+           FROM vendas_avulsas va, jsonb_array_elements(va.itens) x
+          WHERE va.empresa_id = $1 AND va.ambiente_id = ANY($2::uuid[]) AND NOT va.cancelada AND va.criado_em BETWEEN $3 AND $4)
+       SELECT pr.id, pr.nome, pr.grupo, pr.unidade, sum(v.qtd) AS qtd, sum(v.total) AS total
+         FROM v JOIN produtos pr ON pr.id = v.produto_id AND pr.empresa_id = $1
+        GROUP BY pr.id, pr.nome, pr.grupo, pr.unidade ORDER BY 5 DESC, 6 DESC`, p);
+    const vendidos = new Set(produtos.map((x: { id: string }) => x.id));
+    const semVenda = (await this.estadias.query(
+      `SELECT id, nome, grupo, unidade, preco, frigobar FROM produtos WHERE empresa_id = $1 AND ativo AND tipo = 'produto' ORDER BY grupo NULLS LAST, nome`, [u.empresaId]))
+      .filter((x: { id: string }) => !vendidos.has(x.id));
+
+    return {
+      de, ate, diasSemana, calor,
+      suites: suites.map((s: Record<string, string>) => ({
+        id: s.id, codigo: s.codigo, categoria: s.categoria, ambiente: s.ambiente, usos: Number(s.usos), receita: Number(s.receita),
+        horas: Math.round(Number(s.minutos) / 6) / 10,
+      })),
+      produtos: produtos.map((x: Record<string, string>) => ({
+        id: x.id, nome: x.nome, grupo: x.grupo, unidade: x.unidade, quantidade: Math.round(Number(x.qtd) * 1000) / 1000, total: Number(x.total),
+      })),
+      semVenda: semVenda.map((x: Record<string, unknown>) => ({ id: x.id, nome: x.nome, grupo: x.grupo, unidade: x.unidade, preco: Number(x.preco), frigobar: x.frigobar })),
+    };
+  }
+
   async vendas(u: UsuarioToken, filtro: { de?: string; ate?: string; ambienteId?: string; forma?: string }) {
     const ate = filtro.ate ? new Date(`${filtro.ate}T23:59:59.999-03:00`) : new Date();
     const de = filtro.de ? new Date(`${filtro.de}T00:00:00-03:00`) : new Date(ate.getTime() - 7 * DIA);
