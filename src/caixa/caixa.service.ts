@@ -334,6 +334,25 @@ export class CaixaService {
       unidade: mapU.get(e.unidadeId) ?? '—', uso: e.numero, desconto: Number(e.desconto), acrescimo: Number(e.acrescimo),
       motivo: e.motivoAjuste, autorizadoPor: e.autorizadoPor, cortesia: e.cortesiaNome, usuario: e.usuarioSaidaNome,
     }));
+    // produtos vendidos: itens ativos das contas recebidas neste turno + vendas avulsas do turno
+    const idsContas = ests.map((e) => e.id);
+    const produtos: { nome: string; qtd: string; total: string }[] = await this.ds.query(
+      `WITH v AS (
+         SELECT it.descricao AS nome, it.quantidade::numeric AS qtd, it.total::numeric AS total FROM estadia_itens it
+          WHERE it.estadia_id = ANY($1::uuid[]) AND it.status = 'ativo'
+         UNION ALL
+         SELECT x->>'nome', (x->>'quantidade')::numeric, (x->>'total')::numeric
+           FROM vendas_avulsas va, jsonb_array_elements(va.itens) x WHERE va.turno_id = $2 AND NOT va.cancelada)
+       SELECT nome, SUM(qtd) AS qtd, SUM(total) AS total FROM v GROUP BY nome ORDER BY 2 DESC, 1`, [idsContas, t.id]);
+    // troco devolvido ao cliente (contas e vendas avulsas); troco deixado como gorjeta fica de fora
+    const [avTroco] = await this.ds.query(`SELECT COUNT(*) FILTER (WHERE troco > 0)::int AS n, COALESCE(SUM(troco), 0) AS v FROM vendas_avulsas WHERE turno_id = $1 AND NOT cancelada`, [t.id]);
+    const trocoContas = pags.filter((p) => Number(p.troco) > 0 && p.trocoDestino !== 'gorjeta');
+    // produtos que voltaram ao estoque do ambiente durante o turno (estorno de item, entrada cancelada)
+    const voltaram: { nome: string; unidade: string; qtd: string; observacao: string | null; usuario_nome: string | null; criado_em: Date }[] = await this.ds.query(
+      `SELECT p.nome, p.unidade, mv.quantidade AS qtd, mv.observacao, mv.usuario_nome, mv.criado_em
+         FROM estoque_movimentos mv JOIN estoque_locais l ON l.id = mv.local_id JOIN produtos p ON p.id = mv.produto_id
+        WHERE mv.empresa_id = $1 AND l.ambiente_id = $2 AND mv.tipo = 'estorno' AND mv.criado_em BETWEEN $3 AND $4
+        ORDER BY mv.criado_em`, [u.empresaId, t.ambienteId, t.abertoEm, fim]);
     const NOME_OC: Record<string, string> = { estorno: 'Estorno', cancelamento: 'Cancelamento', devolucao: 'Devolução', correcao: 'Correção', transferencia: 'Troca de suíte', cobranca: 'Troca de cobrança' };
     return {
       ocorrencias: ocorrencias.map((o) => ({ hora: o.criado_em, tipo: NOME_OC[o.tipo] ?? o.tipo, descricao: o.descricao, usuario: o.usuario_nome, unidade: o.codigo, uso: o.numero })),
@@ -342,7 +361,11 @@ export class CaixaService {
         estornos: Number(estornos[0]?.qtd ?? 0), valorEstornado: Number(estornos[0]?.valor ?? 0),
         cancelamentos: ocorrencias.filter((o) => o.tipo === 'cancelamento').length,
         descontos: Math.round(ajustes.reduce((s2, a) => s2 + a.desconto, 0) * 100) / 100,
+        trocoDado: r(trocoContas.reduce((s2, p) => s2 + c(p.troco), 0) + c(avTroco?.v)),
+        qtdTrocos: trocoContas.length + Number(avTroco?.n ?? 0),
       },
+      produtos: produtos.map((x) => ({ nome: x.nome, quantidade: Math.round(Number(x.qtd) * 1000) / 1000, total: Number(x.total) })),
+      voltaramEstoque: voltaram.map((x) => ({ hora: x.criado_em, nome: x.nome, unidade: x.unidade, quantidade: Math.round(Number(x.qtd) * 1000) / 1000, motivo: x.observacao, usuario: x.usuario_nome })),
       turno: {
         ...t, trocoInicial: Number(t.trocoInicial), diferenca: t.diferenca === null ? null : Number(t.diferenca),
         fundoProximo: t.fundoProximo === null ? null : Number(t.fundoProximo), retirado: t.retirado === null ? null : Number(t.retirado),
