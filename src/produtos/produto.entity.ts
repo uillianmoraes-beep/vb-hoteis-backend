@@ -11,6 +11,8 @@ export class Produto {
   @Column({ name: 'codigo_barras', type: 'varchar', length: 20, nullable: true }) codigoBarras!: string | null;
   @Column({ type: 'varchar', length: 60, nullable: true }) grupo!: string | null;
   @Column({ type: 'varchar', length: 10, default: 'produto' }) tipo!: 'produto' | 'servico';
+  /** venda (aparece nas telas de venda) ou interno (ingrediente, limpeza, higiene: só estoque) */
+  @Column({ type: 'varchar', length: 10, default: 'venda' }) uso!: 'venda' | 'interno';
   @Column({ type: 'numeric', precision: 10, scale: 2, default: 0 }) preco!: string;
   /** custo digitado (vale enquanto não há custo pelas entradas do estoque) */
   @Column({ type: 'numeric', precision: 10, scale: 2, nullable: true }) custo!: string | null;

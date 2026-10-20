@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { ProdutosService } from './produtos.service';
-import { AtualizarProdutoDto, CriarProdutoDto, SalvarFichaDto } from './produtos.dto';
+import { AtualizarProdutoDto, CriarProdutoDto, RenomearGrupoDto, SalvarFichaDto } from './produtos.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
@@ -11,8 +11,20 @@ export class ProdutosController {
 
   @Get()
   @Requer('produtos.gerenciar', 'estadias.operar')
-  listar(@Usuario() u: UsuarioToken, @Query('inativos') inativos?: string, @Query('busca') busca?: string) {
-    return this.service.listar(u.empresaId, { inativos: inativos === 'true', busca });
+  listar(@Usuario() u: UsuarioToken, @Query('inativos') inativos?: string, @Query('busca') busca?: string, @Query('uso') uso?: string) {
+    return this.service.listar(u.empresaId, { inativos: inativos === 'true', busca, uso });
+  }
+
+  @Get('grupos')
+  @Requer('produtos.gerenciar', 'estoque.gerenciar')
+  grupos(@Usuario() u: UsuarioToken) {
+    return this.service.grupos(u.empresaId);
+  }
+
+  @Put('grupos')
+  @Requer('produtos.gerenciar')
+  renomearGrupo(@Usuario() u: UsuarioToken, @Body() dto: RenomearGrupoDto) {
+    return this.service.renomearGrupo(u.empresaId, dto);
   }
 
   @Post()

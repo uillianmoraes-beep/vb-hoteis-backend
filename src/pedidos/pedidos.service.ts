@@ -33,7 +33,7 @@ export class PedidosService {
     const un = await this.unidadePorToken(token);
     // serviços sem custo (toalha extra, cobertor, limpeza) também aparecem
     const cardapio = await this.ds.query(
-      `SELECT id, nome, grupo, preco, tipo FROM produtos WHERE empresa_id = $1 AND ativo AND cardapio AND (preco > 0 OR tipo = 'servico') AND NOT frigobar
+      `SELECT id, nome, grupo, preco, tipo FROM produtos WHERE empresa_id = $1 AND ativo AND uso = 'venda' AND cardapio AND (preco > 0 OR tipo = 'servico') AND NOT frigobar
         ORDER BY (tipo = 'servico') DESC, grupo NULLS LAST, nome`, [un.empresa_id]);
     // frigobar desta suíte/quarto: o que a categoria tem (ex.: presidencial com champanhe e vinho)
     const frigobar = un.categoria_id ? await this.ds.query(
@@ -205,7 +205,7 @@ export class PedidosService {
   }
 
   async cardapio(u: UsuarioToken) {
-    const l = await this.ds.query(`SELECT id, nome, grupo, preco, cardapio, tipo, frigobar FROM produtos WHERE empresa_id = $1 AND ativo ORDER BY grupo NULLS LAST, nome`, [u.empresaId]);
+    const l = await this.ds.query(`SELECT id, nome, grupo, preco, cardapio, tipo, frigobar FROM produtos WHERE empresa_id = $1 AND ativo AND uso = 'venda' ORDER BY grupo NULLS LAST, nome`, [u.empresaId]);
     return l.map((p: Record<string, unknown>) => ({ id: p.id, nome: p.nome, grupo: p.grupo, preco: Number(p.preco), cardapio: p.cardapio, tipo: p.tipo, frigobar: p.frigobar }));
   }
 

@@ -2,16 +2,17 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Produto } from './produto.entity';
-import { AtualizarProdutoDto, CriarProdutoDto, SalvarFichaDto } from './produtos.dto';
+import { AtualizarProdutoDto, CriarProdutoDto, RenomearGrupoDto, SalvarFichaDto } from './produtos.dto';
 import { limparFiscal } from '../common/fiscal';
 
 @Injectable()
 export class ProdutosService {
   constructor(@InjectRepository(Produto) private readonly repo: Repository<Produto>) {}
 
-  async listar(empresaId: string, opcoes: { inativos?: boolean; busca?: string } = {}) {
+  async listar(empresaId: string, opcoes: { inativos?: boolean; busca?: string; uso?: string } = {}) {
     const qb = this.repo.createQueryBuilder('p').where('p.empresaId = :empresaId', { empresaId });
     if (!opcoes.inativos) qb.andWhere('p.ativo = true');
+    if (opcoes.uso === 'venda' || opcoes.uso === 'interno') qb.andWhere('p.uso = :uso', { uso: opcoes.uso });
     const termo = opcoes.busca?.trim();
     if (termo) {
       qb.andWhere('(lower(p.nome) LIKE :t OR lower(p.codigo) = :c OR p.codigoBarras = :c OR lower(p.grupo) LIKE :t)', {
@@ -41,6 +42,22 @@ export class ProdutosService {
         insumos: f?.n ?? 0, custoFicha: f ? Math.round((Number(f.custo) / rend) * 100) / 100 : null,
       };
     });
+  }
+
+  /** grupos em uso, com quantos produtos de venda e de uso interno */
+  async grupos(empresaId: string) {
+    const l: { grupo: string; venda: number; interno: number }[] = await this.repo.query(
+      `SELECT grupo, COUNT(*) FILTER (WHERE uso = 'venda')::int AS venda, COUNT(*) FILTER (WHERE uso = 'interno')::int AS interno
+         FROM produtos WHERE empresa_id = $1 AND ativo AND grupo IS NOT NULL AND grupo <> '' GROUP BY grupo ORDER BY grupo`, [empresaId]);
+    return l;
+  }
+
+  /** renomeia (ou junta com outro) um grupo em todos os produtos */
+  async renomearGrupo(empresaId: string, dto: RenomearGrupoDto) {
+    const de = dto.de.trim();
+    if (!de) throw new BadRequestException('Informe o grupo.');
+    const r = await this.repo.query(`UPDATE produtos SET grupo = $3 WHERE empresa_id = $1 AND grupo = $2`, [empresaId, de, dto.para.trim() || null]);
+    return { ok: true, produtos: Array.isArray(r) ? r[1] ?? 0 : 0 };
   }
 
   /** ficha técnica do produto: insumos com unidade e custo */
@@ -111,6 +128,7 @@ export class ProdutosService {
         nome: dto.nome.trim(),
         codigo: dto.codigo?.trim() || null,
         codigoBarras: dto.codigoBarras?.trim() || null,
+        uso: dto.uso ?? 'venda',
         custo: dto.custo !== undefined && dto.custo > 0 ? dto.custo.toFixed(2) : null,
         grupo: dto.grupo?.trim() || null,
         tipo: dto.tipo ?? 'produto',
@@ -129,6 +147,7 @@ export class ProdutosService {
     if (dto.codigo !== undefined) await this.codigoLivre(empresaId, dto.codigo, id);
     if (dto.nome !== undefined) p.nome = dto.nome.trim();
     if (dto.codigo !== undefined) p.codigo = dto.codigo?.trim() || null;
+    if (dto.uso !== undefined) p.uso = dto.uso;
     if (dto.custo !== undefined) p.custo = dto.custo && dto.custo > 0 ? dto.custo.toFixed(2) : null;
     if (dto.codigoBarras !== undefined) { await this.barrasLivre(empresaId, dto.codigoBarras, id); p.codigoBarras = dto.codigoBarras?.trim() || null; }
     if (dto.grupo !== undefined) p.grupo = dto.grupo?.trim() || null;
