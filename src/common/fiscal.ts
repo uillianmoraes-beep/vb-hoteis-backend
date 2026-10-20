@@ -27,6 +27,7 @@ export interface DadosFiscais {
   // reforma tributária (IBS / CBS)
   cstIbsCbs?: string; // 3 dígitos
   cClassTrib?: string; // 6 dígitos
+  indOp?: string; // cIndOp: indicador da operação (6 dígitos)
   aliquotaIbs?: number;
   aliquotaIbsUf?: number;
   aliquotaIbsMun?: number;
@@ -76,6 +77,7 @@ const DIGITOS: Record<string, [number, number, string]> = {
   cnae: [7, 7, 'CNAE tem 7 números'],
   cstIbsCbs: [3, 3, 'CST do IBS/CBS tem 3 números'],
   cClassTrib: [6, 6, 'cClassTrib tem 6 números'],
+  indOp: [6, 6, 'O indicador da operação (cIndOp) tem 6 números'],
 };
 const TEXTOS: Record<string, number> = { codBeneficio: 10, unidade: 6, codigoServico: 10, codigoMunicipal: 20, observacao: 300 };
 const ALIQUOTAS = [
