@@ -4,6 +4,7 @@
  */
 export const PERMISSOES = {
   'painel.ver': 'Ver o Painel de Unidades',
+  'cozinha.ver': 'Tela da cozinha/bar: ver e marcar os pedidos (preparando, pronto, entregue)',
   'unidades.status': 'Mudar status das unidades (limpeza, vistoria, livre)',
   'unidades.bloquear': 'Bloquear unidade com motivo',
   'unidades.desbloquear': 'Desbloquear unidade',
@@ -55,7 +56,7 @@ export type Permissao = keyof typeof PERMISSOES;
 
 /** Agrupamento por módulo, para montar perfis marcando o módulo inteiro. */
 export const GRUPOS_PERMISSAO: { grupo: string; permissoes: Permissao[] }[] = [
-  { grupo: 'Recepção e painel', permissoes: ['painel.ver', 'unidades.status', 'unidades.bloquear', 'unidades.desbloquear', 'reservas.gerenciar'] },
+  { grupo: 'Recepção e painel', permissoes: ['painel.ver', 'cozinha.ver', 'unidades.status', 'unidades.bloquear', 'unidades.desbloquear', 'reservas.gerenciar'] },
   { grupo: 'Contas (telefonista)', permissoes: ['estadias.operar', 'estadias.cancelar', 'estadias.corrigir', 'estadias.estornar', 'pagamentos.corrigir', 'cortesias.gerenciar'] },
   { grupo: 'Portaria e saída', permissoes: ['estadias.entrada', 'saida.registrar'] },
   { grupo: 'Governança (limpeza)', permissoes: ['governanca.operar', 'enxoval.gerenciar', 'enxoval.aprovar', 'cafe.gerenciar'] },

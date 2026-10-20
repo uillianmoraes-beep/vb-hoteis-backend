@@ -106,6 +106,8 @@ export class ImpressaoService implements OnModuleInit, OnModuleDestroy {
   async producao(empresaId: string, p: { ambienteId?: string | null; unidadeId?: string | null; local?: string; titulo?: string; origem: string; usuario?: string; obs?: string | null; itens: ItemImpressao[] }) {
     try {
       if (!p.itens.length) return;
+      // fila da tela da cozinha/bar (mesmo sem impressora)
+      await this.filaCozinha(empresaId, p);
       const imps = await this.ds.query(
         `SELECT * FROM impressoras WHERE empresa_id = $1 AND ativo AND (ambiente_id IS NULL OR ambiente_id = $2)`, [empresaId, p.ambienteId ?? null]);
       if (!imps.length) return;
@@ -142,6 +144,33 @@ export class ImpressaoService implements OnModuleInit, OnModuleDestroy {
       }
     } catch (e) {
       this.log.error(`Comanda não enfileirada: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+
+  /** guarda o pedido na fila da tela da cozinha/bar, com o grupo de cada item (a tela filtra por grupo) */
+  private async filaCozinha(empresaId: string, p: { ambienteId?: string | null; unidadeId?: string | null; local?: string; origem: string; usuario?: string; obs?: string | null; itens: ItemImpressao[] }) {
+    try {
+      const ids = p.itens.map((i) => i.produtoId).filter((x): x is string => !!x);
+      // só o que é preparado: produto com ficha técnica ou de grupo que não é serviço (serviço e avaria não vão para a cozinha)
+      const info: { id: string; grupo: string | null; tipo: string; ressarcimento: boolean }[] = ids.length
+        ? await this.ds.query(`SELECT id, grupo, tipo, ressarcimento FROM produtos WHERE id = ANY($1::uuid[])`, [ids]) : [];
+      const mapa = new Map(info.map((x) => [x.id, x]));
+      const itens = p.itens.filter((i) => { const x = i.produtoId ? mapa.get(i.produtoId) : null; return !x || (x.tipo === 'produto' && !x.ressarcimento); });
+      if (!itens.length) return;
+      let local = p.local ?? null;
+      if (!local && p.unidadeId) {
+        const [un] = await this.ds.query(`SELECT codigo, tipo FROM unidades WHERE id = $1`, [p.unidadeId]);
+        if (un) local = `${un.tipo === 'quarto' ? 'Quarto' : un.tipo === 'mesa' ? 'Mesa' : 'Suíte'} ${un.codigo}`;
+      }
+      const [ped] = await this.ds.query(
+        `INSERT INTO producao_pedidos (empresa_id, ambiente_id, unidade_id, local, origem, usuario_nome, obs) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+        [empresaId, p.ambienteId ?? null, p.unidadeId ?? null, local?.slice(0, 80) ?? null, p.origem.slice(0, 20), p.usuario ?? null, p.obs?.slice(0, 300) ?? null]);
+      for (const i of itens) {
+        await this.ds.query(`INSERT INTO producao_itens (pedido_id, produto_id, nome, grupo, quantidade, obs) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [ped.id, i.produtoId ?? null, i.nome.slice(0, 120), (i.produtoId ? mapa.get(i.produtoId)?.grupo : null) ?? null, i.quantidade, i.obs?.slice(0, 200) ?? null]);
+      }
+    } catch (e) {
+      this.log.error(`Pedido não entrou na fila da cozinha: ${e instanceof Error ? e.message : e}`);
     }
   }
 

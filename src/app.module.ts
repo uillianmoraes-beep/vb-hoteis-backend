@@ -36,6 +36,7 @@ import { PedidosModule } from './pedidos/pedidos.module';
 import { SugestoesModule } from './sugestoes/sugestoes.module';
 import { EnxovalModule } from './enxoval/enxoval.module';
 import { EstoqueModule } from './estoque/estoque.module';
+import { CozinhaModule } from './cozinha/cozinha.module';
 import { ComprasModule } from './compras/compras.module';
 import { CobrancaModule } from './cobranca/cobranca.module';
 import { BackupModule } from './backup/backup.module';
@@ -91,6 +92,7 @@ import { ManualModule } from './manual/manual.module';
     SugestoesModule,
     EnxovalModule,
     EstoqueModule,
+    CozinhaModule,
     ComprasModule,
     CobrancaModule,
     BackupModule,
