@@ -450,6 +450,23 @@ export class EstadiasService {
         ...(dto.observacao !== undefined && { observacao: dto.observacao || null }),
       },
     );
+    // hotel (diária combinada na entrada ou na reserva): pessoa a mais ou a menos muda a diária pelo valor de Tarifas › Diárias
+    if (dto.pessoas !== undefined && dto.pessoas !== e.pessoas && e.totalCombinado !== null && e.diariaCombinada !== null) {
+      const und = await this.unidades.findOne({ where: { id: e.unidadeId } });
+      const cfg = await this.tarifas.pessoaExtraHotel(u.empresaId, e.ambienteId, e.categoriaId ?? und?.categoriaId ?? null);
+      if (cfg && cfg.valor > 0) {
+        const extras = (p: number) => Math.max(0, p - cfg.incluidas);
+        const delta = centavos((extras(dto.pessoas) - extras(e.pessoas)) * cfg.valor);
+        if (delta !== 0) {
+          const diaria = centavos(Number(e.diariaCombinada));
+          const noites = diaria > 0 ? Math.max(1, Math.round(centavos(Number(e.totalCombinado)) / diaria)) : 1;
+          const novaDiaria = Math.max(0, diaria + delta);
+          await this.repo.update({ id }, { diariaCombinada: reais(novaDiaria), totalCombinado: reais(Math.max(0, centavos(Number(e.totalCombinado)) + (novaDiaria - diaria) * noites)) });
+          mudancas.push(`diária ${brl(diaria)} → ${brl(novaDiaria)} (${cfg.incluidas} pessoas incluídas, ${brl(centavos(cfg.valor))} por pessoa a mais)`);
+        }
+      }
+      if (und && dto.pessoas > (und.capacidade || 0)) mudancas.push(`acima da capacidade do quarto (${und.capacidade})`);
+    }
     if (mudancas.length) await this.registrar(null, u, id, 'ajuste', mudancas.join(' · '));
     return this.detalhe(u, id);
   }

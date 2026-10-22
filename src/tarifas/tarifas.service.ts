@@ -346,6 +346,15 @@ export class TarifasService {
    * Preço da hospedagem do hotel: soma das noites (sexta e sábado com a diária de fim de semana)
    * + pessoa extra por noite. null = a categoria não tem diária neste ambiente.
    */
+  /** hotel: quantas pessoas a diária da categoria inclui e quanto custa cada pessoa a mais por noite */
+  async pessoaExtraHotel(empresaId: string, ambienteId: string, categoriaId: string | null) {
+    if (!categoriaId) return null;
+    const [a] = await this.ds.query(`SELECT diarias FROM ambientes WHERE id = $1 AND empresa_id = $2`, [ambienteId, empresaId]);
+    const c = ((a?.diarias ?? {}) as Record<string, DiariaCfg>)[categoriaId];
+    if (!c) return null;
+    return { incluidas: c.pessoasIncluidas ?? 2, valor: c.pessoaExtra ?? 0 };
+  }
+
   async precoHotel(empresaId: string, ambienteId: string, categoriaId: string | null, entrada: Date, noites: number, pessoas: number) {
     if (!categoriaId) return null;
     const [a] = await this.ds.query(`SELECT diarias FROM ambientes WHERE id = $1 AND empresa_id = $2`, [ambienteId, empresaId]);
