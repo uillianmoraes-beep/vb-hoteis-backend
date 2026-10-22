@@ -142,6 +142,9 @@ export class RelatoriosFinanceirosService {
       `SELECT to_char(criado_em ${tz}, 'YYYY-MM') AS mes, sum(-quantidade * custo_unitario) AS custo FROM estoque_movimentos
         WHERE empresa_id = $1 AND quantidade < 0 AND (tipo = 'perda' OR referencia LIKE 'agua:%' OR referencia LIKE 'vistoria:%') AND criado_em >= $2 AND criado_em < $3 GROUP BY 1`,
       [u.empresaId, ini, fim]);
+    const refeicoes: { mes: string; custo: string }[] = await this.ds.query(
+      `SELECT to_char(data, 'YYYY-MM') AS mes, sum(custo) AS custo FROM refeicoes_funcionarios
+        WHERE empresa_id = $1 AND NOT cancelada AND data >= ($2::timestamptz ${tz})::date AND data < ($3::timestamptz ${tz})::date GROUP BY 1`, [u.empresaId, ini, fim]).catch(() => []);
     const temEstoque = cmv.some((x) => Number(x.custo) > 0);
     const taxas = await this.taxas(u.empresaId, ini, fim);
     const cls = await this.classificador(u.empresaId);
@@ -156,6 +159,8 @@ export class RelatoriosFinanceirosService {
     for (const [mes, t] of taxas) { soma(taxaCartao, mes, t.real + t.estimada); if (t.estimada > 0) taxaEstimada = true; }
     for (const x of cmv) soma(custoVendido, x.mes, Number(x.custo));
     for (const x of perdas) soma(perdasUso, x.mes, Number(x.custo));
+    const vRefeicoes = zero();
+    for (const x of refeicoes) soma(vRefeicoes, x.mes, Number(x.custo));
 
     // lançamentos por conta do plano
     const porConta = new Map<string, number[]>();
@@ -199,6 +204,7 @@ export class RelatoriosFinanceirosService {
       ...contasDoGrupo('custo'),
     ].filter((l) => l.valores.some((v) => v !== 0));
     const despesas = [...contasDoGrupo('despesa'),
+      ...(vRefeicoes.some((v) => v) ? [{ chave: 'refeicoes', nome: 'Refeições dos funcionários (estoque)', tipo: 'conta' as const, valores: vRefeicoes }] : []),
       ...(semConta.some((v) => v) ? [{ chave: 'semconta', nome: 'Sem conta no plano (classifique em Plano de contas)', tipo: 'conta' as const, valores: semConta }] : [])];
     const financeiro = contasDoGrupo('financeiro');
 
