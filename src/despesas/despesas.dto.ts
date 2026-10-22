@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 
 export class ContaPagarDto {
   @IsString() @MinLength(2) @MaxLength(200) descricao!: string;
@@ -14,6 +14,15 @@ export class ContaPagarDto {
   @IsOptional() @IsBoolean() valorVariavel?: boolean;
   /** de qual CNPJ é a conta ('principal' ou o CNPJ do ambiente) */
   @IsOptional() @IsString() @MaxLength(18) cnpj?: string;
+  /** compra em vários boletos: divide o valor e vence de 30 em 30 dias (só ao criar) */
+  @IsOptional() @IsInt() @Min(1) @Max(24) boletos?: number;
+}
+
+export class AprovarContasDto {
+  /** contas do mesmo lote (nota) */
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(60) @IsUUID('4', { each: true }) ids!: string[];
+  @IsIn(['aprovar', 'recusar']) decisao!: 'aprovar' | 'recusar';
+  @IsOptional() @IsString() @MaxLength(300) motivo?: string;
 }
 
 export class ParcelaNfeDto {
@@ -33,6 +42,8 @@ export class ImportarNfeDto {
   @IsOptional() @IsIn(['dinheiro', 'pix', 'debito', 'credito', 'transferencia', 'boleto']) pagaCom?: string;
   @IsOptional() @IsIn(['sim', 'nao']) lancarCaixa?: 'sim' | 'nao';
   @IsOptional() @IsString() @MaxLength(18) cnpj?: string;
+  /** total da nota (vNF), para o financeiro conferir com a soma dos boletos */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100_000_000) totalNota?: number;
 }
 
 export class PagarContaDto {

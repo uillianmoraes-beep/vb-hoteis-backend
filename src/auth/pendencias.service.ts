@@ -51,6 +51,14 @@ export class PendenciasService {
     };
     const lista = (expr: string) => `string_agg(DISTINCT ${expr}, ', ')`;
 
+    if (pode('despesas.aprovar')) {
+      add({ chave: 'contas-aprovar', nivel: 'aviso', titulo: 'Contas a pagar esperando aprovação', detalhe: 'notas e boletos lançados pelo setor de compras', link: '/despesas?aba=aprovacao' },
+        await contar(`SELECT count(DISTINCT COALESCE(lote_id, id)) AS n, ${lista('fornecedor')} AS nomes FROM contas_pagar WHERE empresa_id = $1 AND status = 'aberta' AND aprovacao = 'pendente'`, [u.empresaId]));
+    } else if (pode('despesas.gerenciar', 'compras.gerenciar')) {
+      add({ chave: 'contas-recusadas', nivel: 'alerta', titulo: 'Contas recusadas pelo financeiro', detalhe: 'corrija e salve de novo', link: '/despesas?aba=aprovacao' },
+        await contar(`SELECT count(DISTINCT COALESCE(lote_id, id)) AS n, ${lista('fornecedor')} AS nomes FROM contas_pagar WHERE empresa_id = $1 AND status = 'aberta' AND aprovacao = 'recusada' AND criado_por = $2`, [u.empresaId, u.nome]));
+    }
+
     if (pode('estoque.gerenciar')) {
       // mercadoria que voltou ao estoque por item cancelado: avisa até o estoquista conferir
       add({ chave: 'devolucoes-estoque', nivel: 'aviso', titulo: 'Itens que voltaram ao estoque', detalhe: 'itens cancelados nas contas: confira se a mercadoria voltou mesmo', link: '/relatorios/estornos?aba=devolucoes' },
