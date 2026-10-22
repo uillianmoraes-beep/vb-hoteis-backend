@@ -28,6 +28,7 @@ import { CortesiasModule } from './cortesias/cortesias.module';
 import { FuncionariosModule } from './funcionarios/funcionarios.module';
 import { BalcaoModule } from './balcao/balcao.module';
 import { DespesasModule } from './despesas/despesas.module';
+import { FinanceiroModule } from './financeiro/plano-contas';
 import { FichasModule } from './fichas/fichas.module';
 import { ReservasModule } from './reservas/reservas.module';
 import { FaturamentoModule } from './faturamento/faturamento.module';
@@ -84,6 +85,7 @@ import { ManualModule } from './manual/manual.module';
     FuncionariosModule,
     BalcaoModule,
     DespesasModule,
+    FinanceiroModule,
     FichasModule,
     ReservasModule,
     FaturamentoModule,

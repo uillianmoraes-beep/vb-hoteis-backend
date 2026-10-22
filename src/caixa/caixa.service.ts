@@ -255,7 +255,8 @@ export class CaixaService {
     return {
       saidas: cfg.saidas?.length ? cfg.saidas : ['Pagamento de fornecedor', 'Passagem', 'Padaria', 'Outras despesas'],
       entradas: cfg.entradas?.length ? cfg.entradas : ['Reforço de troco', 'Outras entradas'],
-      maquininhas: cfg.maquininhas ?? [],
+      // cadastro em Contas e maquininhas (as digitadas aqui antes viraram cadastro)
+      maquininhas: (await this.empresas.query(`SELECT nome FROM maquininhas WHERE empresa_id = $1 AND ativo ORDER BY nome`, [u.empresaId]) as { nome: string }[]).map((x) => x.nome),
       comprovante: cfg.comprovante ?? 'opcional',
     };
   }
@@ -271,9 +272,12 @@ export class CaixaService {
     const atual = (await this.empresas.findOne({ where: { id: u.empresaId } }))?.configCaixa ?? {};
     await this.empresas.update({ id: u.empresaId }, { configCaixa: {
       ...atual, saidas: limpa(dto.saidas), entradas: limpa(dto.entradas),
-      ...(dto.maquininhas ? { maquininhas: limpa(dto.maquininhas) } : {}),
       ...(dto.comprovante ? { comprovante: dto.comprovante } : {}),
     } });
+    // nome novo digitado aqui vira maquininha (as taxas ficam em Contas e maquininhas)
+    for (const nome of limpa(dto.maquininhas ?? [])) {
+      await this.empresas.query(`INSERT INTO maquininhas (empresa_id, nome) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [u.empresaId, nome.slice(0, 40)]);
+    }
     return this.config(u);
   }
 
@@ -510,7 +514,7 @@ export class CaixaService {
     await this.exigirModulo(u);
     await this.movimentos.insert({
       empresaId: u.empresaId, turnoId: null, caixa: 'adm', tipo: dto.tipo, forma: dto.forma, valor: dto.valor.toFixed(2),
-      descricao: dto.descricao.trim(), usuarioId: u.sub, usuarioNome: u.nome, autorizadoPor: null, cnpj: cnpjDoForm(dto.cnpj),
+      descricao: dto.descricao.trim(), categoria: dto.categoria?.trim() || null, usuarioId: u.sub, usuarioNome: u.nome, autorizadoPor: null, cnpj: cnpjDoForm(dto.cnpj),
     });
     return this.adm(u, { cnpj: dto.cnpj });
   }
