@@ -71,6 +71,12 @@ export class ComprasController {
   @Get('compras/precos') @Requer('compras.gerenciar')
   historico(@Usuario() u: UsuarioToken, @Query('busca') busca?: string) { return this.service.historicoPrecos(u, busca); }
 
+  @Get('compras/produtos') @Requer('compras.gerenciar')
+  produtosParaCotar(@Usuario() u: UsuarioToken, @Query('grupo') grupo?: string) { return this.service.produtosParaCotar(u, grupo?.trim() || undefined); }
+
+  @Get('compras/grupos') @Requer('compras.gerenciar')
+  gruposParaCotar(@Usuario() u: UsuarioToken) { return this.service.gruposParaCotar(u); }
+
   @Get('compras/listas') @Requer('compras.gerenciar')
   modelos(@Usuario() u: UsuarioToken) { return this.service.modelos(u); }
 

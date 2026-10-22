@@ -246,7 +246,8 @@ export class ComprasService {
     const d = await this.detalhe(u, id);
     const f = d.fornecedores.find((x: { id: string }) => x.id === cfId);
     if (!f) throw new NotFoundException('Fornecedor não está nesta cotação.');
-    const [emp] = await this.ds.query(`SELECT nome, razao_social, cnpj FROM empresas WHERE id = $1`, [u.empresaId]);
+    // a empresa não tem razão social própria: vem dos dados fiscais (Configuração fiscal) ou fica o nome
+    const [emp] = await this.ds.query(`SELECT nome, cnpj, fiscal->'hospedagem'->>'razaoSocial' AS razao_social FROM empresas WHERE id = $1`, [u.empresaId]);
     let comprador = { nome: emp?.razao_social || emp?.nome || '', cnpj: emp?.cnpj ?? null as string | null };
     if (d.local?.cnpj) {
       const [a] = await this.ds.query(
@@ -323,6 +324,23 @@ export class ComprasService {
   }
 
   // ---------- listas padrão ----------
+
+  /** produtos para puxar para a cotação (por grupo), com saldo e quanto falta para o mínimo */
+  async produtosParaCotar(u: UsuarioToken, grupo?: string) {
+    const l = await this.ds.query(
+      `SELECT p.id, p.nome, p.grupo, p.unidade, p.estoque_minimo, COALESCE((SELECT sum(s.quantidade) FROM estoque_saldos s WHERE s.produto_id = p.id), 0) AS saldo
+         FROM produtos p WHERE p.empresa_id = $1 AND p.ativo AND p.tipo = 'produto' AND NOT p.ressarcimento ${grupo ? 'AND p.grupo = $2' : ''}
+        ORDER BY p.grupo NULLS LAST, p.nome LIMIT 500`, grupo ? [u.empresaId, grupo] : [u.empresaId]);
+    return l.map((p: Record<string, unknown>) => {
+      const saldo = num(p.saldo), minimo = num(p.estoque_minimo);
+      return { id: p.id, nome: p.nome, grupo: p.grupo, unidade: p.unidade, saldo, minimo, falta: minimo > saldo ? r2(minimo - saldo) : 0 };
+    });
+  }
+
+  async gruposParaCotar(u: UsuarioToken) {
+    const l = await this.ds.query(`SELECT grupo, count(*)::int AS n FROM produtos WHERE empresa_id = $1 AND ativo AND tipo = 'produto' AND NOT ressarcimento AND grupo IS NOT NULL AND grupo <> '' GROUP BY grupo ORDER BY grupo`, [u.empresaId]);
+    return l.map((g: { grupo: string; n: number }) => ({ grupo: g.grupo, produtos: g.n }));
+  }
 
   async modelos(u: UsuarioToken) {
     const l = await this.ds.query(`SELECT id, nome, itens, atualizado_em FROM cotacao_modelos WHERE empresa_id = $1 ORDER BY nome`, [u.empresaId]);
