@@ -78,6 +78,23 @@ export class ContasBancariasService {
     return l.map((x) => x.nome);
   }
 
+  /** conta e maquininha de exemplo para treinar a conciliação (não cria de novo se já existirem) */
+  async criarTeste(u: UsuarioToken) {
+    let [conta] = await this.ds.query(`SELECT id FROM contas_bancarias WHERE empresa_id = $1 AND nome = 'Banco Teste · conta 0001'`, [u.empresaId]);
+    if (!conta) {
+      [conta] = await this.ds.query(
+        `INSERT INTO contas_bancarias (empresa_id, nome, banco, agencia, conta, chave_pix) VALUES ($1, 'Banco Teste · conta 0001', '999 Banco Teste', '0001', '12345-6', 'teste@pix.com') RETURNING id`,
+        [u.empresaId]);
+    }
+    const [maq] = await this.ds.query(`SELECT id FROM maquininhas WHERE empresa_id = $1 AND lower(nome) = lower('Stone · teste')`, [u.empresaId]);
+    if (!maq) {
+      await this.ds.query(
+        `INSERT INTO maquininhas (empresa_id, nome, adquirente, conta_bancaria_id, taxa_debito, taxa_credito, taxa_credito_2a6, taxa_credito_7a12, taxa_pix, prazo_debito, prazo_credito, prazo_pix)
+         VALUES ($1, 'Stone · teste', 'Stone', $2, 1.5, 2.99, 3.49, 3.99, 0, 1, 30, 0)`, [u.empresaId, conta.id]);
+    }
+    return { ok: true, conta: 'Banco Teste · conta 0001', maquininha: 'Stone · teste', jaExistiam: !!maq };
+  }
+
   private valoresConta(dto: ContaBancariaDto) {
     return [dto.nome.trim(), dto.banco?.trim() || null, dto.agencia?.trim() || null, dto.conta?.trim() || null, dto.chavePix?.trim() || null,
       dto.cnpj?.replace(/\D/g, '') || null, dto.ativo ?? true];
@@ -154,6 +171,12 @@ export class ContasBancariasController {
   @Requer('caixa.adm')
   atualizarConta(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ContaBancariaDto) {
     return this.service.atualizarConta(u, id, dto);
+  }
+
+  @Post('teste')
+  @Requer('caixa.adm')
+  criarTeste(@Usuario() u: UsuarioToken) {
+    return this.service.criarTeste(u);
   }
 
   @Post('maquininhas')

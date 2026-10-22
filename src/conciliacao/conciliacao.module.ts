@@ -365,7 +365,7 @@ export class ConciliacaoService {
     }
     const [mq] = maquininhaId
       ? await this.ds.query(`SELECT * FROM maquininhas WHERE id = $1 AND empresa_id = $2`, [maquininhaId, u.empresaId])
-      : await this.ds.query(`SELECT * FROM maquininhas WHERE empresa_id = $1 AND ativo ORDER BY criado_em LIMIT 1`, [u.empresaId]);
+      : await this.ds.query(`SELECT * FROM maquininhas WHERE empresa_id = $1 AND ativo ORDER BY (nome = 'Stone · teste') DESC, (taxa_debito IS NOT NULL) DESC, criado_em LIMIT 1`, [u.empresaId]);
     const maq = {
       nome: mq?.nome ?? 'Maquininha', taxaDebito: n(mq?.taxa_debito), taxaCredito: n(mq?.taxa_credito), taxaPix: n(mq?.taxa_pix),
       prazoDebito: mq?.prazo_debito ?? 1, prazoCredito: mq?.prazo_credito ?? 30,
