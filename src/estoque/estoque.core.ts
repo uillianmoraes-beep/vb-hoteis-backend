@@ -56,10 +56,10 @@ export async function moverEstoque(m: Q, mv: Movimento): Promise<number> {
     [mv.localId, mv.produtoId, novo, custo.toFixed(4)]);
   const custoMov = mv.quantidade > 0 && mv.custoUnitario !== undefined && mv.custoUnitario !== null ? mv.custoUnitario : custo;
   await m.query(
-    `INSERT INTO estoque_movimentos (empresa_id, local_id, produto_id, tipo, quantidade, custo_unitario, saldo_depois, documento, referencia, observacao, usuario_nome, lote, validade)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+    `INSERT INTO estoque_movimentos (empresa_id, local_id, produto_id, tipo, quantidade, custo_unitario, saldo_depois, documento, referencia, observacao, usuario_nome, lote, validade, custo_medio_depois)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
     [mv.empresaId, mv.localId, mv.produtoId, mv.tipo, n3(mv.quantidade), custoMov.toFixed(4), novo, mv.documento ?? null, mv.referencia ?? null,
-      mv.observacao?.slice(0, 300) ?? null, mv.usuario ?? null, mv.lote?.trim().slice(0, 40) || null, mv.validade || null]);
+      mv.observacao?.slice(0, 300) ?? null, mv.usuario ?? null, mv.lote?.trim().slice(0, 40) || null, mv.validade || null, custo.toFixed(4)]);
   return custoMov;
 }
 
