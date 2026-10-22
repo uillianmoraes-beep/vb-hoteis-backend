@@ -30,6 +30,14 @@ export class ProdutosController {
     return new StreamableFile(await this.service.modeloImportacao(u.empresaId), { disposition: 'attachment; filename="modelo-produtos.xlsx"' });
   }
 
+  /** todos os produtos (com a tributação) na planilha de importação */
+  @Get('exportar')
+  @Header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @Requer('produtos.gerenciar')
+  async exportar(@Usuario() u: UsuarioToken) {
+    return new StreamableFile(await this.service.exportar(u.empresaId), { disposition: 'attachment; filename="produtos.xlsx"' });
+  }
+
   /** importa a planilha (simular = só a prévia) */
   @Post('importacao')
   @HttpCode(200)

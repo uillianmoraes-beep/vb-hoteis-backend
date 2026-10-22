@@ -138,9 +138,9 @@ export class RelatoriosService {
          SELECT (x->>'produtoId')::uuid, (x->>'quantidade')::numeric, (x->>'total')::numeric
            FROM vendas_avulsas va, jsonb_array_elements(va.itens) x
           WHERE va.empresa_id = $1 AND va.ambiente_id = ANY($2::uuid[]) AND NOT va.cancelada AND va.criado_em BETWEEN $3 AND $4)
-       SELECT pr.id, pr.nome, pr.grupo, pr.unidade, sum(v.qtd) AS qtd, sum(v.total) AS total
+       SELECT pr.id, pr.nome, pr.grupo, pr.unidade, sum(v.qtd) AS qtd, sum(v.total) AS total, pr.custo
          FROM v JOIN produtos pr ON pr.id = v.produto_id AND pr.empresa_id = $1
-        GROUP BY pr.id, pr.nome, pr.grupo, pr.unidade ORDER BY 5 DESC, 6 DESC`, p);
+        GROUP BY pr.id, pr.nome, pr.grupo, pr.unidade, pr.custo ORDER BY 5 DESC, 6 DESC`, p);
     const vendidos = new Set(produtos.map((x: { id: string }) => x.id));
     const semVenda = (await this.estadias.query(
       `SELECT id, nome, grupo, unidade, preco, frigobar FROM produtos WHERE empresa_id = $1 AND ativo AND tipo = 'produto' ORDER BY grupo NULLS LAST, nome`, [u.empresaId]))
@@ -154,6 +154,7 @@ export class RelatoriosService {
       })),
       produtos: produtos.map((x: Record<string, string>) => ({
         id: x.id, nome: x.nome, grupo: x.grupo, unidade: x.unidade, quantidade: Math.round(Number(x.qtd) * 1000) / 1000, total: Number(x.total),
+        custo: x.custo === null ? null : Number(x.custo),
       })),
       semVenda: semVenda.map((x: Record<string, unknown>) => ({ id: x.id, nome: x.nome, grupo: x.grupo, unidade: x.unidade, preco: Number(x.preco), frigobar: x.frigobar })),
     };

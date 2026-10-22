@@ -5,7 +5,7 @@ import { Produto } from './produto.entity';
 import { AmbientesEmLoteDto, AtualizarProdutoDto, CriarProdutoDto, RenomearGrupoDto, SalvarFichaDto } from './produtos.dto';
 import { limparFiscal } from '../common/fiscal';
 import { moverEstoque } from '../estoque/estoque.core';
-import { LinhaLida, lerPlanilha, planilhaModelo } from './importacao';
+import { COLUNAS_FISCAIS, Chave, LinhaLida, ZEROS, lerPlanilha, planilhaModelo } from './importacao';
 
 @Injectable()
 export class ProdutosService {
@@ -80,6 +80,32 @@ export class ProdutosService {
     return planilhaModelo(ambs.map((a) => a.nome), locs.map((l) => l.nome));
   }
 
+  /** todos os produtos ativos na mesma planilha da importação (com a tributação), para corrigir no Excel e importar de volta */
+  async exportar(empresaId: string) {
+    const ambs: { id: string; nome: string }[] = await this.repo.query(`SELECT id, nome FROM ambientes WHERE empresa_id = $1 AND ativo ORDER BY nome`, [empresaId]);
+    const locs: { nome: string }[] = await this.repo.query(`SELECT nome FROM estoque_locais WHERE empresa_id = $1 AND ativo ORDER BY padrao DESC, nome`, [empresaId]);
+    const prods = await this.repo.find({ where: { empresaId, ativo: true }, order: { grupo: 'ASC', nome: 'ASC' } });
+    const nomeAmb = new Map(ambs.map((a) => [a.id, a.nome]));
+    const simNao = (b: boolean) => (b ? 'Sim' : 'Não');
+    const linhas = prods.map((p) => {
+      const l: Partial<Record<Chave, string | number>> = {
+        nome: p.nome, uso: p.uso === 'interno' ? 'Uso interno' : 'Venda', tipo: p.tipo === 'servico' ? 'Serviço' : 'Produto', grupo: p.grupo ?? '',
+        unidade: p.unidade, preco: p.uso === 'interno' ? '' : Number(p.preco), custo: p.custo === null ? '' : Number(p.custo), codigo: p.codigo ?? '',
+        barras: p.codigoBarras ?? '', controla: simNao(p.controlaEstoque), minimo: Number(p.estoqueMinimo) || '',
+        usadoEm: p.ambientesIds?.length ? p.ambientesIds.map((id) => nomeAmb.get(id)).filter(Boolean).join('; ') : 'Todos',
+        frigobar: simNao(p.frigobar), ressarcimento: simNao(p.ressarcimento),
+      };
+      const f = (p.fiscal ?? {}) as Record<string, unknown>;
+      for (const c of COLUNAS_FISCAIS) {
+        const v = f[c.campo];
+        if (v === undefined || v === null || v === '') continue;
+        l[c.chave] = typeof v === 'boolean' ? simNao(v) : typeof v === 'number' ? v : String(v);
+      }
+      return l;
+    });
+    return planilhaModelo(ambs.map((a) => a.nome), locs.map((l) => l.nome), linhas);
+  }
+
   /**
    * Importa a planilha: cria os produtos novos e atualiza os que já existem (mesmo código de barras, código ou nome),
    * só com o que estiver preenchido. `simular` devolve a prévia sem gravar. Saldo inicial entra no estoque.
@@ -145,13 +171,26 @@ export class ProdutosService {
         if (!loc) erros.push(l.local ? `local "${l.local}" não encontrado` : 'não há local de estoque para o saldo');
         else localId = loc.id;
       }
+      // tributação: só as colunas preenchidas; o resto continua como está (ou vem dos padrões)
+      const brutoFiscal: Record<string, unknown> = {};
+      for (const c of COLUNAS_FISCAIS) {
+        let v: string | undefined = l[c.chave];
+        if (!v) continue;
+        const z = ZEROS[c.campo];
+        if (z && /^\d+$/.test(v) && v.length >= z[1] && v.length < z[0]) v = v.padStart(z[0], '0');
+        brutoFiscal[c.campo] = c.campo === 'issRetido' ? simNao(v) : v;
+      }
+      let fiscal: Record<string, unknown> | undefined;
+      if (Object.keys(brutoFiscal).length) {
+        try { fiscal = limparFiscal(brutoFiscal) as Record<string, unknown>; } catch (e) { erros.push(`tributação: ${(e as Error).message.replace(/\.$/, '')}`); }
+      }
       const barras = l.barras?.replace(/\D/g, '') || undefined;
       const ja = (barras && porBarras.get(barras)) || (l.codigo && porCodigo.get(sem(l.codigo))) || porNome.get(chave);
       return {
         linha: l.linha, nome, acao: erros.length ? 'erro' as const : ja ? 'atualizar' as const : 'novo' as const, erros, existenteId: ja ? ja.id : null,
         dados: {
           uso, tipo, grupo: l.grupo?.slice(0, 60), unidade, preco, custo, codigo: l.codigo?.slice(0, 30), barras: barras?.slice(0, 20),
-          controla: simNao(l.controla), minimo, ambientesIds, frigobar: simNao(l.frigobar), ressarcimento: simNao(l.ressarcimento), saldo, localId,
+          controla: simNao(l.controla), minimo, ambientesIds, frigobar: simNao(l.frigobar), ressarcimento: simNao(l.ressarcimento), saldo, localId, fiscal,
         },
       };
     });
@@ -169,12 +208,13 @@ export class ProdutosService {
         if (!id) {
           const tipo = d.tipo ?? 'produto';
           const [novo] = await m.query(
-            `INSERT INTO produtos (empresa_id, nome, codigo, codigo_barras, grupo, tipo, uso, preco, custo, controla_estoque, estoque_minimo, unidade, ambientes_ids, frigobar, ressarcimento)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+            `INSERT INTO produtos (empresa_id, nome, codigo, codigo_barras, grupo, tipo, uso, preco, custo, controla_estoque, estoque_minimo, unidade, ambientes_ids, frigobar, ressarcimento, fiscal)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb) RETURNING id`,
             [empresaId, r.nome, d.codigo ?? null, d.barras ?? null, d.grupo ?? null, tipo, d.uso ?? 'venda', (d.uso === 'interno' ? 0 : d.preco ?? 0).toFixed(2),
               d.custo !== undefined ? d.custo.toFixed(2) : null, d.controla ?? tipo === 'produto', d.minimo ?? 0, d.unidade ?? 'un',
               // "Usado em" em branco: o que foi escolhido na tela de importar (vazio = todos)
-              ((d.ambientesIds === undefined ? padroes.usadoEm : d.ambientesIds) ?? []).length ? (d.ambientesIds === undefined ? padroes.usadoEm : d.ambientesIds) : null, !!d.frigobar, !!d.ressarcimento]);
+              ((d.ambientesIds === undefined ? padroes.usadoEm : d.ambientesIds) ?? []).length ? (d.ambientesIds === undefined ? padroes.usadoEm : d.ambientesIds) : null, !!d.frigobar, !!d.ressarcimento,
+              JSON.stringify(d.fiscal ?? {})]);
           id = novo.id as string;
         } else {
           // só o que veio preenchido
@@ -194,6 +234,7 @@ export class ProdutosService {
           if (d.ambientesIds !== undefined) put('ambientes_ids', d.ambientesIds && d.ambientesIds.length ? d.ambientesIds : null);
           if (d.frigobar !== undefined) put('frigobar', d.frigobar);
           if (d.ressarcimento !== undefined) put('ressarcimento', d.ressarcimento);
+          if (d.fiscal) { vals.push(JSON.stringify(d.fiscal)); sets.push(`fiscal = COALESCE(fiscal, '{}'::jsonb) || $${vals.length}::jsonb`); }
           if (sets.length) await m.query(`UPDATE produtos SET ${sets.join(', ')}, atualizado_em = now() WHERE id = $1`, vals);
         }
         if (d.saldo && d.saldo > 0 && d.localId) {
