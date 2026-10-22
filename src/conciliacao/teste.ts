@@ -1,3 +1,5 @@
+import { createHash } from 'crypto';
+
 /**
  * Arquivos de teste da conciliação: monta um relatório de maquininha (CSV) e um extrato do banco (OFX)
  * a partir dos Pix e cartões lançados no sistema, com alguns erros de propósito, para ver cada cor
@@ -26,9 +28,11 @@ function trocarDigitos(c: string) {
   return a.join('');
 }
 
+/** número fixo para a mesma venda (baixar o teste de novo não cria NSU diferente) */
+const fixo = (semente: string, base = 500000, faixa = 400000) => String(base + (parseInt(createHash('sha1').update(semente).digest('hex').slice(0, 8), 16) % faixa));
+
 export function gerarArquivosTeste(pags: PagTeste[], maq: MaqTeste, hoje: Date) {
-  let seq = 0;
-  const novoCodigo = () => String(500000 + Math.floor(Math.random() * 400000) + seq++);
+  const novoCodigo = (semente: string) => fixo(semente);
   const cartoes = pags.filter((p) => p.forma === 'debito' || p.forma === 'credito');
   const pixes = pags.filter((p) => p.forma === 'pix');
   const roteiro: string[] = [];
@@ -52,11 +56,11 @@ export function gerarArquivosTeste(pags: PagTeste[], maq: MaqTeste, hoje: Date) 
       roteiro.push(`🟡 Forma diferente: ${quem(p)} — no relatório veio ${forma === 'debito' ? 'Débito' : 'Crédito'}. Use "Corrigir para…".`);
     } else if (i === 3) {
       taxaPct = r2(taxaPct + 1);
-      roteiro.push(`${codigo ? '🟢' : '🟡 Sem código'} + taxa a mais: ${quem(p)} — a maquininha cobrou ${dinheiro(taxaPct)}% (contrato ${dinheiro(taxaDe(forma))}%). Aparece na aba Taxas.`);
+      roteiro.push(`${codigo ? '🟢' : '🟢 Sem código'} + taxa a mais: ${quem(p)} — a maquininha cobrou ${dinheiro(taxaPct)}% (contrato ${dinheiro(taxaDe(forma))}%). Aparece na aba Taxas.`);
     } else if (!codigo) {
-      roteiro.push(`🟡 Sem código: ${quem(p)} — a recepção não digitou o código; o sistema acha pelo valor e horário.`);
+      roteiro.push(`🟢 Sem código: ${quem(p)} — a recepção não digitou o código; se for o único com o mesmo valor, forma e horário, o sistema confere sozinho (senão fica amarelo para confirmar).`);
     }
-    if (!codigo) codigo = novoCodigo();
+    if (!codigo) codigo = novoCodigo(`venda:${p.momento.toISOString()}:${p.valor}`);
     const taxa = r2((p.valor * taxaPct) / 100);
     const liquido = r2(p.valor - taxa);
     const pagamento = maisDias(p.momento, forma === 'debito' ? maq.prazoDebito : maq.prazoCredito);
@@ -73,22 +77,29 @@ export function gerarArquivosTeste(pags: PagTeste[], maq: MaqTeste, hoje: Date) 
   // venda na maquininha que ninguém lançou
   const base = cartoes[0]?.momento ?? pixes[0]?.momento ?? hoje;
   const extra = new Date(base.getTime() + 47 * 60_000);
-  linhas.push([dataBr(extra), horaBr(extra), 'Débito', 'Master', '1', novoCodigo(), '771122', '77,77', dinheiro(r2(0.7777 * taxaDe('debito'))),
+  linhas.push([dataBr(extra), horaBr(extra), 'Débito', 'Master', '1', novoCodigo(`extra:${extra.toISOString()}`), '771122', '77,77', dinheiro(r2(0.7777 * taxaDe('debito'))),
     dinheiro(r2(77.77 - 0.7777 * taxaDe('debito'))), dataBr(maisDias(extra, maq.prazoDebito))].join(';'));
+  // a maquininha também paga esta venda: entra no depósito do dia
+  const pagExtra = maisDias(extra, maq.prazoDebito);
+  if (pagExtra <= hoje) {
+    const k = dataBr(pagExtra);
+    const d = depositos.get(k) ?? { quando: pagExtra, valor: 0 };
+    d.valor = r2(d.valor + r2(77.77 - 0.7777 * taxaDe('debito')));
+    depositos.set(k, d);
+  }
   roteiro.push(`🔴 No banco sem conta: Débito de R$ 77,77 (${dataBr(extra)} ${horaBr(extra)}) — venda na maquininha que não foi lançada em conta nenhuma.`);
   linhas.push(['TOTAL', '', '', '', '', '', '', '', '', '', ''].join(';'));
 
   /* ---- extrato do banco (OFX) ---- */
   const trans: string[] = [];
-  let fit = 0;
   const lanc = (quando: Date, valor: number, memo: string) => {
-    trans.push(`<STMTTRN>\n<TRNTYPE>${valor < 0 ? 'DEBIT' : 'CREDIT'}\n<DTPOSTED>${ofxData(quando)}[-3:BRT]\n<TRNAMT>${valor.toFixed(2)}\n<FITID>TESTE${Date.now()}${fit++}\n<MEMO>${memo}\n</STMTTRN>`);
+    trans.push(`<STMTTRN>\n<TRNTYPE>${valor < 0 ? 'DEBIT' : 'CREDIT'}\n<DTPOSTED>${ofxData(quando)}[-3:BRT]\n<TRNAMT>${valor.toFixed(2)}\n<FITID>TESTE${fixo(`${quando.toISOString()}:${valor}:${memo}`, 10000000, 89999999)}\n<MEMO>${memo}\n</STMTTRN>`);
   };
   pixes.forEach((p, i) => {
     if (i === 1 && pixes.length >= 3) { roteiro.push(`🔴 No sistema sem banco: ${quem(p)} — tirei do extrato (Pix que não entrou).`); return; }
     const id = p.comprovante?.replace(/\s/g, '') || '';
     lanc(new Date(p.momento.getTime() + 60_000), p.valor, `PIX RECEBIDO - CLIENTE TESTE ${id ? `E2E${id}` : ''}`.trim());
-    roteiro.push(id ? `🟢 Pix certo: ${quem(p)} — achado no extrato pelo código.` : `🟡 Pix sem código: ${quem(p)} — achado pelo valor e dia.`);
+    roteiro.push(id ? `🟢 Pix certo: ${quem(p)} — achado no extrato pelo código.` : `🟢 Pix sem código: ${quem(p)} — único com esse valor no dia: conferido sozinho.`);
   });
   for (const d of depositos.values()) {
     lanc(d.quando, d.valor, `${maq.nome.toUpperCase()} PAGAMENTOS`);

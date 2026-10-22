@@ -86,6 +86,9 @@ export function perto(l: LinhaConferir, p: PagamentoSistema): boolean {
 }
 
 const mesmoValor = (a: number, b: number) => Math.abs(a - b) < 0.005;
+/** bem perto: com hora, até 10 minutos; sem hora (extrato), o mesmo dia */
+const bemPerto = (l: LinhaConferir, p: PagamentoSistema) =>
+  l.temHora ? Math.abs(l.momento.getTime() - p.momento.getTime()) <= 10 * 60_000 : diaSP(l.momento) === diaSP(p.momento);
 const formaOk = (l: LinhaConferir, p: PagamentoSistema) => !l.forma || l.forma === p.forma;
 
 /**
@@ -99,8 +102,11 @@ export function conferir(linhas: LinhaConferir[], pagamentos: PagamentoSistema[]
   const out: Resultado[] = [];
   // banco: só Pix (os cartões chegam no banco como depósito da maquininha, conferido à parte)
   const candidatos = (l: LinhaConferir) => pagamentos.filter((p) => !usados.has(p.id) && (l.origem === 'maquininha' || p.forma === 'pix'));
-  const regras: { status: Resultado['status']; situacao: string; teste: (l: LinhaConferir, p: PagamentoSistema) => boolean }[] = [
+  const regras: { status: Resultado['status']; situacao: string; unico?: boolean; teste: (l: LinhaConferir, p: PagamentoSistema) => boolean }[] = [
     { status: 'conciliada', situacao: 'ok', teste: (l, p) => codigoBate(p.comprovante, l) && mesmoValor(l.valorBruto, p.valor) && formaOk(l, p) },
+    // sem código digitado, mas só existe um par possível (mesmo valor, mesma forma, até 10 min ou o mesmo dia no extrato): confere sozinho
+    { status: 'conciliada', situacao: 'sem código: único com mesmo valor e horário', unico: true,
+      teste: (l, p) => !normal(p.comprovante) && mesmoValor(l.valorBruto, p.valor) && !!l.forma && l.forma === p.forma && bemPerto(l, p) },
     { status: 'sugerida', situacao: 'forma diferente', teste: (l, p) => codigoBate(p.comprovante, l) && mesmoValor(l.valorBruto, p.valor) },
     { status: 'sugerida', situacao: 'valor diferente', teste: (l, p) => codigoBate(p.comprovante, l) && perto(l, p) },
     { status: 'sugerida', situacao: 'código parecido', teste: (l, p) => codigoParecido(p.comprovante, l) && mesmoValor(l.valorBruto, p.valor) && perto(l, p) },
@@ -115,6 +121,12 @@ export function conferir(linhas: LinhaConferir[], pagamentos: PagamentoSistema[]
       const ok = candidatos(l).filter((p) => r.teste(l, p))
         .sort((a, b) => Math.abs(a.momento.getTime() - l.momento.getTime()) - Math.abs(b.momento.getTime() - l.momento.getTime()));
       if (!ok.length) continue;
+      if (r.unico) {
+        // só quando não há dúvida: um pagamento para a linha e uma linha para o pagamento
+        if (ok.length > 1) continue;
+        const outras = linhas.filter((x) => x.id !== l.id && !feitas.has(x.id) && x.valorBruto > 0 && r.teste(x, ok[0]));
+        if (outras.length) continue;
+      }
       usados.add(ok[0].id);
       feitas.add(l.id);
       out.push({ linhaId: l.id, pagamentoId: ok[0].id, status: r.status, situacao: r.situacao });
