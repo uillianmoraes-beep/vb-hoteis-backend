@@ -13,6 +13,7 @@ export class CriarUnidadeDto {
   @IsOptional() @IsString() @MaxLength(20) garagem?: string;
   @IsOptional() @IsInt() @Min(1) capacidade?: number;
   @IsOptional() @IsInt() ordem?: number;
+  @IsOptional() @IsString() @MaxLength(20) coletivo?: string;
 }
 
 export class AtualizarUnidadeDto {
@@ -26,6 +27,8 @@ export class AtualizarUnidadeDto {
   @IsOptional() @IsString() @MaxLength(20) garagem?: string | null;
   @IsOptional() @IsInt() @Min(1) capacidade?: number;
   @IsOptional() @IsInt() ordem?: number;
+  /** quarto coletivo a que esta cama pertence (vazio = quarto normal) */
+  @IsOptional() @IsString() @MaxLength(20) coletivo?: string | null;
   @IsOptional() @IsNumber() plantaX?: number | null;
   @IsOptional() @IsNumber() plantaY?: number | null;
   @IsOptional() @IsBoolean() ativo?: boolean;
@@ -42,6 +45,8 @@ export class CriarUnidadesLoteDto {
   /** Quantos dígitos no número (2 → 01, 02...). */
   @IsOptional() @IsInt() @Min(1) @Max(5) digitos?: number;
   @IsOptional() @IsString() @MaxLength(20) andar?: string;
+  /** são as camas de um quarto coletivo (ex.: C01): cada uma com 1 pessoa */
+  @IsOptional() @IsString() @MaxLength(20) coletivo?: string;
 }
 
 /** Muda várias unidades de uma vez (ex.: quartos cadastrados no motel que são do hotel). */

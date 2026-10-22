@@ -34,6 +34,8 @@ export class Unidade {
   @Column({ type: 'varchar', length: 20, nullable: true }) andar!: string | null;
   @Column({ type: 'varchar', length: 20, nullable: true }) garagem!: string | null;
   @Column({ type: 'int', default: 2 }) capacidade!: number;
+  /** cama de quarto coletivo: código do quarto (ex.: C01). Cada cama é uma unidade. */
+  @Column({ type: 'varchar', length: 20, nullable: true }) coletivo!: string | null;
 
   @Column({ type: 'varchar', length: 20, default: 'livre' }) status!: StatusUnidade;
   @Column({ name: 'status_desde', type: 'timestamptz', default: () => 'now()' }) statusDesde!: Date;

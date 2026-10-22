@@ -4,6 +4,7 @@ import { randomBytes } from 'crypto';
 import { CancelarReservaDto, CheckinReservaDto, ReservaDto } from './reservas.dto';
 import { UsuarioToken } from '../common/permissoes';
 import { EstadiasService } from '../estadias/estadias.service';
+import { quartosColetivos, ReservasGrupo } from './reservas-grupo';
 
 const FUSO = 'America/Sao_Paulo';
 const hojeSP = () => new Date().toLocaleDateString('sv-SE', { timeZone: FUSO });
@@ -24,21 +25,24 @@ const fmt = (r: Record<string, unknown>) => ({
   adultos: r.adultos, criancas: r.criancas, valorDiaria: Number(r.valor_diaria), valorTotal: Number(r.valor_total),
   sinal: Number(r.sinal), sinalForma: r.sinal_forma, origem: r.origem, observacao: r.observacao, status: r.status,
   estadiaId: r.estadia_id, nova: !r.vista_em, motivoCancelamento: r.motivo_cancelamento, criadoPor: r.criado_por, criadoEm: r.criado_em,
-  codigoPublico: r.codigo_publico ?? null, categoriaPedida: r.categoria_pedida ?? null, quartoEscolhido: !!r.quarto_escolhido,
+  grupoId: r.grupo_id ?? null, codigoPublico: r.codigo_publico ?? null, categoriaPedida: r.categoria_pedida ?? null, quartoEscolhido: !!r.quarto_escolhido,
 });
 
 @Injectable()
 export class ReservasService {
-  constructor(private readonly ds: DataSource, private readonly estadias: EstadiasService) {}
+  readonly grupos: ReservasGrupo;
+  constructor(private readonly ds: DataSource, private readonly estadias: EstadiasService) {
+    this.grupos = new ReservasGrupo(ds);
+  }
 
   /** Quartos de hotel/pousada (o motel não tem reserva por diária). */
   private async quartos(u: UsuarioToken) {
     const l = await this.ds.query(
-      `SELECT un.id, un.codigo, un.status, un.capacidade, c.nome AS categoria, a.id AS ambiente_id, a.nome AS ambiente
+      `SELECT un.id, un.codigo, un.status, un.capacidade, un.coletivo, c.nome AS categoria, a.id AS ambiente_id, a.nome AS ambiente
          FROM unidades un JOIN ambientes a ON a.id = un.ambiente_id LEFT JOIN categorias c ON c.id = un.categoria_id
         WHERE un.empresa_id = $1 AND un.ativo = true AND a.tipo IN ('hotel','pousada')
-        ORDER BY a.ordem, a.nome, un.codigo`, [u.empresaId]);
-    return l.map((q: Record<string, unknown>) => ({ id: q.id, codigo: q.codigo, status: q.status, capacidade: q.capacidade, categoria: q.categoria, ambienteId: q.ambiente_id, ambiente: q.ambiente }));
+        ORDER BY a.ordem, a.nome, COALESCE(un.coletivo, un.codigo), un.coletivo IS NOT NULL, un.ordem, un.codigo`, [u.empresaId]);
+    return l.map((q: Record<string, unknown>) => ({ id: q.id, codigo: q.codigo, status: q.status, capacidade: q.capacidade, coletivo: q.coletivo ?? null, categoria: q.categoria, ambienteId: q.ambiente_id, ambiente: q.ambiente }));
   }
 
   async listar(u: UsuarioToken, f: { de?: string; ate?: string; busca?: string }) {
@@ -58,7 +62,10 @@ export class ReservasService {
         WHERE ${where} ORDER BY r.chegada, r.hospede LIMIT 1000`, params);
     const [chegHoje] = await this.ds.query(`SELECT count(*)::int AS n FROM reservas WHERE empresa_id = $1 AND chegada = $2 AND status IN ('pendente','confirmada')`, [u.empresaId, hoje]);
     const [saiHoje] = await this.ds.query(`SELECT count(*)::int AS n FROM reservas WHERE empresa_id = $1 AND saida = $2 AND status = 'hospedada'`, [u.empresaId, hoje]);
-    return { hoje, de, ate, chegadasHoje: chegHoje?.n ?? 0, saidasHoje: saiHoje?.n ?? 0, quartos: await this.quartos(u), lista: l.map(fmt) };
+    return {
+      hoje, de, ate, chegadasHoje: chegHoje?.n ?? 0, saidasHoje: saiHoje?.n ?? 0, quartos: await this.quartos(u), lista: l.map(fmt),
+      coletivos: await quartosColetivos(this.ds, u.empresaId), grupos: await this.grupos.listar(u, de, ate),
+    };
   }
 
   private async buscar(u: UsuarioToken, id: string) {
@@ -191,6 +198,11 @@ export class ReservasService {
   async checkin(u: UsuarioToken, id: string, dto: CheckinReservaDto) {
     const r = await this.buscar(u, id);
     if (!['pendente', 'confirmada'].includes(r.status)) throw new BadRequestException('Esta reserva já foi hospedada ou cancelada.');
+    // quarto coletivo: a reserva vem com o nome da empresa; na chegada vale o nome do funcionário
+    if (dto.hospede?.trim()) {
+      r.hospede = dto.hospede.trim();
+      await this.ds.query(`UPDATE reservas SET hospede = $2 WHERE id = $1`, [id, r.hospede]);
+    }
     const hoje = hojeSP();
     if (dia(r.chegada) > hoje) throw new BadRequestException(`A chegada desta reserva é ${br(dia(r.chegada))}. Altere a data se o hóspede chegou antes.`);
     const sinal = Number(r.sinal);

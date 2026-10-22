@@ -56,7 +56,7 @@ export class ReservaOnlineService {
     const uns = await this.ds.query(
       `SELECT un.id, un.codigo, un.nome, un.capacidade, un.ambiente_id, un.categoria_id, c.nome AS categoria
          FROM unidades un LEFT JOIN categorias c ON c.id = un.categoria_id
-        WHERE un.empresa_id = $1 AND un.ativo ORDER BY un.ordem, un.codigo`, [u.empresaId]);
+        WHERE un.empresa_id = $1 AND un.ativo AND un.coletivo IS NULL ORDER BY un.ordem, un.codigo`, [u.empresaId]);
     return ambs.map((a: Record<string, unknown>) => {
       const daqui = uns.filter((x: { ambiente_id: string }) => x.ambiente_id === a.id);
       const cats = new Map<string, { id: string; nome: string; quartos: number }>();
@@ -154,7 +154,7 @@ export class ReservaOnlineService {
     const hoje = hojeSP();
     const uns = await q.query(
       `SELECT un.id, un.codigo, un.nome, un.capacidade, un.categoria_id, un.status FROM unidades un
-        WHERE un.ambiente_id = $1 AND un.empresa_id = $2 AND un.ativo AND un.categoria_id IS NOT NULL ORDER BY un.ordem, un.codigo`, [a.id, a.empresa_id]);
+        WHERE un.ambiente_id = $1 AND un.empresa_id = $2 AND un.ativo AND un.categoria_id IS NOT NULL AND un.coletivo IS NULL ORDER BY un.ordem, un.codigo`, [a.id, a.empresa_id]);
     const reservados = await q.query(
       `SELECT DISTINCT unidade_id FROM reservas WHERE empresa_id = $1 AND ambiente_id = $2 AND status IN ('pendente','confirmada','hospedada')
          AND chegada < $4::date AND saida > $3::date`, [a.empresa_id, a.id, chegada, saida]);

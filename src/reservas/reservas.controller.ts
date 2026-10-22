@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ReservasService } from './reservas.service';
-import { CancelarReservaDto, CheckinReservaDto, ReservaDto } from './reservas.dto';
+import { CancelarReservaDto, CheckinReservaDto, GrupoReservaDto, ReservaDto } from './reservas.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
@@ -26,6 +26,31 @@ export class ReservasController {
   @Requer('painel.ver', 'reservas.gerenciar', 'estadias.operar', 'estadias.entrada')
   vistas(@Usuario() u: UsuarioToken, @Param('unidadeId', ParseUUIDPipe) unidadeId: string) {
     return this.service.marcarVistas(u, unidadeId);
+  }
+
+  @Get('grupos/:id')
+  @Requer('reservas.gerenciar', 'estadias.operar', 'estadias.entrada')
+  verGrupo(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.grupos.ver(u, id);
+  }
+
+  @Post('grupos')
+  @Requer('reservas.gerenciar', 'estadias.operar')
+  criarGrupo(@Usuario() u: UsuarioToken, @Body() dto: GrupoReservaDto) {
+    return this.service.grupos.criar(u, dto);
+  }
+
+  @Patch('grupos/:id')
+  @Requer('reservas.gerenciar', 'estadias.operar')
+  atualizarGrupo(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: GrupoReservaDto) {
+    return this.service.grupos.atualizar(u, id, dto);
+  }
+
+  @Post('grupos/:id/cancelar')
+  @HttpCode(200)
+  @Requer('reservas.gerenciar', 'estadias.operar')
+  cancelarGrupo(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.grupos.cancelar(u, id);
   }
 
   @Post()

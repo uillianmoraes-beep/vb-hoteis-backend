@@ -30,6 +30,24 @@ export class CancelarReservaDto {
 export class CheckinReservaDto {
   /** lança o sinal já recebido como adiantamento na conta (abate do total) */
   @IsOptional() @IsIn(['sim', 'nao']) lancarSinal?: 'sim' | 'nao';
+  /** quarto coletivo: nome do funcionário que está chegando nesta cama */
+  @IsOptional() @IsString() @MinLength(2) @MaxLength(120) hospede?: string;
+}
+
+/** Reserva de empresa no quarto coletivo: quantas camas em cada noite. */
+export class GrupoReservaDto {
+  @IsString() @MinLength(1) @MaxLength(20) coletivo!: string;
+  /** empresa cadastrada no Faturamento (quem paga) */
+  @IsOptional() @IsUUID() clienteFaturadoId?: string;
+  @IsString() @MinLength(2) @MaxLength(120) nome!: string;
+  @IsOptional() @IsString() @MaxLength(30) telefone?: string;
+  @Matches(DATA) chegada!: string;
+  @Matches(DATA) saida!: string;
+  /** uma posição por noite, a partir da chegada */
+  @IsArray() @ArrayMaxSize(120) @IsInt({ each: true }) @Min(0, { each: true }) @Max(100, { each: true }) camas!: number[];
+  /** valor por cama por noite */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100_000) valorDiaria?: number;
+  @IsOptional() @IsString() @MaxLength(400) observacao?: string;
 }
 
 export class ConfigCategoriaOnlineDto {

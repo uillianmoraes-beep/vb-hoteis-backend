@@ -33,6 +33,7 @@ import { StatusUnidade, UsuarioToken, temPermissao } from '../common/permissoes'
 import { ImpressaoService } from '../impressao/impressao.service';
 import { AutorizacaoEntrada, liberarPermissao, quemLibera, registrarLiberacao } from '../common/liberacao';
 import { calcularConta, centavos, minutosAteHorario, reais, ResultadoCalc } from './calculadora';
+import { liberarCamaDoGrupo } from '../reservas/reservas-grupo';
 
 export interface ContaCalculada extends ResultadoCalc {
   minutosUso: number;
@@ -719,6 +720,8 @@ export class EstadiasService {
         notaEmail: dto.nota?.email?.trim() || null,
         notaSolicitadaEm: controlaNotas && total > 0 ? new Date() : null,
       });
+      // cama de quarto coletivo que saiu antes: as noites que sobram voltam para a empresa
+      await liberarCamaDoGrupo(m, id, u.nome);
       // pagador separado: uma nota a emitir para cada parte (empresa × hóspede)
       if (controlaNotas && total > 0 && dto.pagadores?.length) {
         const hosp = conta.valorHospedagem + conta.valorPessoas;

@@ -93,6 +93,7 @@ export class UnidadesService {
       ...dto,
       empresaId: u.empresaId,
       ambientePadraoId: dto.ambienteId,
+      coletivo: dto.coletivo?.trim() || null,
       status: 'livre',
     });
     return this.repo.save(unidade);
@@ -122,6 +123,8 @@ export class UnidadesService {
           categoriaId: dto.categoriaId ?? null,
           tipo: dto.tipo ?? 'suite',
           andar: dto.andar ?? null,
+          coletivo: dto.coletivo?.trim() || null,
+          capacidade: dto.coletivo?.trim() ? 1 : 2,
           codigo,
           ordem: dto.de + i,
           status: 'livre',
@@ -141,8 +144,9 @@ export class UnidadesService {
     if (dto.categoriaId === undefined && ambienteNovo !== unidade.ambientePadraoId && unidade.categoriaId) dto.categoriaId = null;
     if (dto.categoriaId) await this.validarCategoria(u.empresaId, dto.categoriaId, ambienteNovo);
 
-    const { plantaX, plantaY, ...resto } = dto;
+    const { plantaX, plantaY, coletivo, ...resto } = dto;
     Object.assign(unidade, resto);
+    if (coletivo !== undefined) unidade.coletivo = coletivo?.trim() || null;
     if (plantaX !== undefined) unidade.plantaX = plantaX === null ? null : String(plantaX);
     if (plantaY !== undefined) unidade.plantaY = plantaY === null ? null : String(plantaY);
     // relações carregadas atrapalham o save quando o id muda
