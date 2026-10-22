@@ -64,6 +64,11 @@ export class MudarStatusDto {
   @IsOptional() @IsString() @MaxLength(500) observacao?: string;
 }
 
+export class TempoExtraDto {
+  /** minutos a mais (normalmente 10) */
+  @IsInt() @Min(5) @Max(60) minutos!: number;
+}
+
 export class ResponsavelDto {
   /** vazio = tira o responsável */
   @IsString() @MaxLength(60) nome!: string;

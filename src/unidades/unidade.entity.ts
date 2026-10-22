@@ -39,6 +39,9 @@ export class Unidade {
 
   @Column({ type: 'varchar', length: 20, default: 'livre' }) status!: StatusUnidade;
   @Column({ name: 'status_desde', type: 'timestamptz', default: () => 'now()' }) statusDesde!: Date;
+  /** +10 min para a camareira: vale só enquanto tempoExtraDesde = statusDesde (a situação não mudou) */
+  @Column({ name: 'tempo_extra_min', type: 'int', default: 0 }) tempoExtraMin!: number;
+  @Column({ name: 'tempo_extra_desde', type: 'timestamptz', nullable: true }) tempoExtraDesde!: Date | null;
   @Column({ name: 'motivo_bloqueio_id', type: 'uuid', nullable: true }) motivoBloqueioId!: string | null;
   @ManyToOne(() => MotivoBloqueio, { nullable: true }) @JoinColumn({ name: 'motivo_bloqueio_id' })
   motivoBloqueio?: MotivoBloqueio | null;

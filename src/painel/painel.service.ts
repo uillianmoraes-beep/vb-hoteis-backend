@@ -135,6 +135,8 @@ export class PainelService {
         status: x.status,
         statusDesde: x.statusDesde,
         minutosNoStatus: minutos,
+        /** +10 min da camareira (só vale para a situação atual) */
+        tempoExtraMin: x.tempoExtraDesde && new Date(x.tempoExtraDesde).getTime() === new Date(x.statusDesde).getTime() ? x.tempoExtraMin : 0,
         motivoBloqueio: x.motivoBloqueio ? { id: x.motivoBloqueio.id, nome: x.motivoBloqueio.nome, cor: x.motivoBloqueio.cor } : null,
         observacaoStatus: x.observacaoStatus,
         plantaX: x.plantaX !== null ? Number(x.plantaX) : null,

@@ -3,7 +3,7 @@ import {
 } from '@nestjs/common';
 import { UnidadesService } from './unidades.service';
 import {
-  AtualizarUnidadeDto, CriarUnidadeDto, CriarUnidadesLoteDto, MoverUnidadesDto, MudarStatusDto, ResponsavelDto,
+  AtualizarUnidadeDto, CriarUnidadeDto, CriarUnidadesLoteDto, MoverUnidadesDto, MudarStatusDto, ResponsavelDto, TempoExtraDto,
 } from './dto/unidades.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
@@ -16,6 +16,15 @@ export class UnidadesController {
   @Get()
   listar(@Usuario() u: UsuarioToken, @Query('ambienteId') ambienteId?: string) {
     return this.service.listar(u, ambienteId);
+  }
+
+  /** desempenho das camareiras (tempo de cada limpeza, extras, dentro da meta) */
+  @Get('limpezas/desempenho')
+  @Requer('governanca.operar', 'relatorios.ver', 'vistorias.relatorio')
+  desempenho(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string) {
+    const d8 = (x?: string) => (x && /^\d{4}-\d{2}-\d{2}$/.test(x) ? x : undefined);
+    const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    return this.service.desempenhoLimpeza(u, d8(de) ?? `${hoje.slice(0, 7)}-01`, d8(ate) ?? hoje);
   }
 
   @Get(':id')
@@ -57,6 +66,13 @@ export class UnidadesController {
   @Patch(':id/status')
   mudarStatus(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: MudarStatusDto) {
     return this.service.mudarStatus(u, id, dto);
+  }
+
+  /** Governança: +10 min para a camareira (sem tirar da limpeza). */
+  @Patch(':id/mais-tempo')
+  @Requer('unidades.status', 'governanca.operar')
+  maisTempo(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: TempoExtraDto) {
+    return this.service.maisTempo(u, id, dto.minutos);
   }
 
   /** Governança: quem está limpando / vistoriando a unidade. */

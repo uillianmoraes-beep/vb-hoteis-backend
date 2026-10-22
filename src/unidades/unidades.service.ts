@@ -283,6 +283,60 @@ export class UnidadesService {
     return this.buscar(u, id);
   }
 
+  /** +10 min para a camareira terminar, sem tirar a suíte da limpeza (fica registrado para o desempenho) */
+  async maisTempo(u: UsuarioToken, id: string, minutos: number) {
+    const unidade = await this.buscar(u, id);
+    if (!['limpeza', 'vistoria'].includes(unidade.status)) throw new BadRequestException('Só dá para dar mais tempo na limpeza ou na vistoria.');
+    const vale = unidade.tempoExtraDesde && new Date(unidade.tempoExtraDesde).getTime() === new Date(unidade.statusDesde).getTime();
+    const total = Math.min(180, (vale ? unidade.tempoExtraMin : 0) + minutos);
+    const quem = unidade.observacaoStatus?.startsWith('Camareira:') ? unidade.observacaoStatus.slice(10).trim() : '';
+    await this.ds.transaction(async (m) => {
+      await m.update(Unidade, { id: unidade.id }, { tempoExtraMin: total, tempoExtraDesde: unidade.statusDesde });
+      await m.insert(UnidadeEvento, {
+        empresaId: u.empresaId, unidadeId: unidade.id, statusAnterior: unidade.status, statusNovo: unidade.status, motivoBloqueioId: null,
+        observacao: `Mais ${minutos} min${quem ? ` para ${quem}` : ''} (total +${total} min)`, usuarioId: u.sub, usuarioNome: u.nome,
+      });
+    });
+    return this.buscar(u, id);
+  }
+
+  /**
+   * Desempenho das camareiras: cada limpeza (da entrada em "limpeza" até sair dela), quem limpou,
+   * quanto tempo levou, quantos minutos extras pediu e se ficou dentro da meta (40 min + extras).
+   */
+  async desempenhoLimpeza(u: UsuarioToken, de: string, ate: string, meta = 40) {
+    const l: { unidade: string; inicio: Date; fim: Date; minutos: string; camareira: string | null; extras: string | null }[] = await this.ds.query(
+      `WITH mudancas AS (
+         SELECT e.*, lag(e.criado_em) OVER (PARTITION BY e.unidade_id ORDER BY e.criado_em) AS antes
+           FROM unidade_eventos e
+          WHERE e.empresa_id = $1 AND e.status_anterior IS DISTINCT FROM e.status_novo AND e.criado_em >= $2::date - 2 AND e.criado_em < $3::date + 1)
+       SELECT un.codigo AS unidade, m.antes AS inicio, m.criado_em AS fim, extract(epoch FROM m.criado_em - m.antes) / 60 AS minutos,
+              (SELECT substr(x.observacao, 12) FROM unidade_eventos x WHERE x.unidade_id = m.unidade_id AND x.criado_em BETWEEN m.antes AND m.criado_em
+                  AND x.observacao LIKE 'Camareira: %' ORDER BY x.criado_em DESC LIMIT 1) AS camareira,
+              (SELECT sum(substring(x.observacao FROM '^Mais ([0-9]+) min')::int) FROM unidade_eventos x WHERE x.unidade_id = m.unidade_id
+                  AND x.criado_em BETWEEN m.antes AND m.criado_em AND x.observacao LIKE 'Mais % min%') AS extras
+         FROM mudancas m JOIN unidades un ON un.id = m.unidade_id
+        WHERE m.status_anterior = 'limpeza' AND m.antes IS NOT NULL AND (m.criado_em AT TIME ZONE 'America/Sao_Paulo')::date BETWEEN $2::date AND $3::date
+        ORDER BY m.criado_em DESC LIMIT 5000`, [u.empresaId, de, ate]);
+    const limpezas = l.map((x) => {
+      const minutos = Math.round(Number(x.minutos));
+      const extras = Number(x.extras ?? 0);
+      return { unidade: x.unidade, inicio: x.inicio, fim: x.fim, minutos, camareira: x.camareira?.trim() || null, extras, dentro: minutos <= meta + extras };
+    });
+    const porCamareira = new Map<string, { camareira: string; limpezas: number; minutos: number; dentro: number; extras: number; vezesExtra: number }>();
+    for (const x of limpezas) {
+      const k = x.camareira ?? 'Sem camareira indicada';
+      const c = porCamareira.get(k) ?? { camareira: k, limpezas: 0, minutos: 0, dentro: 0, extras: 0, vezesExtra: 0 };
+      c.limpezas++; c.minutos += x.minutos; if (x.dentro) c.dentro++; c.extras += x.extras; if (x.extras) c.vezesExtra++;
+      porCamareira.set(k, c);
+    }
+    return {
+      de, ate, meta, limpezas: limpezas.slice(0, 500),
+      porCamareira: [...porCamareira.values()].map((c) => ({ ...c, media: Math.round(c.minutos / c.limpezas), dentroPct: Math.round((c.dentro / c.limpezas) * 100) }))
+        .sort((a, b) => b.limpezas - a.limpezas),
+    };
+  }
+
   async historico(u: UsuarioToken, id: string, limite = 50) {
     await this.buscar(u, id);
     return this.eventos.find({
