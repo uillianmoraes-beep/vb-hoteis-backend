@@ -16,7 +16,11 @@ const CFOP_ST = ['5405', '5403', '5401', '6403', '6404'];
  * (campo faltando, NCM que não existe, CFOP e CSOSN/CST que não combinam, CEST na substituição tributária).
  * `d` é a tributação efetiva (padrão → regra do CFOP → produto).
  */
-export function conferirItem(d: DadosFiscais, regime: string | null, ncmExiste: (n: string) => boolean | null): Problema[] {
+/** lucro presumido e lucro real usam os códigos do regime normal (CST) */
+const normalizar = (r: string | null) => (r === 'presumido' || r === 'real' ? 'normal' : r);
+
+export function conferirItem(d: DadosFiscais, regimeEmpresa: string | null, ncmExiste: (n: string) => boolean | null): Problema[] {
+  const regime = normalizar(regimeEmpresa);
   const p: Problema[] = [];
   const erro = (campo: string, texto: string) => p.push({ nivel: 'erro', campo, texto });
   const aviso = (campo: string, texto: string) => p.push({ nivel: 'aviso', campo, texto });

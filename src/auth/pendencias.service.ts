@@ -60,6 +60,19 @@ export class PendenciasService {
             UNION SELECT nome FROM funcionarios WHERE empresa_id = $1 AND ativo AND to_char(nascimento, 'MM-DD') = to_char(${HOJE}, 'MM-DD')) x`, [u.empresaId]));
     }
 
+    if (pode('caixa.adm')) {
+      // reserva do caixa ADM: perguntar quanto separar do movimento de ontem (enquanto não responder) e avisar atraso
+      try {
+        const [r] = await this.ds.query(
+          `SELECT (SELECT count(*) FROM reserva_compromissos WHERE empresa_id = $1 AND ativo)::int AS compromissos,
+                  (SELECT count(*) FROM reserva_movimentos WHERE empresa_id = $1 AND data = ${HOJE} - 1 AND tipo IN ('separar','pular'))::int AS respondido`, [u.empresaId]);
+        if (r?.compromissos > 0 && !r.respondido) {
+          out.push({ chave: 'reserva-separar', nivel: 'aviso', titulo: 'Separar a reserva do movimento de ontem', quantidade: 1,
+            detalhe: 'quanto vai para o fundo das despesas do mês (folha, contas, impostos)', link: '/reserva' });
+        }
+      } catch { /* tabelas novas ainda não criadas */ }
+    }
+
     if (pode('despesas.aprovar')) {
       add({ chave: 'contas-aprovar', nivel: 'aviso', titulo: 'Contas a pagar esperando aprovação', detalhe: 'notas e boletos lançados pelo setor de compras', link: '/despesas?aba=aprovacao' },
         await contar(`SELECT count(DISTINCT COALESCE(lote_id, id)) AS n, ${lista('fornecedor')} AS nomes FROM contas_pagar WHERE empresa_id = $1 AND status = 'aberta' AND aprovacao = 'pendente'`, [u.empresaId]));

@@ -101,7 +101,7 @@ export class NcmService {
     return e?.regime_tributario ?? null;
   }
 
-  async salvarRegime(empresaId: string, regime: 'simples' | 'mei' | 'normal') {
+  async salvarRegime(empresaId: string, regime: 'simples' | 'mei' | 'normal' | 'presumido' | 'real') {
     await this.ds.query(`UPDATE empresas SET regime_tributario = $2 WHERE id = $1`, [empresaId, regime]);
     return { ok: true, regime };
   }

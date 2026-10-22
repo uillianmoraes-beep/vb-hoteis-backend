@@ -6,7 +6,7 @@ import { NcmService } from './ncm.service';
 import { Requer } from '../common/decorators/requer.decorator';
 
 class RegimeDto {
-  @IsIn(['simples', 'mei', 'normal']) regime!: 'simples' | 'mei' | 'normal';
+  @IsIn(['simples', 'mei', 'normal', 'presumido', 'real']) regime!: 'simples' | 'mei' | 'normal' | 'presumido' | 'real';
 }
 
 /** Buscar tributação (NCM) pelo nome do produto: tabela oficial + sugestão por IA. */
