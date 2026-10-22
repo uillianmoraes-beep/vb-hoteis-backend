@@ -6,6 +6,7 @@ import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
 import { CAMPOS, LinhaArquivo, Mapa, acharCabecalho, adivinharMapa, assinatura, lerOfx, lerTabela, linhasDaPlanilha } from './leitura';
 import { LinhaConferir, PagamentoSistema, acharDeposito, conferir, taxaContrato } from './conferir';
+import { gerarArquivosTeste } from './teste';
 
 const DATA = /^\d{4}-\d{2}-\d{2}$/;
 const DIA = 86_400_000;
@@ -350,6 +351,36 @@ export class ConciliacaoService {
     return { ok: true };
   }
 
+  /** arquivos de teste (CSV da maquininha e OFX do banco) feitos com os Pix e cartões lançados no período */
+  async arquivosTeste(u: UsuarioToken, de: string, ate: string, maquininhaId?: string) {
+    const pags = (await this.ds.query(
+      `SELECT p.forma, p.valor, p.criado_em, p.comprovante, un.codigo FROM estadia_pagamentos p
+         JOIN estadias e ON e.id = p.estadia_id LEFT JOIN unidades un ON un.id = e.unidade_id
+        WHERE p.empresa_id = $1 AND p.forma IN ('pix','debito','credito') AND p.criado_em >= $2 AND p.criado_em < $3
+        ORDER BY p.criado_em LIMIT 300`, [u.empresaId, inicioDia(de), inicioDia(somaDias(ate, 1))]))
+      .map((p: Record<string, unknown>) => ({ forma: p.forma as string, valor: Number(p.valor), momento: new Date(p.criado_em as string), comprovante: (p.comprovante as string) ?? null, unidade: (p.codigo as string) ?? null }));
+    if (!pags.length) {
+      throw new BadRequestException(`Não há Pix, débito nem crédito lançado de ${de.split('-').reverse().join('/')} a ${ate.split('-').reverse().join('/')}. `
+        + 'Feche umas 5 contas de teste (2 no Pix, 2 no débito, 1 no crédito, digitando o código do comprovante, pode inventar) e tente de novo.');
+    }
+    const [mq] = maquininhaId
+      ? await this.ds.query(`SELECT * FROM maquininhas WHERE id = $1 AND empresa_id = $2`, [maquininhaId, u.empresaId])
+      : await this.ds.query(`SELECT * FROM maquininhas WHERE empresa_id = $1 AND ativo ORDER BY criado_em LIMIT 1`, [u.empresaId]);
+    const maq = {
+      nome: mq?.nome ?? 'Maquininha', taxaDebito: n(mq?.taxa_debito), taxaCredito: n(mq?.taxa_credito), taxaPix: n(mq?.taxa_pix),
+      prazoDebito: mq?.prazo_debito ?? 1, prazoCredito: mq?.prazo_credito ?? 30,
+    };
+    const g = gerarArquivosTeste(pags, maq, new Date());
+    return {
+      maquininha: mq ? { id: mq.id, nome: mq.nome } : null,
+      arquivos: [
+        { nome: `teste-maquininha-${de}-a-${ate}.csv`, conteudo: g.csv },
+        { nome: `teste-extrato-${de}-a-${ate}.ofx`, conteudo: g.ofx },
+      ],
+      roteiro: g.roteiro,
+    };
+  }
+
   async excluirImportacao(u: UsuarioToken, id: string) {
     const r = await this.ds.query(`DELETE FROM conciliacao_importacoes WHERE id = $1 AND empresa_id = $2 RETURNING id`, [id, u.empresaId]);
     if (!linhasDe(r).length) throw new NotFoundException('Importação não encontrada.');
@@ -369,6 +400,14 @@ export class ConciliacaoController {
     if (d > a) throw new BadRequestException('A data inicial é depois da final.');
     if ((Date.parse(a) - Date.parse(d)) / DIA > 92) throw new BadRequestException('Escolha até 3 meses.');
     return this.service.ver(u, d, a);
+  }
+
+  @Get('teste')
+  @Requer('caixa.adm')
+  teste(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string, @Query('maquininhaId') maquininhaId?: string) {
+    const a = ate && DATA.test(ate) ? ate : hojeSP();
+    const d = de && DATA.test(de) ? de : somaDias(a, -6);
+    return this.service.arquivosTeste(u, d, a, maquininhaId && /^[0-9a-f-]{36}$/i.test(maquininhaId) ? maquininhaId : undefined);
   }
 
   @Post('importar')
