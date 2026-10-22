@@ -60,6 +60,14 @@ export class PendenciasService {
             UNION SELECT nome FROM funcionarios WHERE empresa_id = $1 AND ativo AND to_char(nascimento, 'MM-DD') = to_char(${HOJE}, 'MM-DD')) x`, [u.empresaId]));
     }
 
+    if (pode('funcionarios.gerenciar')) {
+      // documento do funcionário com validade (exame ASO, CNH) vencido ou vencendo em 30 dias; vale só o mais novo de cada tipo
+      add({ chave: 'documentos-vencendo', nivel: 'aviso', titulo: 'Documentos de funcionário vencendo', detalhe: 'exame médico, CNH…', link: '/funcionarios' },
+        await contar(`SELECT count(*) AS n, string_agg(DISTINCT f.nome, ', ') AS nomes FROM funcionario_documentos d JOIN funcionarios f ON f.id = d.funcionario_id
+            WHERE d.empresa_id = $1 AND f.ativo AND d.validade IS NOT NULL AND d.validade <= ${HOJE} + 30
+              AND NOT EXISTS (SELECT 1 FROM funcionario_documentos n WHERE n.funcionario_id = d.funcionario_id AND n.tipo = d.tipo AND n.criado_em > d.criado_em)`, [u.empresaId]));
+    }
+
     if (pode('caixa.adm')) {
       // reserva do caixa ADM: perguntar quanto separar do movimento de ontem (enquanto não responder) e avisar atraso
       try {
