@@ -79,6 +79,13 @@ export class UsuariosService {
     return this.buscar(empresaId, usuario.id);
   }
 
+  /** libera o usuário bloqueado por senhas erradas */
+  async desbloquear(empresaId: string, id: string) {
+    await this.buscar(empresaId, id);
+    await this.repo.query(`UPDATE usuarios SET tentativas_falhas = 0, bloqueado_ate = NULL WHERE id = $1`, [id]);
+    return this.buscar(empresaId, id);
+  }
+
   async trocarSenha(empresaId: string, id: string, senha: string) {
     await this.buscar(empresaId, id);
     await this.repo.update({ id }, { senhaHash: await bcrypt.hash(senha, 10) });

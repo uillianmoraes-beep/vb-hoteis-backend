@@ -51,6 +51,21 @@ export class PendenciasService {
     };
     const lista = (expr: string) => `string_agg(DISTINCT ${expr}, ', ')`;
 
+    if (pode('notas.gerenciar', 'empresa.editar')) {
+      // certificado digital: vermelho na última semana (ou vencido), amarelo até 30 dias antes
+      try {
+        const certs: { titular: string; tipo: string; dias: number }[] = await this.ds.query(
+          `SELECT titular, tipo, (validade - ${HOJE})::int AS dias FROM certificados WHERE empresa_id = $1 AND ativo AND validade <= ${HOJE} + 30 ORDER BY validade`, [u.empresaId]);
+        const quando = (d: number) => (d < 0 ? `venceu há ${-d} dia(s)` : d === 0 ? 'vence hoje' : `vence em ${d} dia(s)`);
+        const urgentes = certs.filter((c) => c.dias <= 7);
+        const proximos = certs.filter((c) => c.dias > 7);
+        if (urgentes.length) out.push({ chave: 'certificado-urgente', nivel: 'alerta', titulo: 'Certificado digital vencendo', quantidade: urgentes.length,
+          detalhe: urgentes.map((c) => `${c.tipo} ${c.titular}: ${quando(c.dias)}`).join(' · ') + ' · sem ele não sai nota fiscal', link: '/certificados' });
+        if (proximos.length) out.push({ chave: 'certificado-proximo', nivel: 'aviso', titulo: 'Certificado digital vence este mês', quantidade: proximos.length,
+          detalhe: proximos.map((c) => `${c.tipo} ${c.titular}: ${quando(c.dias)}`).join(' · '), link: '/certificados' });
+      } catch { /* tabela nova ainda não criada */ }
+    }
+
     if (pode('painel.ver', 'reservas.gerenciar', 'estadias.operar')) {
       // hotel: hóspede que já devia ter saído
       let p: unknown[] = [u.empresaId];

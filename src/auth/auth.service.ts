@@ -26,10 +26,47 @@ export class AuthService {
       .getOne();
   }
 
+  /** regras de segurança da empresa (padrão: 5 tentativas, 15 min de bloqueio, tela trava com 30 min parado) */
+  async seguranca(empresaId: string) {
+    const [e] = await this.usuarios.query(`SELECT config_seguranca FROM empresas WHERE id = $1`, [empresaId]);
+    const c = (e?.config_seguranca ?? {}) as { tentativas?: number; bloqueioMin?: number; inatividadeMin?: number };
+    return { tentativas: c.tentativas ?? 5, bloqueioMin: c.bloqueioMin ?? 15, inatividadeMin: c.inatividadeMin ?? 30 };
+  }
+
+  async salvarSeguranca(u: UsuarioToken, dto: { tentativas: number; bloqueioMin: number; inatividadeMin: number }) {
+    await this.usuarios.query(`UPDATE empresas SET config_seguranca = $2::jsonb WHERE id = $1`, [u.empresaId, JSON.stringify(dto)]);
+    return this.seguranca(u.empresaId);
+  }
+
+  /** senha errada conta; passou do limite, o usuário fica bloqueado por um tempo */
+  private async contarFalha(usuarioId: string, empresaId: string) {
+    const cfg = await this.seguranca(empresaId);
+    const [r] = await this.usuarios.query(
+      `UPDATE usuarios SET tentativas_falhas = tentativas_falhas + 1 WHERE id = $1 RETURNING tentativas_falhas`, [usuarioId]);
+    const n = Number((Array.isArray(r) ? r[0] : r)?.tentativas_falhas ?? 0);
+    if (cfg.tentativas > 0 && n >= cfg.tentativas) {
+      await this.usuarios.query(`UPDATE usuarios SET tentativas_falhas = 0, bloqueado_ate = now() + ($2 || ' minutes')::interval WHERE id = $1`, [usuarioId, String(cfg.bloqueioMin)]);
+      return { bloqueou: true, minutos: cfg.bloqueioMin, restantes: 0 };
+    }
+    return { bloqueou: false, minutos: 0, restantes: cfg.tentativas > 0 ? cfg.tentativas - n : null };
+  }
+
+  private async conferirBloqueio(usuarioId: string) {
+    const [b] = await this.usuarios.query(`SELECT ceil(extract(epoch FROM bloqueado_ate - now()) / 60)::int AS min FROM usuarios WHERE id = $1 AND bloqueado_ate > now()`, [usuarioId]);
+    if (b) throw new UnauthorizedException(`Muitas senhas erradas: este usuário está bloqueado por mais ${b.min} minuto(s). O gerente pode liberar em Equipe › Usuários.`);
+  }
+
   async login(login: string, senha: string, agente?: string) {
     const usuario = await this.buscarComSenha('lower(u.login) = lower(:valor)', login.trim());
+    if (usuario) await this.conferirBloqueio(usuario.id);
     const senhaOk = usuario ? await bcrypt.compare(senha, usuario.senhaHash) : false;
+    if (usuario && !senhaOk) {
+      const f = await this.contarFalha(usuario.id, usuario.empresaId);
+      if (f.bloqueou) throw new UnauthorizedException(`Muitas senhas erradas: usuário bloqueado por ${f.minutos} minutos. O gerente pode liberar em Equipe › Usuários.`);
+      if (f.restantes !== null && f.restantes <= 2) throw new UnauthorizedException(`Login ou senha incorretos. Mais ${f.restantes} tentativa(s) e o usuário fica bloqueado.`);
+    }
     if (!usuario || !senhaOk) throw new UnauthorizedException('Login ou senha incorretos.');
+    if (usuario.ativo) await this.usuarios.query(`UPDATE usuarios SET tentativas_falhas = 0, bloqueado_ate = NULL WHERE id = $1`, [usuario.id]);
     if (!usuario.ativo) throw new UnauthorizedException('Usuário desativado. Fale com o gerente.');
     if (usuario.acessoCelular === false && /Mobi|Android|iPhone|iPad|iPod/i.test(agente ?? '')) {
       throw new UnauthorizedException('Seu usuário não tem acesso pelo celular. Use o computador da empresa.');
@@ -130,6 +167,21 @@ export class AuthService {
     return l.map((x: Record<string, unknown>) => ({
       id: x.id, criadoEm: x.criado_em, usuarioId: x.usuario_id, usuario: x.usuario_nome, tipo: x.tipo, de: x.de, para: x.para, ip: x.ip, agente: x.agente,
     }));
+  }
+
+  /** tela travada por inatividade: confere a senha de quem está logado */
+  async confirmarSenha(u: UsuarioToken, senha: string) {
+    const usuario = await this.buscarComSenha('u.id = :valor', u.sub);
+    if (!usuario || !usuario.ativo) throw new UnauthorizedException('Usuário não encontrado ou desativado.');
+    await this.conferirBloqueio(usuario.id);
+    if (!(await bcrypt.compare(senha, usuario.senhaHash))) {
+      const f = await this.contarFalha(usuario.id, usuario.empresaId);
+      // bloqueou: a sessão acaba (401 manda para o login)
+      if (f.bloqueou) throw new UnauthorizedException(`Muitas senhas erradas: usuário bloqueado por ${f.minutos} minutos.`);
+      throw new BadRequestException(f.restantes !== null && f.restantes <= 2 ? `Senha incorreta. Mais ${f.restantes} tentativa(s) e o usuário fica bloqueado.` : 'Senha incorreta.');
+    }
+    await this.usuarios.query(`UPDATE usuarios SET tentativas_falhas = 0 WHERE id = $1`, [usuario.id]);
+    return { ok: true };
   }
 
   async trocarMinhaSenha(u: UsuarioToken, senhaAtual: string, novaSenha: string) {

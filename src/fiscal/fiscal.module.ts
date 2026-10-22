@@ -8,11 +8,12 @@ import { NcmService } from './ncm.service';
 import { NcmController } from './ncm.controller';
 import { NumeracaoController } from './numeracao.controller';
 import { ConferenciaController, ConferenciaService } from './conferencia';
+import { CertificadosController, CertificadosService } from './certificados';
 
 @Module({
   imports: [TypeOrmModule.forFeature([RegraFiscal, Empresa])],
-  providers: [FiscalService, NcmService, ConferenciaService],
-  controllers: [FiscalController, NcmController, NumeracaoController, ConferenciaController],
+  providers: [FiscalService, NcmService, ConferenciaService, CertificadosService],
+  controllers: [FiscalController, NcmController, NumeracaoController, ConferenciaController, CertificadosController],
   exports: [FiscalService],
 })
 export class FiscalModule {}

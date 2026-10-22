@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Headers, HttpCode, Ip, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { AuthService } from './auth.service';
-import { EntrarAmbienteDto, LoginDto, MeuPinDto, TrocarMinhaSenhaDto } from './dto/login.dto';
+import { ConfirmarSenhaDto, EntrarAmbienteDto, LoginDto, MeuPinDto, SegurancaDto, TrocarMinhaSenhaDto } from './dto/login.dto';
 import { PendenciasService } from './pendencias.service';
 import { Requer } from '../common/decorators/requer.decorator';
 import { Publico } from '../common/decorators/publico.decorator';
@@ -41,6 +41,25 @@ export class AuthController {
     const uuid = (x?: string) => (x && /^[0-9a-f-]{36}$/i.test(x) ? x : undefined);
     const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
     return this.service.acessos(u, { de: d(q.de) ?? hoje, ate: d(q.ate) ?? hoje, ambienteId: uuid(q.ambienteId), usuarioId: uuid(q.usuarioId) });
+  }
+
+  /** regras de segurança (qualquer usuário logado lê: a tela usa o tempo de inatividade) */
+  @Get('seguranca')
+  seguranca(@Usuario() u: UsuarioToken) {
+    return this.service.seguranca(u.empresaId);
+  }
+
+  @Patch('seguranca')
+  @Requer('empresa.editar', 'usuarios.gerenciar')
+  salvarSeguranca(@Usuario() u: UsuarioToken, @Body() dto: SegurancaDto) {
+    return this.service.salvarSeguranca(u, dto);
+  }
+
+  /** tela travada por inatividade */
+  @Post('confirmar-senha')
+  @HttpCode(200)
+  confirmarSenha(@Usuario() u: UsuarioToken, @Body() dto: ConfirmarSenhaDto) {
+    return this.service.confirmarSenha(u, dto.senha);
   }
 
   @Patch('minha-senha')

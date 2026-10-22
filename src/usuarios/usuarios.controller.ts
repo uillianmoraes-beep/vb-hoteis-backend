@@ -30,6 +30,12 @@ export class UsuariosController {
     return this.service.atualizar(u.empresaId, id, dto, u.sub);
   }
 
+  /** libera quem ficou bloqueado por errar a senha várias vezes */
+  @Post(':id/desbloquear')
+  desbloquear(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.desbloquear(u.empresaId, id);
+  }
+
   @Patch(':id/senha')
   trocarSenha(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: TrocarSenhaDto) {
     return this.service.trocarSenha(u.empresaId, id, dto.senha);
