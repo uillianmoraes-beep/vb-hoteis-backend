@@ -29,6 +29,7 @@ import { FuncionariosModule } from './funcionarios/funcionarios.module';
 import { BalcaoModule } from './balcao/balcao.module';
 import { DespesasModule } from './despesas/despesas.module';
 import { FinanceiroModule } from './financeiro/plano-contas';
+import { ConciliacaoModule } from './conciliacao/conciliacao.module';
 import { FichasModule } from './fichas/fichas.module';
 import { ReservasModule } from './reservas/reservas.module';
 import { FaturamentoModule } from './faturamento/faturamento.module';
@@ -86,6 +87,7 @@ import { ManualModule } from './manual/manual.module';
     BalcaoModule,
     DespesasModule,
     FinanceiroModule,
+    ConciliacaoModule,
     FichasModule,
     ReservasModule,
     FaturamentoModule,

@@ -8,7 +8,7 @@ async function bootstrap() {
   // fotos das categorias vão em base64 (já reduzidas no navegador): corpo de até 1 MB
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const exp = app as any;
-  exp.useBodyParser('json', { limit: '3mb' });
+  exp.useBodyParser('json', { limit: '15mb' });
   exp.useBodyParser('urlencoded', { limit: '3mb', extended: true });
   // restaurar backup: o arquivo vai inteiro no corpo (application/octet-stream)
   exp.useBodyParser('raw', { type: 'application/octet-stream', limit: '300mb' });
