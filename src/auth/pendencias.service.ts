@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { UsuarioToken, temPermissao } from '../common/permissoes';
+import { FeriasService } from '../funcionarios/ferias';
 
 export interface Pendencia {
   chave: string;
@@ -66,6 +67,15 @@ export class PendenciasService {
         await contar(`SELECT count(*) AS n, string_agg(DISTINCT f.nome, ', ') AS nomes FROM funcionario_documentos d JOIN funcionarios f ON f.id = d.funcionario_id
             WHERE d.empresa_id = $1 AND f.ativo AND d.validade IS NOT NULL AND d.validade <= ${HOJE} + 30
               AND NOT EXISTS (SELECT 1 FROM funcionario_documentos n WHERE n.funcionario_id = d.funcionario_id AND n.tipo = d.tipo AND n.criado_em > d.criado_em)`, [u.empresaId]));
+    }
+
+    if (pode('funcionarios.gerenciar', 'funcionarios.financeiro')) {
+      // férias vencidas (pagam em dobro) ou que precisam começar em até 60 dias e ninguém programou
+      try {
+        const nomes = await new FeriasService(this.ds).alertas(u.empresaId);
+        add({ chave: 'ferias-vencendo', nivel: 'alerta', titulo: 'Férias vencidas ou perto de vencer', detalhe: 'programe para não pagar em dobro', link: '/rh' },
+          { n: nomes.length, nomes: nomes.slice(0, 5).join(', ') });
+      } catch { /* tabelas novas ainda não criadas */ }
     }
 
     if (pode('caixa.adm')) {
