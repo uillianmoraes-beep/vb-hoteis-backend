@@ -12,6 +12,11 @@ export class EstadiaPagamento {
   @Column({ type: 'numeric', precision: 10, scale: 2, default: 0 }) troco!: string;
   @Column({ name: 'troco_destino', type: 'varchar', length: 10, nullable: true }) trocoDestino!: 'cliente' | 'gorjeta' | null;
   @Column({ name: 'gorjeta_para', type: 'varchar', length: 120, nullable: true }) gorjetaPara!: string | null;
+  /** código do comprovante da maquininha (NSU / autorização) ou ID do Pix: base da conciliação bancária */
+  @Column({ type: 'varchar', length: 60, nullable: true }) comprovante!: string | null;
+  @Column({ type: 'varchar', length: 40, nullable: true }) maquininha!: string | null;
+  /** crédito parcelado */
+  @Column({ type: 'smallint', nullable: true }) parcelas!: number | null;
   /** entrada (portaria) | adiantamento | fechamento */
   @Column({ type: 'varchar', length: 12, default: 'fechamento' }) momento!: string;
   /** turno do caixa em que o dinheiro entrou */

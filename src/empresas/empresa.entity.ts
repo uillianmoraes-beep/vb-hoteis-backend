@@ -15,7 +15,13 @@ export class Empresa {
   /** perguntas da pesquisa de satisfação (null = padrão) */
   @Column({ type: 'jsonb', nullable: true }) pesquisa!: { id: string; texto: string; ativo: boolean }[] | null;
   /** regra das gorjetas: limite pago na hora, taxa da casa e período do repasse */
-  @Column({ name: 'config_caixa', type: 'jsonb', default: () => "'{}'::jsonb" }) configCaixa!: { saidas?: string[]; entradas?: string[] };
+  @Column({ name: 'config_caixa', type: 'jsonb', default: () => "'{}'::jsonb" }) configCaixa!: {
+    saidas?: string[]; entradas?: string[];
+    /** nomes das maquininhas / contas (ex.: Stone recepção, Pix Itaú) */
+    maquininhas?: string[];
+    /** código do comprovante no pix/débito/crédito: não pede, pede (opcional) ou obrigatório */
+    comprovante?: 'nao' | 'opcional' | 'obrigatorio';
+  };
   @Column({ name: 'config_gorjeta', type: 'jsonb', default: () => "'{}'::jsonb" }) configGorjeta!: { limiteNaHora?: number; taxaPct?: number; periodo?: 'semanal' | 'quinzenal' | 'mensal' };
   @Column({ name: 'ultimo_uso', type: 'int', default: 0 }) ultimoUso!: number;
   /** módulos contratados (revenda); só a Virtual Barra altera */

@@ -42,6 +42,10 @@ export class PagamentoDto {
   @IsOptional() @IsString() @MaxLength(120) penhoraContato?: string;
   /** faturado: cliente (empresa/convênio) que vai pagar depois */
   @IsOptional() @IsUUID() clienteFaturadoId?: string;
+  /** pix / débito / crédito: código do comprovante (NSU, autorização ou ID do Pix) */
+  @IsOptional() @IsString() @MaxLength(60) comprovante?: string;
+  @IsOptional() @IsString() @MaxLength(40) maquininha?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(24) parcelas?: number;
 }
 
 export class NotaFiscalDto {

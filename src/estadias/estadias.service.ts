@@ -43,6 +43,16 @@ export interface ContaCalculada extends ResultadoCalc {
 }
 
 const ABERTAS = ['aberta', 'conta_entregue'];
+/** formas que têm comprovante (maquininha ou Pix) */
+const FORMAS_COMPROVANTE = ['pix', 'debito', 'credito'];
+const dadosComprovante = (p: PagamentoDto) => {
+  if (!FORMAS_COMPROVANTE.includes(p.forma)) return { comprovante: null, maquininha: null, parcelas: null };
+  return {
+    comprovante: p.comprovante?.trim().replace(/\s+/g, '') || null,
+    maquininha: p.maquininha?.trim() || null,
+    parcelas: p.forma === 'credito' && p.parcelas && p.parcelas > 1 ? p.parcelas : null,
+  };
+};
 const NOMES_FORMA: Record<string, string> = { dinheiro: 'dinheiro', pix: 'Pix', debito: 'débito', credito: 'crédito', faturado: 'faturado', penhora: 'penhora' };
 const brl = (c: number) => `R$ ${reais(c).replace('.', ',')}`;
 
@@ -302,13 +312,23 @@ export class EstadiasService {
         gorjetaUsuarioId: p.gorjetaUsuarioId ?? null, gorjetaAdicional: centavos(p.gorjetaAdicional ?? 0),
         penhoraItem: p.forma === 'penhora' ? p.penhoraItem?.trim() || '' : '', penhoraContato: p.forma === 'penhora' ? p.penhoraContato?.trim() || null : null,
         clienteFaturadoId: p.forma === 'faturado' ? p.clienteFaturadoId ?? null : null,
+        ...dadosComprovante(p),
       };
     });
+  }
+
+  /** Configuração do caixa: pix/débito/crédito sem o código do comprovante não passa. */
+  private async conferirComprovantes(empresaId: string, pags: { forma: string; valor: number; comprovante: string | null }[]) {
+    const cfg = (await this.empresas.findOne({ where: { id: empresaId } }))?.configCaixa;
+    if (cfg?.comprovante !== 'obrigatorio') return;
+    const sem = pags.find((p) => p.valor > 0 && FORMAS_COMPROVANTE.includes(p.forma) && !p.comprovante);
+    if (sem) throw new BadRequestException(`Digite o código do comprovante do ${NOMES_FORMA[sem.forma] ?? sem.forma} de ${brl(sem.valor)}.`);
   }
 
   private async gravarAdiantamento(m: EntityManager, u: UsuarioToken, estadiaId: string, lista: PagamentoDto[], momento: 'entrada' | 'adiantamento', ambienteId: string) {
     const pags = this.lerPagamentos(lista).filter((p) => p.valor > 0);
     if (!pags.length) return 0;
+    await this.conferirComprovantes(u.empresaId, pags);
     if (pags.some((p) => p.forma === 'penhora')) throw new BadRequestException('Penhora só no fechamento da conta.');
     const turnoId = await this.caixa.turnoParaRecebimento(u.empresaId, ambienteId);
     for (const p of pags) {
@@ -316,11 +336,12 @@ export class EstadiasService {
         empresaId: u.empresaId, estadiaId, forma: p.forma, valor: reais(p.valor),
         valorRecebido: p.recebido !== null ? reais(p.recebido) : null, troco: reais(p.troco),
         trocoDestino: p.trocoDestino, gorjetaPara: p.gorjetaPara, usuarioId: u.sub, usuarioNome: u.nome, momento, turnoId,
+        comprovante: p.comprovante, maquininha: p.maquininha, parcelas: p.parcelas,
       });
     }
     const soma = pags.reduce((s, p) => s + p.valor, 0);
     await this.registrar(m, u, estadiaId, 'adiantamento',
-      `${momento === 'entrada' ? 'Pago na entrada' : 'Recebido antecipado'}: ${pags.map((p) => `${NOMES_FORMA[p.forma] ?? p.forma} ${brl(p.valor)}${p.troco ? ` (troco ${brl(p.troco)})` : ''}`).join(' + ')}`);
+      `${momento === 'entrada' ? 'Pago na entrada' : 'Recebido antecipado'}: ${pags.map((p) => `${NOMES_FORMA[p.forma] ?? p.forma} ${brl(p.valor)}${p.troco ? ` (troco ${brl(p.troco)})` : ''}${p.comprovante ? ` · cód. ${p.comprovante}` : ''}`).join(' + ')}`);
     return soma;
   }
 
@@ -647,6 +668,7 @@ export class EstadiasService {
     const pags = this.lerPagamentos(dto.pagamentos ?? []);
     for (const pg of dto.pagadores ?? []) documentoFiscal(pg.documento); // CPF/CNPJ errado avisa antes de gravar
     if (pags.some((p) => p.forma === 'penhora' && p.penhoraItem.length < 2)) throw new BadRequestException('Na penhora, diga qual objeto o cliente deixou (ex.: celular, relógio).');
+    await this.conferirComprovantes(u.empresaId, pags);
     const anteriores = await this.pagamentos.find({ where: { estadiaId: e.id } });
     const adiantado = anteriores.reduce((s, p) => s + centavos(Number(p.valor)), 0);
     const restante = total - adiantado;
@@ -670,6 +692,7 @@ export class EstadiasService {
           empresaId: u.empresaId, estadiaId: e.id, forma: p.forma, valor: reais(p.valor),
           valorRecebido: p.recebido !== null ? reais(p.recebido) : null, troco: reais(p.troco),
           trocoDestino: p.trocoDestino, gorjetaPara: p.gorjetaPara, usuarioId: u.sub, usuarioNome: u.nome, momento: 'fechamento', turnoId,
+          comprovante: p.comprovante, maquininha: p.maquininha, parcelas: p.parcelas,
         });
         if (p.forma === 'penhora') {
           await m.insert(Penhora, {

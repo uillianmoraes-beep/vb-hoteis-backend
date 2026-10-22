@@ -255,12 +255,25 @@ export class CaixaService {
     return {
       saidas: cfg.saidas?.length ? cfg.saidas : ['Pagamento de fornecedor', 'Passagem', 'Padaria', 'Outras despesas'],
       entradas: cfg.entradas?.length ? cfg.entradas : ['Reforço de troco', 'Outras entradas'],
+      maquininhas: cfg.maquininhas ?? [],
+      comprovante: cfg.comprovante ?? 'opcional',
     };
+  }
+
+  /** o que a recepção precisa para pedir o código do comprovante */
+  async configComprovante(u: UsuarioToken) {
+    const c = await this.config(u);
+    return { maquininhas: c.maquininhas, comprovante: c.comprovante };
   }
 
   async salvarConfig(u: UsuarioToken, dto: ConfigCaixaDto) {
     const limpa = (l: string[]) => [...new Set(l.map((x) => x.trim()).filter(Boolean))];
-    await this.empresas.update({ id: u.empresaId }, { configCaixa: { saidas: limpa(dto.saidas), entradas: limpa(dto.entradas) } });
+    const atual = (await this.empresas.findOne({ where: { id: u.empresaId } }))?.configCaixa ?? {};
+    await this.empresas.update({ id: u.empresaId }, { configCaixa: {
+      ...atual, saidas: limpa(dto.saidas), entradas: limpa(dto.entradas),
+      ...(dto.maquininhas ? { maquininhas: limpa(dto.maquininhas) } : {}),
+      ...(dto.comprovante ? { comprovante: dto.comprovante } : {}),
+    } });
     return this.config(u);
   }
 

@@ -21,6 +21,12 @@ export class CaixaController {
     return this.service.config(u);
   }
 
+  /** recepção: maquininhas e se o código do comprovante é obrigatório */
+  @Get('comprovante')
+  configComprovante(@Usuario() u: UsuarioToken) {
+    return this.service.configComprovante(u);
+  }
+
   @Put('config')
   @Requer('caixa.adm')
   salvarConfig(@Usuario() u: UsuarioToken, @Body() dto: ConfigCaixaDto) {
