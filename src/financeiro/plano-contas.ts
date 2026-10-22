@@ -1,10 +1,9 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Injectable, NotFoundException, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, MaxLength, MinLength, ValidateIf } from 'class-validator';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
-import { ContasBancariasController, ContasBancariasService } from './contas-bancarias';
 
 /**
  * Plano de contas: cada conta pertence a uma linha da DRE / do fluxo de caixa.
@@ -206,10 +205,3 @@ export class PlanoContasController {
     return this.service.atualizar(u, id, dto);
   }
 }
-
-@Module({
-  providers: [PlanoContasService, ContasBancariasService],
-  controllers: [PlanoContasController, ContasBancariasController],
-  exports: [PlanoContasService, ContasBancariasService],
-})
-export class FinanceiroModule {}
