@@ -4,10 +4,11 @@ import { Funcionario, FuncionarioLancamento, Revisao } from './funcionario.entit
 import { FuncionariosService } from './funcionarios.service';
 import { FuncionariosController } from './funcionarios.controller';
 import { RefeicoesController, RefeicoesService } from './refeicoes';
+import { AniversariantesController, AniversariantesService } from './aniversariantes';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Funcionario, FuncionarioLancamento, Revisao])],
-  providers: [FuncionariosService, RefeicoesService],
-  controllers: [RefeicoesController, FuncionariosController],
+  providers: [FuncionariosService, RefeicoesService, AniversariantesService],
+  controllers: [RefeicoesController, AniversariantesController, FuncionariosController],
 })
 export class FuncionariosModule {}

@@ -51,6 +51,15 @@ export class PendenciasService {
     };
     const lista = (expr: string) => `string_agg(DISTINCT ${expr}, ', ')`;
 
+    if (pode('reservas.gerenciar', 'estadias.operar', 'funcionarios.gerenciar')) {
+      // aniversariante hoje (hóspede pela ficha FNRH, funcionário pelo cadastro)
+      add({ chave: 'aniversario-hoje', nivel: 'info', titulo: 'Aniversariantes de hoje', detalhe: 'mande os parabéns', link: '/aniversariantes' },
+        await contar(`SELECT count(*) AS n, string_agg(DISTINCT nome, ', ') AS nomes FROM (
+            SELECT f.dados->>'nome' AS nome FROM fichas_hospede f WHERE f.empresa_id = $1 AND f.dados->>'nascimento' ~ '^\\d{4}-\\d{2}-\\d{2}$'
+              AND substr(f.dados->>'nascimento', 6, 5) = to_char(${HOJE}, 'MM-DD')
+            UNION SELECT nome FROM funcionarios WHERE empresa_id = $1 AND ativo AND to_char(nascimento, 'MM-DD') = to_char(${HOJE}, 'MM-DD')) x`, [u.empresaId]));
+    }
+
     if (pode('despesas.aprovar')) {
       add({ chave: 'contas-aprovar', nivel: 'aviso', titulo: 'Contas a pagar esperando aprovação', detalhe: 'notas e boletos lançados pelo setor de compras', link: '/despesas?aba=aprovacao' },
         await contar(`SELECT count(DISTINCT COALESCE(lote_id, id)) AS n, ${lista('fornecedor')} AS nomes FROM contas_pagar WHERE empresa_id = $1 AND status = 'aberta' AND aprovacao = 'pendente'`, [u.empresaId]));

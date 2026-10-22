@@ -10,6 +10,7 @@ export class FuncionarioDto {
   @IsOptional() @IsString() @MaxLength(30) documento?: string;
   @IsOptional() @IsString() @MaxLength(120) chavePix?: string;
   @IsOptional() @Matches(/^(\d{4}-\d{2}-\d{2})?$/) admissao?: string;
+  @IsOptional() @Matches(/^(\d{4}-\d{2}-\d{2})?$/) nascimento?: string;
   @IsOptional() @IsString() @MaxLength(400_000) foto?: string;
   @IsOptional() @IsString() @MaxLength(40) usuarioId?: string;
   @IsOptional() @IsBoolean() recebeGorjeta?: boolean;

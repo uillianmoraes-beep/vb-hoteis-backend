@@ -16,6 +16,7 @@ export class Funcionario {
   @Column({ type: 'varchar', length: 30, nullable: true }) documento!: string | null;
   @Column({ name: 'chave_pix', type: 'varchar', length: 120, nullable: true }) chavePix!: string | null;
   @Column({ type: 'date', nullable: true }) admissao!: string | null;
+  @Column({ type: 'date', nullable: true }) nascimento!: string | null;
   @Column({ type: 'text', nullable: true, select: false }) foto!: string | null;
   /** login no sistema, se tiver */
   @Column({ name: 'usuario_id', type: 'uuid', nullable: true }) usuarioId!: string | null;

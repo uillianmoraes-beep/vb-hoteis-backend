@@ -45,7 +45,7 @@ export class FuncionariosService {
     const d: Partial<Funcionario> = {
       nome: dto.nome.trim(), funcao: dto.funcao as Funcionario['funcao'], ambienteIds: dto.ambienteIds ?? [],
       telefone: dto.telefone?.trim() || null, documento: dto.documento?.trim() || null, chavePix: dto.chavePix?.trim() || null,
-      admissao: dto.admissao || null, usuarioId: dto.usuarioId || null, recebeGorjeta: !!dto.recebeGorjeta,
+      admissao: dto.admissao || null, nascimento: dto.nascimento || null, usuarioId: dto.usuarioId || null, recebeGorjeta: !!dto.recebeGorjeta,
       observacao: dto.observacao?.trim() || null, ativo: dto.ativo ?? true,
     };
     if (dto.foto !== undefined) {
