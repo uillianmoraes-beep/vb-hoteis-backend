@@ -51,6 +51,13 @@ export class PendenciasService {
     };
     const lista = (expr: string) => `string_agg(DISTINCT ${expr}, ', ')`;
 
+    if (pode('estoque.gerenciar')) {
+      // mercadoria que voltou ao estoque por item cancelado: avisa até o estoquista conferir
+      add({ chave: 'devolucoes-estoque', nivel: 'aviso', titulo: 'Itens que voltaram ao estoque', detalhe: 'itens cancelados nas contas: confira se a mercadoria voltou mesmo', link: '/relatorios/estornos?aba=devolucoes' },
+        await contar(`SELECT count(*) AS n, ${lista('pr.nome')} AS nomes FROM estoque_movimentos m JOIN produtos pr ON pr.id = m.produto_id
+          WHERE m.empresa_id = $1 AND m.tipo = 'estorno' AND m.conferido_em IS NULL`, [u.empresaId]));
+    }
+
     if (pode('notas.gerenciar', 'empresa.editar')) {
       // certificado digital: vermelho na última semana (ou vencido), amarelo até 30 dias antes
       try {
