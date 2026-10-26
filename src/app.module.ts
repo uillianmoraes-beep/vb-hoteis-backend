@@ -27,6 +27,7 @@ import { RelatoriosModule } from './relatorios/relatorios.module';
 import { CortesiasModule } from './cortesias/cortesias.module';
 import { FuncionariosModule } from './funcionarios/funcionarios.module';
 import { ContadorModule } from './contador/contador.module';
+import { FerramentasModule } from './ferramentas/ferramentas';
 import { BalcaoModule } from './balcao/balcao.module';
 import { DespesasModule } from './despesas/despesas.module';
 import { FinanceiroModule } from './financeiro/financeiro.module';
@@ -86,6 +87,7 @@ import { ManualModule } from './manual/manual.module';
     CortesiasModule,
     FuncionariosModule,
     ContadorModule,
+    FerramentasModule,
     BalcaoModule,
     DespesasModule,
     FinanceiroModule,

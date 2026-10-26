@@ -103,6 +103,18 @@ export class PendenciasService {
       } catch { /* tabelas novas ainda não criadas */ }
     }
 
+    if (pode('ferramentas.gerenciar', 'compras.gerenciar', 'caixa.adm', 'unidades.bloquear')) {
+      // ferramentas: devolução atrasada (para quem cuida) e pedidos de compra esperando a pré-aprovação (compras/ADM)
+      try {
+        const f = await this.ds.query(
+          `SELECT (SELECT count(*) FROM ferramenta_entregas WHERE empresa_id = $1 AND devolvida_em IS NULL AND previsao < ${HOJE})::int AS atrasadas,
+                  (SELECT string_agg(DISTINCT responsavel, ', ') FROM ferramenta_entregas WHERE empresa_id = $1 AND devolvida_em IS NULL AND previsao < ${HOJE}) AS quem,
+                  (SELECT count(*) FROM ferramenta_pedidos WHERE empresa_id = $1 AND status = 'pendente')::int AS pedidos`, [u.empresaId]);
+        if (pode('ferramentas.gerenciar')) add({ chave: 'ferramentas-atrasadas', nivel: 'aviso', titulo: 'Ferramentas com devolução atrasada', link: '/ferramentas' }, { n: f[0]?.atrasadas ?? 0, nomes: f[0]?.quem ?? '' });
+        if (pode('compras.gerenciar', 'caixa.adm')) add({ chave: 'ferramentas-pedidos', nivel: 'aviso', titulo: 'Pedidos de ferramenta para aprovar', detalhe: 'aprovado já vira cotação', link: '/ferramentas?aba=pedidos' }, { n: f[0]?.pedidos ?? 0, nomes: '' }, false);
+      } catch { /* tabelas novas ainda não criadas */ }
+    }
+
     if (pode('caixa.adm')) {
       // reserva do caixa ADM: perguntar quanto separar do movimento de ontem (enquanto não responder) e avisar atraso
       try {
