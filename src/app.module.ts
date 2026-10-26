@@ -36,6 +36,7 @@ import { TotemModule } from './totem/totem';
 import { AvisosModule } from './avisos/avisos';
 import { WhatsappModule } from './avisos/whatsapp';
 import { ConcorrenciaModule } from './tarifas/concorrencia';
+import { FundoModule } from './empresas/fundo';
 import { ContratosModule } from './contratos/contratos';
 import { BalcaoModule } from './balcao/balcao.module';
 import { DespesasModule } from './despesas/despesas.module';
@@ -105,6 +106,7 @@ import { ManualModule } from './manual/manual.module';
     AvisosModule,
     WhatsappModule,
     ConcorrenciaModule,
+    FundoModule,
     UniformesModule,
     ContratosModule,
     BalcaoModule,
