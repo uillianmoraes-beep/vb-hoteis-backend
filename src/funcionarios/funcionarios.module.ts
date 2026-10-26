@@ -12,11 +12,12 @@ import { EscalaController, EscalaService } from './escala';
 import { LicencasController, LicencasService } from './licencas';
 import { BancoHorasController, BancoHorasService } from './banco-horas';
 import { DesempenhoController, DesempenhoService, ProvaPublicaController } from './desempenho';
+import { ObrigatoriosController, ObrigatoriosService } from './obrigatorios';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Funcionario, FuncionarioLancamento, Revisao])],
-  providers: [FuncionariosService, RefeicoesService, AniversariantesService, ContratoService, DocumentosService, FeriasService, EscalaService, LicencasService, BancoHorasService, DesempenhoService],
+  providers: [FuncionariosService, RefeicoesService, AniversariantesService, ContratoService, DocumentosService, FeriasService, EscalaService, LicencasService, BancoHorasService, DesempenhoService, ObrigatoriosService],
   exports: [ContratoService, FeriasService, EscalaService, LicencasService, BancoHorasService],
-  controllers: [RefeicoesController, AniversariantesController, ContratoController, DocumentosController, FeriasController, EscalaController, LicencasController, BancoHorasController, DesempenhoController, ProvaPublicaController, FuncionariosController],
+  controllers: [RefeicoesController, AniversariantesController, ContratoController, DocumentosController, FeriasController, EscalaController, LicencasController, BancoHorasController, DesempenhoController, ProvaPublicaController, ObrigatoriosController, FuncionariosController],
 })
 export class FuncionariosModule {}

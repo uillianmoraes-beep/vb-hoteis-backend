@@ -28,6 +28,7 @@ const fmtFatura = (f: Record<string, unknown>) => ({
   status: f.status, boletoLinha: f.boleto_linha, boletoNossoNumero: f.boleto_nosso_numero, boletoLink: f.boleto_link, observacao: f.observacao,
   pagoEm: dia(f.pago_em), valorPago: f.valor_pago === null ? null : Number(f.valor_pago), formaPagamento: f.forma_pagamento, pagoPor: f.pago_por,
   criadoPor: f.criado_por, qtd: f.qtd === undefined ? undefined : Number(f.qtd), cnpj: f.cnpj ?? null,
+  notaStatus: f.nota_status ?? 'nao', notaNumero: f.nota_numero ?? null, notaEmitidaEm: f.nota_emitida_em ?? null, notaEmitidaPor: f.nota_emitida_por ?? null, enviadaEm: f.enviada_em ?? null,
 });
 
 const SQL_SALDOS = `
@@ -311,6 +312,23 @@ export class FaturamentoService {
       await m.query(`UPDATE faturas SET status='paga', pago_em=$2, valor_pago=valor, forma_pagamento=$3, pago_por=$4 WHERE id=$1`, [id, pagoEm, dto.forma, u.nome]);
       await m.query(`UPDATE contas_receber SET status='paga', pago_em=$2, forma_pagamento=$3, pago_por=$4 WHERE fatura_id=$1 AND status='aberta'`, [id, pagoEm, dto.forma, u.nome]);
     });
+    return { ok: true };
+  }
+
+  /** nota da fatura: pendente (precisa emitir), emitida (com o número) ou sem nota */
+  async notaFatura(u: UsuarioToken, id: string, dto: { status: 'pendente' | 'emitida' | 'nao'; numero?: string }) {
+    const [f] = await this.ds.query(`SELECT status FROM faturas WHERE id = $1 AND empresa_id = $2`, [id, u.empresaId]);
+    if (!f) throw new NotFoundException('Fatura não encontrada.');
+    if (dto.status === 'emitida' && !dto.numero?.trim()) throw new BadRequestException('Coloque o número da nota.');
+    await this.ds.query(
+      `UPDATE faturas SET nota_status = $3, nota_numero = $4, nota_emitida_em = CASE WHEN $3 = 'emitida' THEN now() END, nota_emitida_por = CASE WHEN $3 = 'emitida' THEN $5 END
+        WHERE id = $1 AND empresa_id = $2`, [id, u.empresaId, dto.status, dto.status === 'emitida' ? dto.numero!.trim().slice(0, 30) : null, u.nome]);
+    return { ok: true };
+  }
+
+  /** marca que a fatura foi mandada ao cliente (WhatsApp ou e-mail) */
+  async marcarEnviada(u: UsuarioToken, id: string) {
+    await this.ds.query(`UPDATE faturas SET enviada_em = now() WHERE id = $1 AND empresa_id = $2`, [id, u.empresaId]);
     return { ok: true };
   }
 

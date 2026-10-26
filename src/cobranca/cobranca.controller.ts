@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
 import { CobrancaService } from './cobranca.service';
-import { ConfigCobrancaDto, GerarCobrancaDto } from './cobranca.dto';
+import { ConfigCobrancaDto, FaturarClienteDto, GerarCobrancaDto } from './cobranca.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { Publico } from '../common/decorators/publico.decorator';
@@ -39,6 +39,13 @@ export class CobrancaController {
 
   @Post('cobrancas/:id/cancelar') @HttpCode(200) @Requer('faturamento.gerenciar')
   cancelar(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.cancelar(u, id); }
+
+  /** um clique: fatura (uma por CNPJ) + boleto/Pix + nota pendente + texto pronto para mandar */
+  @Post('faturamento/clientes/:id/faturar') @HttpCode(200) @Requer('faturamento.gerenciar')
+  faturar(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: FaturarClienteDto) { return this.service.faturarCliente(u, id, dto); }
+
+  @Get('faturamento/faturas/:id/envio') @Requer('faturamento.gerenciar')
+  envio(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.envio(u, id); }
 
   @Get('faturamento/faturas/:id/cobranca') @Requer('faturamento.gerenciar')
   daFatura(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.daFatura(u, id); }

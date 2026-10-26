@@ -7,6 +7,8 @@ import { UsuarioToken } from '../common/permissoes';
 import { CAMPOS, LinhaArquivo, Mapa, acharCabecalho, adivinharMapa, assinatura, lerOfx, lerTabela, linhasDaPlanilha } from './leitura';
 import { LinhaConferir, PagamentoSistema, acharDeposito, conferir, taxaContrato } from './conferir';
 import { gerarArquivosTeste } from './teste';
+import { FaturamentoModule } from '../faturamento/faturamento.module';
+import { FaturamentoService } from '../faturamento/faturamento.service';
 
 const DATA = /^\d{4}-\d{2}-\d{2}$/;
 const DIA = 86_400_000;
@@ -32,6 +34,8 @@ class ImportarDto {
 }
 class ConfirmarDto {
   @IsOptional() @IsUUID() pagamentoId?: string;
+  /** crédito do banco que é o pagamento de uma fatura (transferência/Pix da empresa): dá baixa se ainda estiver em aberto */
+  @IsOptional() @IsUUID() faturaId?: string;
   /** troca o código digitado na recepção pelo do arquivo */
   @IsOptional() @IsBoolean() corrigirCodigo?: boolean;
 }
@@ -49,7 +53,7 @@ const taxasMaq = (m: Maq) => ({ taxaDebito: n(m.taxa_debito), taxaCredito: n(m.t
 
 @Injectable()
 export class ConciliacaoService {
-  constructor(private readonly ds: DataSource) {}
+  constructor(private readonly ds: DataSource, private readonly faturamento: FaturamentoService) {}
 
   /* ---------------- importar ---------------- */
 
@@ -145,7 +149,7 @@ export class ConciliacaoService {
       const ini = inicioDia(somaDias(de, -1));
       const fim = inicioDia(somaDias(ate, 2));
       // as sugestões são refeitas (podem ter chegado arquivos ou códigos novos); verde e ignorada ficam
-      await m.query(`UPDATE conciliacao_linhas SET status = 'pendente', situacao = NULL, pagamento_id = NULL
+      await m.query(`UPDATE conciliacao_linhas SET status = 'pendente', situacao = NULL, pagamento_id = NULL, fatura_id = NULL
                       WHERE empresa_id = $1 AND status = 'sugerida' AND momento BETWEEN $2 AND $3`, [empresaId, ini, fim]);
       const linhas = await m.query(
         `SELECT * FROM conciliacao_linhas WHERE empresa_id = $1 AND status = 'pendente' AND valor_bruto > 0 AND momento BETWEEN $2 AND $3`, [empresaId, ini, fim]);
@@ -171,8 +175,62 @@ export class ConciliacaoService {
         }
       }
       verdes += await this.conferirDepositos(m, empresaId, ini, fim);
-      return { verdes, amarelas };
+      const fat = await this.conferirFaturas(m, empresaId, ini, fim);
+      return { verdes: verdes + fat.verdes, amarelas: amarelas + fat.amarelas, faturasBaixadas: fat.baixadas };
     });
+  }
+
+  /**
+   * créditos do banco que são o pagamento de uma fatura (empresa que paga por transferência/Pix):
+   * - fatura já paga (baixa à mão, mesmo valor, até 3 dias de diferença) → verde;
+   * - fatura em aberto com o mesmo valor e o CNPJ/CPF do cliente na descrição do extrato → baixa sozinha e fica verde;
+   * - fatura em aberto com o mesmo valor (só uma) → amarela: "pode ser a fatura nº X", o gerente confirma e a baixa é feita.
+   */
+  private async conferirFaturas(m: EntityManager, empresaId: string, ini: Date, fim: Date) {
+    const creditos = await m.query(
+      `SELECT id, momento, valor_bruto, descricao, forma FROM conciliacao_linhas
+        WHERE empresa_id = $1 AND origem = 'banco' AND status = 'pendente' AND valor_bruto > 0 AND momento BETWEEN $2 AND $3`, [empresaId, ini, fim]);
+    const res = { verdes: 0, amarelas: 0, baixadas: 0 };
+    if (!creditos.length) return res;
+    const faturas: { id: string; numero: number | null; valor: string; status: string; pago_em: string | Date | null; nome: string; documento: string | null }[] = await m.query(
+      `SELECT f.id, f.numero, f.valor, f.status, f.pago_em, c.nome, c.documento FROM faturas f JOIN clientes_faturados c ON c.id = f.cliente_id
+        WHERE f.empresa_id = $1 AND (f.status = 'aberta' OR (f.status = 'paga' AND f.forma_pagamento IN ('pix','transferencia','boleto') AND COALESCE(f.pago_por,'') <> 'Asaas (automático)'
+              AND f.pago_em BETWEEN ($2::timestamptz - interval '5 days')::date AND ($3::timestamptz + interval '5 days')::date))
+          AND NOT EXISTS (SELECT 1 FROM conciliacao_linhas l WHERE l.fatura_id = f.id AND l.status IN ('conciliada','sugerida'))`, [empresaId, ini, fim]);
+    if (!faturas.length) return res;
+    const usadas = new Set<string>();
+    const so = (v: unknown) => String(v ?? '').replace(/\D/g, '');
+    const sem = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    for (const c of creditos) {
+      const valor = Math.round(Number(c.valor_bruto) * 100);
+      const diaL = diaSP(new Date(c.momento));
+      const desc = sem(String(c.descricao ?? ''));
+      const descNum = so(c.descricao);
+      const mesmas = faturas.filter((f) => !usadas.has(f.id) && Math.round(Number(f.valor) * 100) === valor);
+      const pagas = mesmas.filter((f) => f.status === 'paga' && f.pago_em && Math.abs(Date.parse(`${String(f.pago_em instanceof Date ? f.pago_em.toISOString() : f.pago_em).slice(0, 10)}T12:00:00Z`) - Date.parse(`${diaL}T12:00:00Z`)) <= 3 * DIA);
+      const abertas = mesmas.filter((f) => f.status === 'aberta');
+      const doc = (f: { documento: string | null }) => { const d = so(f.documento); return d.length >= 11 && (descNum.includes(d) || descNum.includes(d.slice(0, 8))); };
+      const nome = (f: { nome: string }) => sem(f.nome).split(/\s+/).filter((w) => w.length >= 4).some((w) => desc.includes(w));
+      const marcar = async (f: { id: string; numero: number | null; nome: string }, status: 'conciliada' | 'sugerida', situacao: string) => {
+        usadas.add(f.id);
+        await m.query(`UPDATE conciliacao_linhas SET status = $2::varchar, situacao = $3, fatura_id = $4, conferido_por = CASE WHEN $2::varchar = 'conciliada' THEN 'automático' END,
+                         conferido_em = CASE WHEN $2::varchar = 'conciliada' THEN now() END WHERE id = $1`, [c.id, status, situacao.slice(0, 200), f.id]);
+        if (status === 'conciliada') res.verdes++; else res.amarelas++;
+      };
+      const paga = pagas.find(doc) ?? pagas.find(nome) ?? (pagas.length === 1 ? pagas[0] : undefined);
+      if (paga) { await marcar(paga, 'conciliada', `fatura nº ${paga.numero ?? '—'} paga · ${paga.nome}`); continue; }
+      const certa = abertas.filter(doc);
+      if (certa.length === 1) {
+        const f = certa[0];
+        const sistema = { sub: null, empresaId, perfilId: null, nome: 'Conciliação (automático)', permissoes: [], ambientesIds: [] } as unknown as UsuarioToken;
+        const ok = await this.faturamento.baixarFatura(sistema, f.id, { forma: c.forma === 'pix' ? 'pix' : 'transferencia', pagoEm: diaL }).then(() => true).catch(() => false);
+        if (ok) { res.baixadas++; await marcar(f, 'conciliada', `fatura nº ${f.numero ?? '—'} · ${f.nome} (baixada pelo extrato)`); continue; }
+      }
+      const prov = abertas.filter(nome);
+      const sug = prov.length === 1 ? prov[0] : abertas.length === 1 ? abertas[0] : undefined;
+      if (sug) await marcar(sug, 'sugerida', `pode ser a fatura nº ${sug.numero ?? '—'} de ${sug.nome} — confirme para dar baixa`);
+    }
+    return res;
   }
 
   /** créditos do banco que são o depósito das vendas de cartão de uma maquininha */
@@ -214,8 +272,10 @@ export class ConciliacaoService {
     const mapaMaq = new Map(maqs.map((x) => [x.id, x]));
     const linhas = await this.ds.query(
       `SELECT l.*, cb.nome AS conta_nome, p.forma AS p_forma, p.valor AS p_valor, p.criado_em AS p_momento, p.comprovante AS p_comprovante, p.usuario_nome AS p_usuario,
-              p.maquininha AS p_maquininha, p.estadia_id AS p_estadia, e.numero AS p_uso, un.codigo AS p_unidade
+              p.maquininha AS p_maquininha, p.estadia_id AS p_estadia, e.numero AS p_uso, un.codigo AS p_unidade,
+              fa.numero AS fa_numero, fa.status AS fa_status, fa.valor AS fa_valor, cf.nome AS fa_cliente
          FROM conciliacao_linhas l LEFT JOIN contas_bancarias cb ON cb.id = l.conta_bancaria_id
+         LEFT JOIN faturas fa ON fa.id = l.fatura_id LEFT JOIN clientes_faturados cf ON cf.id = fa.cliente_id
          LEFT JOIN estadia_pagamentos p ON p.id = l.pagamento_id LEFT JOIN estadias e ON e.id = p.estadia_id LEFT JOIN unidades un ON un.id = e.unidade_id
         WHERE l.empresa_id = $1 AND l.momento >= $2 AND l.momento < $3 ORDER BY l.momento`, [u.empresaId, ini, fim]);
     let taxaAMais = 0;
@@ -237,6 +297,7 @@ export class ConciliacaoService {
         dataPagamento: l.data_pagamento ? String(l.data_pagamento instanceof Date ? l.data_pagamento.toISOString() : l.data_pagamento).slice(0, 10) : null,
         forma: l.forma, bandeira: l.bandeira, parcelas: l.parcelas, nsu: l.nsu, autorizacao: l.autorizacao, valorBruto: bruto, taxa, valorLiquido: n(l.valor_liquido),
         descricao: l.descricao, status: l.status, situacao: l.situacao, observacao: l.observacao, conferidoPor: l.conferido_por, deposito: l.deposito_de ?? null, auditoria,
+        fatura: l.fatura_id ? { id: l.fatura_id, numero: l.fa_numero, status: l.fa_status, valor: Number(l.fa_valor), cliente: l.fa_cliente } : null,
         pagamento: l.pagamento_id ? {
           id: l.pagamento_id, forma: l.p_forma, valor: Number(l.p_valor), momento: l.p_momento, comprovante: l.p_comprovante, usuario: l.p_usuario,
           maquininha: l.p_maquininha, estadiaId: l.p_estadia, uso: l.p_uso, unidade: l.p_unidade,
@@ -308,6 +369,20 @@ export class ConciliacaoService {
     }));
   }
 
+  /** faturas que podem ser o par deste crédito do banco (para ligar à mão) */
+  async faturasCandidatas(u: UsuarioToken, id: string) {
+    const l = await this.linha(u, id);
+    const r = await this.ds.query(
+      `SELECT f.id, f.numero, f.valor, f.vencimento, f.status, f.pago_em, c.nome FROM faturas f JOIN clientes_faturados c ON c.id = f.cliente_id
+        WHERE f.empresa_id = $1 AND f.status IN ('aberta','paga') AND (f.status = 'aberta' OR f.pago_em >= ($3::timestamptz - interval '30 days')::date)
+          AND NOT EXISTS (SELECT 1 FROM conciliacao_linhas x WHERE x.fatura_id = f.id AND x.status = 'conciliada' AND x.id <> $4)
+        ORDER BY abs(f.valor - $2), f.vencimento LIMIT 15`, [u.empresaId, Number(l.valor_bruto), l.momento, id]);
+    return r.map((f: Record<string, unknown>) => ({
+      id: f.id, numero: f.numero, valor: Number(f.valor), cliente: f.nome, status: f.status,
+      vencimento: f.vencimento instanceof Date ? f.vencimento.toISOString().slice(0, 10) : String(f.vencimento ?? '').slice(0, 10),
+    }));
+  }
+
   private async linha(u: UsuarioToken, id: string) {
     const [l] = await this.ds.query(`SELECT * FROM conciliacao_linhas WHERE id = $1 AND empresa_id = $2`, [id, u.empresaId]);
     if (!l) throw new NotFoundException('Linha não encontrada.');
@@ -316,6 +391,16 @@ export class ConciliacaoService {
 
   async confirmar(u: UsuarioToken, id: string, dto: ConfirmarDto) {
     const l = await this.linha(u, id);
+    const faturaId = dto.faturaId ?? (dto.pagamentoId ? null : l.fatura_id);
+    if (faturaId) {
+      const [f] = await this.ds.query(`SELECT f.id, f.numero, f.status, c.nome FROM faturas f JOIN clientes_faturados c ON c.id = f.cliente_id WHERE f.id = $1 AND f.empresa_id = $2`, [faturaId, u.empresaId]);
+      if (!f) throw new BadRequestException('Fatura não encontrada.');
+      if (f.status === 'cancelada') throw new BadRequestException('Esta fatura foi cancelada.');
+      if (f.status === 'aberta') await this.faturamento.baixarFatura(u, f.id, { forma: l.forma === 'pix' ? 'pix' : 'transferencia', pagoEm: diaSP(new Date(l.momento)) });
+      await this.ds.query(`UPDATE conciliacao_linhas SET status = 'conciliada', fatura_id = $2, pagamento_id = NULL, situacao = $3, conferido_por = $4, conferido_em = now() WHERE id = $1`,
+        [id, f.id, `fatura nº ${f.numero ?? '—'} · ${f.nome}${f.status === 'aberta' ? ' (baixada aqui)' : ''}`.slice(0, 200), u.nome]);
+      return { ok: true, faturaBaixada: f.status === 'aberta' };
+    }
     const pagamentoId = dto.pagamentoId ?? l.pagamento_id;
     if (pagamentoId) {
       const [p] = await this.ds.query(`SELECT p.id, p.comprovante, p.estadia_id FROM estadia_pagamentos p WHERE p.id = $1 AND p.empresa_id = $2`, [pagamentoId, u.empresaId]);
@@ -339,14 +424,14 @@ export class ConciliacaoService {
 
   async ignorar(u: UsuarioToken, id: string, dto: IgnorarDto) {
     await this.linha(u, id);
-    await this.ds.query(`UPDATE conciliacao_linhas SET status = 'ignorada', pagamento_id = NULL, observacao = $2, conferido_por = $3, conferido_em = now() WHERE id = $1`,
+    await this.ds.query(`UPDATE conciliacao_linhas SET status = 'ignorada', pagamento_id = NULL, fatura_id = NULL, observacao = $2, conferido_por = $3, conferido_em = now() WHERE id = $1`,
       [id, dto.motivo.trim(), u.nome]);
     return { ok: true };
   }
 
   async desfazer(u: UsuarioToken, id: string) {
     await this.linha(u, id);
-    await this.ds.query(`UPDATE conciliacao_linhas SET status = 'pendente', situacao = NULL, pagamento_id = NULL, deposito_de = NULL, observacao = NULL,
+    await this.ds.query(`UPDATE conciliacao_linhas SET status = 'pendente', situacao = NULL, pagamento_id = NULL, fatura_id = NULL, deposito_de = NULL, observacao = NULL,
                            conferido_por = NULL, conferido_em = NULL WHERE id = $1`, [id]);
     return { ok: true };
   }
@@ -430,6 +515,12 @@ export class ConciliacaoController {
     return this.service.candidatos(u, id);
   }
 
+  @Get('linhas/:id/faturas')
+  @Requer('caixa.adm')
+  faturas(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.faturasCandidatas(u, id);
+  }
+
   @Post('linhas/:id/confirmar')
   @HttpCode(200)
   @Requer('caixa.adm')
@@ -458,6 +549,6 @@ export class ConciliacaoController {
   }
 }
 
-@Module({ providers: [ConciliacaoService], controllers: [ConciliacaoController] })
+@Module({ imports: [FaturamentoModule], providers: [ConciliacaoService], controllers: [ConciliacaoController] })
 export class ConciliacaoModule {}
 

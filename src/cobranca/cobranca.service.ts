@@ -168,6 +168,69 @@ export class CobrancaService {
     }
   }
 
+  /**
+   * Faturar num clique: junta o que o cliente deve (fora de fatura), faz uma fatura por CNPJ,
+   * gera o boleto/Pix no Asaas (quando ligado), deixa a nota pendente e devolve o texto para mandar.
+   * Quando o Asaas avisar o pagamento, a fatura baixa sozinha (webhook).
+   */
+  async faturarCliente(u: UsuarioToken, clienteId: string, dto: { contas?: string[]; vencimento?: string; cobrar: 'BOLETO' | 'PIX' | 'nao'; nota?: boolean; observacao?: string }) {
+    const [c] = await this.ds.query(`SELECT id, nome, prazo_dias FROM clientes_faturados WHERE id = $1 AND empresa_id = $2`, [clienteId, u.empresaId]);
+    if (!c) throw new NotFoundException('Cliente não encontrado.');
+    const abertas: { id: string; cnpj: string | null }[] = await this.ds.query(
+      `SELECT id, cnpj FROM contas_receber WHERE empresa_id = $1 AND cliente_id = $2 AND status = 'aberta' AND fatura_id IS NULL ${dto.contas?.length ? 'AND id = ANY($3::uuid[])' : ''} ORDER BY criado_em`,
+      dto.contas?.length ? [u.empresaId, clienteId, dto.contas] : [u.empresaId, clienteId]);
+    if (!abertas.length) throw new BadRequestException(`${c.nome} não tem nada em aberto para faturar.`);
+    const vencimento = dto.vencimento ?? somaDias(hojeSP(), Number(c.prazo_dias) > 0 ? Number(c.prazo_dias) : 7);
+    if (vencimento < hojeSP()) throw new BadRequestException('O vencimento não pode ser antes de hoje.');
+    const asaas = dto.cobrar !== 'nao' && (await this.ativa(u.empresaId));
+    // uma fatura por CNPJ (motel e hotel têm nota e boleto separados)
+    const grupos = new Map<string, string[]>();
+    for (const a of abertas) grupos.set(a.cnpj ?? '', [...(grupos.get(a.cnpj ?? '') ?? []), a.id]);
+    const feitas: { id: string; numero: number | null; valor: number; cobranca: { link: string | null; linha: string | null; pix: string | null } | null; aviso: string | null }[] = [];
+    for (const ids of grupos.values()) {
+      const { id } = await this.faturamento.gerarFatura(u, { clienteId, contas: ids, vencimento, observacao: dto.observacao });
+      if (dto.nota) await this.ds.query(`UPDATE faturas SET nota_status = 'pendente' WHERE id = $1`, [id]);
+      const [f] = await this.ds.query(`SELECT numero, valor FROM faturas WHERE id = $1`, [id]);
+      let cobranca: { link: string | null; linha: string | null; pix: string | null } | null = null;
+      let aviso: string | null = null;
+      if (dto.cobrar !== 'nao' && !asaas) aviso = 'Boleto/Pix automático desligado (Asaas). A fatura foi feita; coloque o boleto à mão ou ligue em Ajustes → Cobrança.';
+      if (asaas) {
+        try { const r = await this.gerarFatura(u, id, dto.cobrar as 'BOLETO' | 'PIX'); cobranca = { link: r.link, linha: r.linha, pix: r.pix }; }
+        catch (e) { aviso = `Fatura feita, mas o boleto não saiu: ${e instanceof Error ? e.message : String(e)}`; }
+      }
+      feitas.push({ id, numero: f?.numero ?? null, valor: Number(f?.valor ?? 0), cobranca, aviso });
+    }
+    const envios = await Promise.all(feitas.map((f) => this.envio(u, f.id)));
+    return { ok: true, vencimento, faturas: feitas.map((f, i) => ({ ...f, envio: envios[i] })) };
+  }
+
+  /** texto pronto para mandar a fatura por WhatsApp ou e-mail */
+  async envio(u: UsuarioToken, faturaId: string) {
+    const [f] = await this.ds.query(
+      `SELECT f.*, c.nome, c.contato, c.telefone, c.email, e.nome AS empresa FROM faturas f JOIN clientes_faturados c ON c.id = f.cliente_id JOIN empresas e ON e.id = f.empresa_id
+        WHERE f.id = $1 AND f.empresa_id = $2`, [faturaId, u.empresaId]);
+    if (!f) throw new NotFoundException('Fatura não encontrada.');
+    const cob = await this.daFatura(u, faturaId);
+    const valor = Number(f.valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    const venc = dia(f.vencimento).split('-').reverse().join('/');
+    const linhasTexto = [
+      `Olá${f.contato ? `, ${String(f.contato).split(' ')[0]}` : ''}! Segue a fatura nº ${f.numero ?? ''} de ${f.empresa}.`,
+      `Valor: ${valor} · vencimento ${venc}.`,
+      cob?.link ? `Boleto / pagamento: ${cob.link}` : f.boleto_link ? `Boleto: ${f.boleto_link}` : '',
+      cob?.linha || f.boleto_linha ? `Linha digitável: ${cob?.linha ?? f.boleto_linha}` : '',
+      cob?.pix ? `Pix copia e cola: ${cob.pix}` : '',
+      f.nota_numero ? `Nota fiscal nº ${f.nota_numero}.` : '',
+      'Qualquer dúvida, estamos à disposição. Obrigado!',
+    ].filter(Boolean);
+    const texto = linhasTexto.join('\n');
+    const fone = soDigitos(f.telefone);
+    return {
+      texto, telefone: f.telefone ?? null, email: f.email ?? null,
+      whatsapp: fone.length >= 10 ? `https://wa.me/${fone.length <= 11 ? `55${fone}` : fone}?text=${encodeURIComponent(texto)}` : null,
+      mailto: f.email ? `mailto:${f.email}?subject=${encodeURIComponent(`Fatura nº ${f.numero ?? ''} · ${f.empresa}`)}&body=${encodeURIComponent(texto)}` : null,
+    };
+  }
+
   /** cobrança atual da fatura (para a tela e a impressão) */
   async daFatura(u: UsuarioToken, faturaId: string) {
     const [c] = await this.ds.query(

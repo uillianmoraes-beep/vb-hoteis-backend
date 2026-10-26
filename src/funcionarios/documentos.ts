@@ -18,7 +18,11 @@ export const TIPOS_DOCUMENTO = {
   rg: 'RG', cpf: 'CPF', ctps: 'Carteira de trabalho (CTPS)', contrato: 'Contrato de trabalho', aso: 'Exame médico (ASO)', atestado: 'Atestado médico',
   residencia: 'Comprovante de residência', titulo: 'Título de eleitor', reservista: 'Reservista', cnh: 'CNH',
   certidao: 'Certidão (nascimento/casamento)', filhos: 'Documentos dos filhos', escolaridade: 'Escolaridade/cursos',
-  advertencia: 'Advertência/suspensão', ferias: 'Aviso/recibo de férias', holerite: 'Holerite / recibo de pagamento', rescisao: 'Rescisão', outro: 'Outro',
+  advertencia: 'Advertência/suspensão', ferias: 'Aviso/recibo de férias', holerite: 'Holerite / recibo de pagamento', rescisao: 'Rescisão',
+  pis: 'PIS / NIS', registro: 'Ficha de registro do empregado', vt: 'Termo do vale-transporte (opção ou recusa)', lgpd: 'Termo de uso de dados (LGPD)',
+  salario_familia: 'Termo do salário-família', dependentes_ir: 'Declaração de dependentes (IR)', compensacao: 'Acordo de compensação / banco de horas',
+  ficha_epi: 'Ficha de EPI assinada', ponto: 'Espelho de ponto assinado', ppp: 'PPP (perfil profissiográfico)', aviso_previo: 'Aviso prévio / pedido de demissão',
+  trct: 'TRCT (termo de rescisão)', fgts: 'Guia / extrato do FGTS', seguro_desemprego: 'Guias do seguro-desemprego', outro: 'Outro',
 } as const;
 const TIPOS_ARQUIVO: Record<string, string> = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png' };
 const MAX_BYTES = 8_000_000;

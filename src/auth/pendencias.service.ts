@@ -118,6 +118,19 @@ export class PendenciasService {
       } catch { /* tabelas novas ainda não criadas */ }
     }
 
+    if (pode('uniformes.gerenciar')) {
+      // uniformes e EPI: troca vencida, estoque abaixo do mínimo, CA do EPI vencido
+      try {
+        const w = await this.ds.query(
+          `SELECT (SELECT count(*) FROM uniforme_entregas WHERE empresa_id = $1 AND devolvido_em IS NULL AND troca_prevista < ${HOJE})::int AS trocas,
+                  (SELECT count(*) FROM uniforme_itens WHERE empresa_id = $1 AND ativo AND estoque_minimo > 0 AND quantidade < estoque_minimo)::int AS minimo,
+                  (SELECT count(*) FROM uniforme_itens WHERE empresa_id = $1 AND ativo AND ca_validade < ${HOJE})::int AS ca`, [u.empresaId]);
+        add({ chave: 'uniformes-troca', nivel: 'info', titulo: 'Uniforme/EPI na hora de trocar', link: '/uniformes?aba=entregas' }, { n: w[0]?.trocas ?? 0, nomes: '' });
+        add({ chave: 'uniformes-minimo', nivel: 'aviso', titulo: 'Uniforme/EPI abaixo do mínimo', detalhe: 'compre mais', link: '/uniformes' }, { n: w[0]?.minimo ?? 0, nomes: '' });
+        add({ chave: 'uniformes-ca', nivel: 'aviso', titulo: 'EPI com CA vencido', detalhe: 'troque por um com certificado válido', link: '/uniformes' }, { n: w[0]?.ca ?? 0, nomes: '' });
+      } catch { /* tabelas novas ainda não criadas */ }
+    }
+
     if (pode('caixa.adm', 'funcionarios.gerenciar')) {
       // do dia 15 em diante: o que o contador ainda não entregou do mês passado
       try {

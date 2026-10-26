@@ -46,6 +46,11 @@ export class BaixaDto {
   @IsOptional() @Matches(DATA) pagoEm?: string;
 }
 
+export class NotaFaturaDto {
+  @IsIn(['pendente', 'emitida', 'nao']) status!: 'pendente' | 'emitida' | 'nao';
+  @IsOptional() @IsString() @MaxLength(30) numero?: string;
+}
+
 export class CreditoDto {
   @IsIn(['entrada', 'devolucao']) tipo!: 'entrada' | 'devolucao';
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) @Max(10_000_000) valor!: number;

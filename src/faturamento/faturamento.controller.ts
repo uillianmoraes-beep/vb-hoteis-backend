@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { IsUUID } from 'class-validator';
 import { FaturamentoService } from './faturamento.service';
-import { BaixaDto, BoletoDto, ClienteFaturadoDto, CreditoDto, GerarFaturaDto, LancamentoManualDto } from './faturamento.dto';
+import { BaixaDto, BoletoDto, ClienteFaturadoDto, CreditoDto, GerarFaturaDto, LancamentoManualDto, NotaFaturaDto } from './faturamento.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
@@ -65,6 +65,12 @@ export class FaturamentoController {
 
   @Post('faturas/:id/baixar') @HttpCode(200) @Requer('faturamento.gerenciar')
   baixarFatura(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: BaixaDto) { return this.service.baixarFatura(u, id, dto); }
+
+  @Post('faturas/:id/nota') @HttpCode(200) @Requer('faturamento.gerenciar', 'notas.gerenciar')
+  nota(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: NotaFaturaDto) { return this.service.notaFatura(u, id, dto); }
+
+  @Post('faturas/:id/enviada') @HttpCode(200) @Requer('faturamento.gerenciar')
+  enviada(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.marcarEnviada(u, id); }
 
   @Post('faturas/:id/cancelar') @HttpCode(200) @Requer('faturamento.gerenciar')
   cancelarFatura(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.cancelarFatura(u, id); }

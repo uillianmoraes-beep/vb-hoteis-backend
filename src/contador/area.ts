@@ -128,7 +128,7 @@ export class AreaContadorService {
     const entre = (col: string) => `${col} >= ($2::date)::timestamp ${tz} AND ${col} < ($3::date)::timestamp ${tz}`;
     const p = [u.empresaId, ini, fim];
     const q = (sql: string) => this.ds.query(sql, p).catch(() => []);
-    const [emitidas, partes, pendentes, desfeitas, entradas, estornos] = await Promise.all([
+    const [emitidas, partes, pendentesContas, desfeitas, entradas, estornos, fatEmitidas, fatPendentes] = await Promise.all([
       q(`SELECT e.id, e.numero AS uso, e.nota_numero AS nota, e.nota_emitida_em AS em, e.nota_emitida_por AS por, e.valor_total AS valor, e.nota_documento AS documento, e.nota_nome AS nome, a.nome AS ambiente, a.cnpj
            FROM estadias e JOIN ambientes a ON a.id = e.ambiente_id WHERE e.empresa_id = $1 AND e.nota_status = 'emitida' AND ${entre('e.nota_emitida_em')} AND NOT EXISTS (SELECT 1 FROM estadia_notas n WHERE n.estadia_id = e.id) ORDER BY e.nota_emitida_em`),
       q(`SELECT n.id, e.numero AS uso, n.numero AS nota, n.emitida_em AS em, n.emitida_por AS por, n.valor, n.documento, n.nome, n.parte, a.nome AS ambiente, a.cnpj
@@ -141,10 +141,20 @@ export class AreaContadorService {
            FROM contas_pagar WHERE empresa_id = $1 AND chave_nfe IS NOT NULL AND status <> 'cancelada' AND ${entre('criado_em')} GROUP BY chave_nfe ORDER BY min(criado_em)`),
       q(`SELECT i.descricao, i.quantidade, i.total, i.motivo_estorno AS motivo, i.estornado_por AS por, e.numero AS uso, i.criado_em AS em FROM estadia_itens i JOIN estadias e ON e.id = i.estadia_id
           WHERE i.empresa_id = $1 AND i.status = 'estornado' AND ${entre('i.criado_em')} ORDER BY i.criado_em`),
+      // faturas de empresa: a nota sai pela fatura (uma nota para o mês do cliente)
+      q(`SELECT f.id, f.numero, f.nota_numero AS nota, f.nota_emitida_em AS em, f.nota_emitida_por AS por, f.valor, c.documento, c.nome, f.cnpj
+           FROM faturas f JOIN clientes_faturados c ON c.id = f.cliente_id WHERE f.empresa_id = $1 AND f.nota_status = 'emitida' AND f.status <> 'cancelada' AND ${entre('f.nota_emitida_em')} ORDER BY f.nota_emitida_em`),
+      q(`SELECT f.id, f.numero, f.emissao AS em, f.valor, c.documento, c.nome FROM faturas f JOIN clientes_faturados c ON c.id = f.cliente_id
+          WHERE f.empresa_id = $1 AND f.nota_status = 'pendente' AND f.status <> 'cancelada' AND f.emissao >= $2::date AND f.emissao < $3::date ORDER BY f.emissao`),
     ]);
+    const pendentes = [
+      ...pendentesContas,
+      ...fatPendentes.map((x: Record<string, unknown>) => ({ id: x.id, uso: `fatura ${x.numero ?? ''}`.trim(), em: x.em, valor: x.valor, documento: x.documento, nome: x.nome, ambiente: 'Faturamento' })),
+    ];
     const n = (v: unknown) => Number(v ?? 0);
     const saidas = [
       ...emitidas.map((x: Record<string, unknown>) => ({ tipo: 'conta', nota: x.nota, em: x.em, por: x.por, valor: n(x.valor), documento: x.documento, nome: x.nome, ambiente: x.ambiente, cnpj: x.cnpj, uso: x.uso })),
+      ...fatEmitidas.map((x: Record<string, unknown>) => ({ tipo: 'fatura', nota: x.nota, em: x.em, por: x.por, valor: n(x.valor), documento: x.documento, nome: x.nome, ambiente: 'Faturamento', cnpj: x.cnpj, uso: `fatura ${x.numero ?? ''}`.trim() })),
       ...partes.map((x: Record<string, unknown>) => ({ tipo: x.parte === 'consumo' ? 'consumo' : 'parte', nota: x.nota, em: x.em, por: x.por, valor: n(x.valor), documento: x.documento, nome: x.nome, ambiente: x.ambiente, cnpj: x.cnpj, uso: x.uso })),
     ].sort((a, b) => String(a.em).localeCompare(String(b.em)));
     return {
