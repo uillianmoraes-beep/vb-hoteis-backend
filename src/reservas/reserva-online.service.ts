@@ -5,6 +5,7 @@ import { UsuarioToken } from '../common/permissoes';
 import { ConfigReservaOnlineDto, ReservaPublicaDto } from './reservas.dto';
 import { CobrancaService } from '../cobranca/cobranca.service';
 import { enviarParaLocal } from '../servidor-local/ponte.core';
+import { conferirCpfLivre } from './cpf-unico';
 
 interface Q { query: (sql: string, params?: unknown[]) => Promise<any> }
 
@@ -216,6 +217,7 @@ export class ReservaOnlineService {
       const cpf = (dto.documento ?? '').replace(/\D/g, '');
       if (cpf.length !== 11 && cpf.length !== 14) throw new BadRequestException('Informe o CPF para gerar o Pix do sinal.');
     }
+    await conferirCpfLivre(this.ds, a.empresa_id, dto.documento, dto.chegada, dto.saida);
     // com sinal, a reserva só confirma quando o Pix for pago
     const status = sinalPct > 0 ? 'pendente' : cfg.confirmacao === 'automatica' ? 'confirmada' : 'pendente';
     const r = await this.ds.transaction(async (m) => {

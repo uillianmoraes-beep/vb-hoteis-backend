@@ -5,6 +5,7 @@ import { CancelarReservaDto, CheckinReservaDto, ReservaDto } from './reservas.dt
 import { UsuarioToken } from '../common/permissoes';
 import { EstadiasService } from '../estadias/estadias.service';
 import { quartosColetivos, ReservasGrupo } from './reservas-grupo';
+import { conferirCpfLivre } from './cpf-unico';
 
 const FUSO = 'America/Sao_Paulo';
 const hojeSP = () => new Date().toLocaleDateString('sv-SE', { timeZone: FUSO });
@@ -90,6 +91,7 @@ export class ReservasService {
     if (choque) {
       throw new BadRequestException(`O quarto ${q.codigo} já tem a reserva nº ${choque.numero ?? '—'} (${choque.hospede}) de ${br(dia(choque.chegada))} a ${br(dia(choque.saida))}.`);
     }
+    await conferirCpfLivre(this.ds, u.empresaId, dto.documento, dto.chegada, dto.saida, ignorarId);
     const n = noites(dto.chegada, dto.saida);
     const total = dto.valorTotal ?? (dto.valorDiaria ?? 0) * n;
     if ((dto.sinal ?? 0) > 0 && !dto.sinalForma) throw new BadRequestException('Informe como o sinal foi pago.');
