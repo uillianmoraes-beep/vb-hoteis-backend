@@ -11,6 +11,19 @@ export class NovoPedidoDto {
   @IsOptional() @IsString() @MaxLength(300) observacao?: string;
 }
 
+/** pedido lançado pela recepção (hóspede ligou) */
+export class PedidoRecepcaoDto {
+  @IsUUID() unidadeId!: string;
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(30) @ValidateNested({ each: true }) @Type(() => ItemPedidoDto) itens!: ItemPedidoDto[];
+  @IsOptional() @IsString() @MaxLength(300) observacao?: string;
+  /** já aceita e lança na conta */
+  @IsOptional() @IsBoolean() aceitar?: boolean;
+}
+
+export class SaiuPedidoDto {
+  @IsString() @MaxLength(120) levadoPor!: string;
+}
+
 export class RecusarPedidoDto {
   @IsOptional() @IsString() @MaxLength(200) motivo?: string;
 }

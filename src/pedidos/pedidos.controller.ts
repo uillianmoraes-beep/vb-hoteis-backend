@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { PedidosService } from './pedidos.service';
-import { CardapioDto, FrigobarCategoriaDto, NovoPedidoDto, RecusarPedidoDto } from './pedidos.dto';
+import { CardapioDto, FrigobarCategoriaDto, NovoPedidoDto, PedidoRecepcaoDto, RecusarPedidoDto, SaiuPedidoDto } from './pedidos.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { Publico } from '../common/decorators/publico.decorator';
@@ -22,10 +22,25 @@ export class PedidosController {
   @Get('pedidos/historico') @Requer('estadias.operar', 'produtos.gerenciar')
   historico(@Usuario() u: UsuarioToken, @Query('dias') dias?: string) { return this.service.historico(u, Number(dias) || 7); }
 
+  @Get('pedidos/quadro') @Requer('painel.ver', 'estadias.operar', 'estadias.entrada', 'cozinha.ver')
+  quadro(@Usuario() u: UsuarioToken) { return this.service.quadro(u); }
+
+  @Get('pedidos/apoio') @Requer('estadias.operar', 'estadias.entrada', 'cozinha.ver')
+  apoio(@Usuario() u: UsuarioToken) { return this.service.apoio(u); }
+
+  @Get('pedidos/relatorio') @Requer('estadias.operar', 'produtos.gerenciar', 'relatorios.ver')
+  relatorio(@Usuario() u: UsuarioToken, @Query('dias') dias?: string) { return this.service.relatorio(u, Number(dias) || 30); }
+
+  @Post('pedidos/recepcao') @Requer('estadias.operar')
+  pelaRecepcao(@Usuario() u: UsuarioToken, @Body() dto: PedidoRecepcaoDto) { return this.service.criarPelaRecepcao(u, dto); }
+
+  @Post('pedidos/:id/saiu') @HttpCode(200) @Requer('estadias.operar', 'estadias.entrada', 'cozinha.ver')
+  saiu(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: SaiuPedidoDto) { return this.service.saiu(u, id, dto.levadoPor); }
+
   @Post('pedidos/:id/aceitar') @HttpCode(200) @Requer('estadias.operar')
   aceitar(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.aceitar(u, id); }
 
-  @Post('pedidos/:id/entregue') @HttpCode(200) @Requer('estadias.operar', 'estadias.entrada')
+  @Post('pedidos/:id/entregue') @HttpCode(200) @Requer('estadias.operar', 'estadias.entrada', 'cozinha.ver')
   entregue(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.entregue(u, id); }
 
   @Post('pedidos/:id/recusar') @HttpCode(200) @Requer('estadias.operar')

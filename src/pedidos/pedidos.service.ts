@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { NovoPedidoDto, RecusarPedidoDto } from './pedidos.dto';
+import { NovoPedidoDto, PedidoRecepcaoDto, RecusarPedidoDto } from './pedidos.dto';
 import { UsuarioToken } from '../common/permissoes';
 import { ImpressaoService } from '../impressao/impressao.service';
 import { enviarParaLocal } from '../servidor-local/ponte.core';
@@ -12,6 +12,8 @@ const fmt = (p: Record<string, unknown>) => ({
   id: p.id, unidadeId: p.unidade_id, unidade: p.codigo ?? null, ambienteId: p.ambiente_id ?? null, estadiaId: p.estadia_id, itens: p.itens as ItemPedido[],
   total: Number(p.total), observacao: p.observacao, status: p.status, motivo: p.motivo, aceitoPor: p.aceito_por, aceitoEm: p.aceito_em,
   entreguePor: p.entregue_por, entregueEm: p.entregue_em, criadoEm: p.criado_em,
+  origem: p.origem ?? 'qr', levadoPor: p.levado_por ?? null, saiuEm: p.saiu_em ?? null, lancadoPor: p.lancado_por ?? null,
+  minutos: p.entregue_em ? Math.round((new Date(p.entregue_em as string).getTime() - new Date(p.criado_em as string).getTime()) / 60000) : null,
 });
 
 @Injectable()
@@ -87,7 +89,7 @@ export class PedidosService {
     if (ambienteId && /^[0-9a-f-]{36}$/i.test(ambienteId)) { params.push(ambienteId); f = ` AND un.ambiente_id = $2`; }
     const l = await this.ds.query(
       `SELECT p.*, un.codigo, un.ambiente_id FROM pedidos p JOIN unidades un ON un.id = p.unidade_id
-        WHERE p.empresa_id = $1 AND p.status IN ('novo','aceito') AND p.criado_em > now() - interval '1 day'${f} ORDER BY p.criado_em`, params);
+        WHERE p.empresa_id = $1 AND p.status IN ('novo','aceito','saiu') AND p.criado_em > now() - interval '1 day'${f} ORDER BY p.criado_em`, params);
     return l.map(fmt);
   }
 
@@ -141,9 +143,105 @@ export class PedidosService {
 
   async entregue(u: UsuarioToken, id: string) {
     const p = await this.pedido(u, id);
-    if (p.status !== 'aceito') throw new BadRequestException('Aceite o pedido antes de marcar como entregue.');
-    await this.ds.query(`UPDATE pedidos SET status = 'entregue', entregue_por = $2, entregue_em = now() WHERE id = $1`, [id, u.nome]);
+    if (p.status !== 'aceito' && p.status !== 'saiu') throw new BadRequestException('Aceite o pedido antes de marcar como entregue.');
+    await this.ds.query(`UPDATE pedidos SET status = 'entregue', entregue_por = $2, entregue_em = now(), levado_por = COALESCE(levado_por, $2) WHERE id = $1`, [id, u.nome]);
     return { ok: true };
+  }
+
+  /** saiu da cozinha/recepção para o quarto: quem está levando */
+  async saiu(u: UsuarioToken, id: string, levadoPor: string) {
+    const p = await this.pedido(u, id);
+    if (p.status !== 'aceito') throw new BadRequestException(p.status === 'novo' ? 'Aceite o pedido antes.' : 'Este pedido já saiu ou foi entregue.');
+    await this.ds.query(`UPDATE pedidos SET status = 'saiu', levado_por = $2, saiu_em = now() WHERE id = $1`, [id, levadoPor.trim().slice(0, 120) || u.nome]);
+    return { ok: true };
+  }
+
+  /** a recepção lança o pedido (hóspede ligou ou pediu no balcão) */
+  async criarPelaRecepcao(u: UsuarioToken, dto: PedidoRecepcaoDto) {
+    const [un] = await this.ds.query(
+      `SELECT un.id, un.codigo, (SELECT es.id FROM estadias es WHERE es.unidade_id = un.id AND es.status = 'aberta' ORDER BY es.entrada_em DESC LIMIT 1) AS estadia_id
+         FROM unidades un WHERE un.id = $1 AND un.empresa_id = $2`, [dto.unidadeId, u.empresaId]);
+    if (!un) throw new NotFoundException('Quarto não encontrado.');
+    if (!un.estadia_id) throw new BadRequestException(`O ${un.codigo} não está ocupado agora.`);
+    const ids = [...new Set(dto.itens.map((i) => i.produtoId))];
+    const prods = await this.ds.query(`SELECT id, nome, preco FROM produtos WHERE empresa_id = $1 AND ativo AND id = ANY($2::uuid[])`, [u.empresaId, ids]);
+    const mapa = new Map<string, Record<string, unknown>>(prods.map((p: Record<string, unknown>) => [String(p.id), p]));
+    const itens: ItemPedido[] = [];
+    for (const i of dto.itens) {
+      const p = mapa.get(i.produtoId);
+      if (!p) throw new BadRequestException('Um dos itens não está mais disponível.');
+      const ja = itens.find((x) => x.produtoId === i.produtoId);
+      if (ja) ja.quantidade += i.quantidade;
+      else itens.push({ produtoId: i.produtoId, nome: String(p.nome), quantidade: i.quantidade, preco: Number(p.preco) });
+    }
+    const total = Math.round(itens.reduce((s, i) => s + i.preco * i.quantidade * 100, 0)) / 100;
+    const [novo] = await this.ds.query(
+      `INSERT INTO pedidos (empresa_id, unidade_id, estadia_id, itens, total, observacao, origem, lancado_por) VALUES ($1,$2,$3,$4::jsonb,$5,$6,'recepcao',$7) RETURNING id`,
+      [u.empresaId, un.id, un.estadia_id, JSON.stringify(itens), total.toFixed(2), dto.observacao?.trim() || null, u.nome]);
+    if (dto.aceitar) await this.aceitar(u, novo.id);
+    return { ok: true, id: novo.id as string };
+  }
+
+  /** quartos ocupados (para lançar pedido pela recepção) e quem pode levar */
+  async apoio(u: UsuarioToken) {
+    const quartos = await this.ds.query(
+      `SELECT un.id, un.codigo, a.nome AS ambiente FROM unidades un JOIN ambientes a ON a.id = un.ambiente_id
+        WHERE un.empresa_id = $1 AND un.ativo AND EXISTS (SELECT 1 FROM estadias es WHERE es.unidade_id = un.id AND es.status = 'aberta')
+        ORDER BY a.ordem, a.nome, un.ordem, un.codigo`, [u.empresaId]);
+    const equipe = await this.ds.query(`SELECT nome FROM funcionarios WHERE empresa_id = $1 AND ativo ORDER BY nome`, [u.empresaId]);
+    return { quartos, equipe: equipe.map((f: { nome: string }) => f.nome) };
+  }
+
+  /** o quadro do serviço de quartos: em aberto + o que fechou hoje */
+  async quadro(u: UsuarioToken) {
+    const abertos = await this.ds.query(
+      `SELECT p.*, un.codigo, un.ambiente_id FROM pedidos p JOIN unidades un ON un.id = p.unidade_id
+        WHERE p.empresa_id = $1 AND p.status IN ('novo','aceito','saiu') AND p.criado_em > now() - interval '2 days' ORDER BY p.criado_em`, [u.empresaId]);
+    const hoje = await this.ds.query(
+      `SELECT p.*, un.codigo, un.ambiente_id FROM pedidos p JOIN unidades un ON un.id = p.unidade_id
+        WHERE p.empresa_id = $1 AND p.status IN ('entregue','recusado')
+          AND (p.criado_em AT TIME ZONE 'America/Sao_Paulo')::date = (now() AT TIME ZONE 'America/Sao_Paulo')::date ORDER BY p.criado_em DESC`, [u.empresaId]);
+    const ent = hoje.filter((p: Record<string, unknown>) => p.status === 'entregue').map(fmt);
+    const tempos = ent.map((p: { minutos: number | null }) => p.minutos).filter((m: number | null): m is number => m !== null);
+    return {
+      agora: new Date().toISOString(), abertos: abertos.map(fmt), hoje: hoje.map(fmt),
+      resumo: {
+        novos: abertos.filter((p: Record<string, unknown>) => p.status === 'novo').length, preparando: abertos.filter((p: Record<string, unknown>) => p.status === 'aceito').length,
+        aCaminho: abertos.filter((p: Record<string, unknown>) => p.status === 'saiu').length, entreguesHoje: ent.length,
+        recusadosHoje: hoje.length - ent.length, tempoMedio: tempos.length ? Math.round(tempos.reduce((s: number, m: number) => s + m, 0) / tempos.length) : null,
+        vendidoHoje: Math.round(ent.reduce((s: number, p: { total: number }) => s + p.total, 0) * 100) / 100,
+      },
+    };
+  }
+
+  /** relatório: tempo de atendimento, quem levou, o que mais pedem */
+  async relatorio(u: UsuarioToken, dias: number) {
+    const d = String(Math.min(180, Math.max(1, dias)));
+    const [g] = await this.ds.query(
+      `SELECT count(*)::int AS pedidos, count(*) FILTER (WHERE status = 'entregue')::int AS entregues, count(*) FILTER (WHERE status = 'recusado')::int AS recusados,
+              count(*) FILTER (WHERE origem = 'recepcao')::int AS pela_recepcao, COALESCE(sum(total) FILTER (WHERE status = 'entregue'), 0) AS vendido,
+              round(avg(extract(epoch FROM entregue_em - criado_em) / 60) FILTER (WHERE status = 'entregue'))::int AS tempo_medio,
+              round(avg(extract(epoch FROM aceito_em - criado_em) / 60) FILTER (WHERE aceito_em IS NOT NULL))::int AS tempo_aceite
+         FROM pedidos WHERE empresa_id = $1 AND criado_em > now() - ($2 || ' days')::interval`, [u.empresaId, d]);
+    const porPessoa = await this.ds.query(
+      `SELECT COALESCE(levado_por, entregue_por) AS nome, count(*)::int AS entregas, round(avg(extract(epoch FROM entregue_em - criado_em) / 60))::int AS tempo_medio
+         FROM pedidos WHERE empresa_id = $1 AND status = 'entregue' AND criado_em > now() - ($2 || ' days')::interval GROUP BY 1 ORDER BY 2 DESC`, [u.empresaId, d]);
+    const itens = await this.ds.query(
+      `SELECT i->>'nome' AS nome, sum((i->>'quantidade')::int)::int AS quantidade, sum((i->>'quantidade')::int * (i->>'preco')::numeric) AS valor
+         FROM pedidos p, jsonb_array_elements(p.itens) i WHERE p.empresa_id = $1 AND p.status = 'entregue' AND p.criado_em > now() - ($2 || ' days')::interval
+        GROUP BY 1 ORDER BY 2 DESC LIMIT 20`, [u.empresaId, d]);
+    const porHora = await this.ds.query(
+      `SELECT extract(hour FROM criado_em AT TIME ZONE 'America/Sao_Paulo')::int AS hora, count(*)::int AS pedidos
+         FROM pedidos WHERE empresa_id = $1 AND criado_em > now() - ($2 || ' days')::interval GROUP BY 1 ORDER BY 1`, [u.empresaId, d]);
+    return {
+      dias: Number(d),
+      geral: { pedidos: Number(g?.pedidos ?? 0), entregues: Number(g?.entregues ?? 0), recusados: Number(g?.recusados ?? 0), pelaRecepcao: Number(g?.pela_recepcao ?? 0),
+        vendido: Number(g?.vendido ?? 0), tempoMedio: g?.tempo_medio === null || g?.tempo_medio === undefined ? null : Number(g.tempo_medio),
+        tempoAceite: g?.tempo_aceite === null || g?.tempo_aceite === undefined ? null : Number(g.tempo_aceite) },
+      porPessoa: porPessoa.map((x: Record<string, unknown>) => ({ nome: x.nome ?? '—', entregas: Number(x.entregas), tempoMedio: x.tempo_medio === null ? null : Number(x.tempo_medio) })),
+      itens: itens.map((x: Record<string, unknown>) => ({ nome: x.nome, quantidade: Number(x.quantidade), valor: Number(x.valor) })),
+      porHora: porHora.map((x: Record<string, unknown>) => ({ hora: Number(x.hora), pedidos: Number(x.pedidos) })),
+    };
   }
 
   async recusar(u: UsuarioToken, id: string, dto: RecusarPedidoDto) {
