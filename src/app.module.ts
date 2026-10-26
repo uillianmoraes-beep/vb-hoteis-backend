@@ -34,6 +34,8 @@ import { AssistenteModule } from './assistente/assistente';
 import { EventosModule } from './eventos/eventos';
 import { TotemModule } from './totem/totem';
 import { AvisosModule } from './avisos/avisos';
+import { WhatsappModule } from './avisos/whatsapp';
+import { ConcorrenciaModule } from './tarifas/concorrencia';
 import { ContratosModule } from './contratos/contratos';
 import { BalcaoModule } from './balcao/balcao.module';
 import { DespesasModule } from './despesas/despesas.module';
@@ -101,6 +103,8 @@ import { ManualModule } from './manual/manual.module';
     EventosModule,
     TotemModule,
     AvisosModule,
+    WhatsappModule,
+    ConcorrenciaModule,
     UniformesModule,
     ContratosModule,
     BalcaoModule,
