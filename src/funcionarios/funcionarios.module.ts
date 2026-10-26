@@ -8,11 +8,12 @@ import { AniversariantesController, AniversariantesService } from './aniversaria
 import { ContratoController, ContratoService } from './contrato';
 import { DocumentosController, DocumentosService } from './documentos';
 import { FeriasController, FeriasService } from './ferias';
+import { EscalaController, EscalaService } from './escala';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Funcionario, FuncionarioLancamento, Revisao])],
-  providers: [FuncionariosService, RefeicoesService, AniversariantesService, ContratoService, DocumentosService, FeriasService],
-  exports: [ContratoService, FeriasService],
-  controllers: [RefeicoesController, AniversariantesController, ContratoController, DocumentosController, FeriasController, FuncionariosController],
+  providers: [FuncionariosService, RefeicoesService, AniversariantesService, ContratoService, DocumentosService, FeriasService, EscalaService],
+  exports: [ContratoService, FeriasService, EscalaService],
+  controllers: [RefeicoesController, AniversariantesController, ContratoController, DocumentosController, FeriasController, EscalaController, FuncionariosController],
 })
 export class FuncionariosModule {}

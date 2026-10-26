@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { UsuarioToken, temPermissao } from '../common/permissoes';
 import { FeriasService } from '../funcionarios/ferias';
+import { EscalaService } from '../funcionarios/escala';
 
 export interface Pendencia {
   chave: string;
@@ -75,6 +76,15 @@ export class PendenciasService {
         const nomes = await new FeriasService(this.ds).alertas(u.empresaId);
         add({ chave: 'ferias-vencendo', nivel: 'alerta', titulo: 'Férias vencidas ou perto de vencer', detalhe: 'programe para não pagar em dobro', link: '/rh' },
           { n: nomes.length, nomes: nomes.slice(0, 5).join(', ') });
+      } catch { /* tabelas novas ainda não criadas */ }
+    }
+
+    if (pode('funcionarios.gerenciar')) {
+      // de quinta a domingo: quem costuma estar na escala e ainda não tem a da semana que vem
+      try {
+        const r = await new EscalaService(this.ds).semEscalaProximaSemana(u.empresaId);
+        add({ chave: 'escala-proxima-semana', nivel: 'aviso', titulo: 'Escala da semana que vem sem montar', detalhe: `a partir de ${r.segunda}`, link: '/escala' },
+          { n: r.nomes.length, nomes: r.nomes.slice(0, 5).join(', ') });
       } catch { /* tabelas novas ainda não criadas */ }
     }
 
