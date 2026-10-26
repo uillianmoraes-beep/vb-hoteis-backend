@@ -6,7 +6,7 @@ export class Promocoes1761250000000 implements MigrationInterface {
 
   public async up(q: QueryRunner): Promise<void> {
     await q.query(`
-      CREATE TABLE IF NOT EXISTS promocoes (
+      CREATE TABLE IF NOT EXISTS promocoes_reserva (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
         empresa_id uuid NOT NULL,
         tipo varchar(10) NOT NULL,
@@ -26,7 +26,7 @@ export class Promocoes1761250000000 implements MigrationInterface {
         criado_por varchar(120),
         criado_em timestamptz NOT NULL DEFAULT now()
       )`);
-    await q.query(`CREATE INDEX IF NOT EXISTS idx_promocoes ON promocoes (empresa_id, tipo)`);
+    await q.query(`CREATE INDEX IF NOT EXISTS idx_promocoes_reserva ON promocoes_reserva (empresa_id, tipo)`);
     await q.query(`
       CREATE TABLE IF NOT EXISTS reservas_rascunhos (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -59,6 +59,6 @@ export class Promocoes1761250000000 implements MigrationInterface {
     await q.query(`ALTER TABLE empresas DROP COLUMN IF EXISTS fidelidade`);
     for (const c of ['desconto', 'pacote_nome', 'pacote_id', 'cupom_codigo']) await q.query(`ALTER TABLE reservas DROP COLUMN IF EXISTS ${c}`);
     await q.query(`DROP TABLE IF EXISTS reservas_rascunhos`);
-    await q.query(`DROP TABLE IF EXISTS promocoes`);
+    await q.query(`DROP TABLE IF EXISTS promocoes_reserva`);
   }
 }

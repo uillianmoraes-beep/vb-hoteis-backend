@@ -65,7 +65,7 @@ export async function aplicarPromocoes(ds: { query: (sql: string, params?: unkno
   };
   let base = p.total;
   if (p.pacoteId) {
-    const [pk] = await ds.query(`SELECT * FROM promocoes WHERE id = $1 AND empresa_id = $2 AND tipo = 'pacote'`, [p.pacoteId, p.empresaId]);
+    const [pk] = await ds.query(`SELECT * FROM promocoes_reserva WHERE id = $1 AND empresa_id = $2 AND tipo = 'pacote'`, [p.pacoteId, p.empresaId]);
     if (!pk) throw new BadRequestException('Pacote não encontrado.');
     const erro = valida(pk);
     if (erro) throw new BadRequestException(`O pacote ${pk.nome} ${erro}.`);
@@ -78,7 +78,7 @@ export async function aplicarPromocoes(ds: { query: (sql: string, params?: unkno
   }
   const codigo = (p.cupom ?? '').trim().toUpperCase();
   if (codigo) {
-    const [c] = await ds.query(`SELECT * FROM promocoes WHERE empresa_id = $1 AND tipo = 'cupom' AND upper(codigo) = $2`, [p.empresaId, codigo]);
+    const [c] = await ds.query(`SELECT * FROM promocoes_reserva WHERE empresa_id = $1 AND tipo = 'cupom' AND upper(codigo) = $2`, [p.empresaId, codigo]);
     if (!c) throw new BadRequestException('Cupom não encontrado. Confira o código.');
     const erro = valida(c);
     if (erro) throw new BadRequestException(`Este cupom ${erro}.`);
@@ -122,7 +122,7 @@ export class PromocoesService {
   }
 
   async ver(u: UsuarioToken) {
-    const promos = await this.ds.query(`SELECT * FROM promocoes WHERE empresa_id = $1 ORDER BY ativo DESC, tipo, nome`, [u.empresaId]);
+    const promos = await this.ds.query(`SELECT * FROM promocoes_reserva WHERE empresa_id = $1 ORDER BY ativo DESC, tipo, nome`, [u.empresaId]);
     const abandonadas = await this.ds.query(
       `SELECT r.*, c.nome AS categoria, a.nome AS ambiente FROM reservas_rascunhos r LEFT JOIN categorias c ON c.id = r.categoria_id LEFT JOIN ambientes a ON a.id = r.ambiente_id
         WHERE r.empresa_id = $1 AND r.reserva_id IS NULL AND r.atualizado_em > now() - interval '30 days' ORDER BY r.atualizado_em DESC LIMIT 200`, [u.empresaId]);
@@ -150,26 +150,26 @@ export class PromocoesService {
     if (dto.tipo === 'cupom' && (!codigo || codigo.length < 3)) throw new BadRequestException('O cupom precisa de um código (ex.: VERAO10).');
     if (dto.tipo === 'cupom' && !(dto.descontoPct || dto.descontoValor)) throw new BadRequestException('Coloque o desconto do cupom (% ou R$).');
     if (codigo) {
-      const [ja] = await this.ds.query(`SELECT id FROM promocoes WHERE empresa_id = $1 AND tipo = 'cupom' AND upper(codigo) = $2 AND id <> COALESCE($3::uuid, '00000000-0000-0000-0000-000000000000')`, [u.empresaId, codigo, id ?? null]);
+      const [ja] = await this.ds.query(`SELECT id FROM promocoes_reserva WHERE empresa_id = $1 AND tipo = 'cupom' AND upper(codigo) = $2 AND id <> COALESCE($3::uuid, '00000000-0000-0000-0000-000000000000')`, [u.empresaId, codigo, id ?? null]);
       if (ja) throw new BadRequestException(`Já existe o cupom ${codigo}.`);
     }
     const v = [dto.tipo, dto.nome.trim(), codigo, dto.descricao?.trim() || null, dto.descontoPct ?? 0, dto.descontoValor ?? 0, dto.acrescimo ?? 0, dto.minNoites ?? 1,
       dto.validoDe || null, dto.validoAte || null, dto.limiteUsos ?? 0, dto.ambienteId || null, dto.ativo ?? true];
     if (id) {
       const r = linhas(await this.ds.query(
-        `UPDATE promocoes SET tipo=$3, nome=$4, codigo=$5, descricao=$6, desconto_pct=$7, desconto_valor=$8, acrescimo=$9, min_noites=$10, valido_de=$11, valido_ate=$12, limite_usos=$13, ambiente_id=$14, ativo=$15
+        `UPDATE promocoes_reserva SET tipo=$3, nome=$4, codigo=$5, descricao=$6, desconto_pct=$7, desconto_valor=$8, acrescimo=$9, min_noites=$10, valido_de=$11, valido_ate=$12, limite_usos=$13, ambiente_id=$14, ativo=$15
           WHERE id = $1 AND empresa_id = $2 RETURNING id`, [id, u.empresaId, ...v]));
       if (!r.length) throw new NotFoundException('Promoção não encontrada.');
       return { ok: true, id };
     }
     const [r] = await this.ds.query(
-      `INSERT INTO promocoes (empresa_id, tipo, nome, codigo, descricao, desconto_pct, desconto_valor, acrescimo, min_noites, valido_de, valido_ate, limite_usos, ambiente_id, ativo, criado_por)
+      `INSERT INTO promocoes_reserva (empresa_id, tipo, nome, codigo, descricao, desconto_pct, desconto_valor, acrescimo, min_noites, valido_de, valido_ate, limite_usos, ambiente_id, ativo, criado_por)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`, [u.empresaId, ...v, u.nome]);
     return { ok: true, id: r.id };
   }
 
   async desativar(u: UsuarioToken, id: string) {
-    await this.ds.query(`UPDATE promocoes SET ativo = false WHERE id = $1 AND empresa_id = $2`, [id, u.empresaId]);
+    await this.ds.query(`UPDATE promocoes_reserva SET ativo = false WHERE id = $1 AND empresa_id = $2`, [id, u.empresaId]);
     return { ok: true };
   }
 

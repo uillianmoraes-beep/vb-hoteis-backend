@@ -134,10 +134,10 @@ export class ReservaOnlineService {
          FROM categorias c JOIN unidades un ON un.categoria_id = c.id AND un.ativo AND un.ambiente_id = $1
         WHERE c.empresa_id = $2 GROUP BY c.id ORDER BY c.ordem, c.nome`, [a.id, a.empresa_id]);
     const pacotes = await this.ds.query(
-      `SELECT id, nome, descricao, acrescimo, desconto_pct, desconto_valor, min_noites FROM promocoes
+      `SELECT id, nome, descricao, acrescimo, desconto_pct, desconto_valor, min_noites FROM promocoes_reserva
         WHERE empresa_id = $1 AND tipo = 'pacote' AND ativo AND (ambiente_id IS NULL OR ambiente_id = $2) AND (valido_ate IS NULL OR valido_ate >= $3::date)
           AND (limite_usos = 0 OR usos < limite_usos) ORDER BY nome`, [a.empresa_id, a.id, hojeSP()]).catch(() => []);
-    const [cup] = await this.ds.query(`SELECT count(*)::int AS n FROM promocoes WHERE empresa_id = $1 AND tipo = 'cupom' AND ativo`, [a.empresa_id]).catch(() => [{ n: 0 }]);
+    const [cup] = await this.ds.query(`SELECT count(*)::int AS n FROM promocoes_reserva WHERE empresa_id = $1 AND tipo = 'cupom' AND ativo`, [a.empresa_id]).catch(() => [{ n: 0 }]);
     const [emp] = await this.ds.query(`SELECT fidelidade FROM empresas WHERE id = $1`, [a.empresa_id]).catch(() => [null]);
     const fid = (emp?.fidelidade ?? {}) as Fidelidade;
     return {
@@ -284,7 +284,7 @@ export class ReservaOnlineService {
       if (promo.desconto || promo.pacoteId || promo.cupomCodigo) {
         await m.query(`UPDATE reservas SET desconto = $2, cupom_codigo = $3, pacote_id = $4, pacote_nome = $5 WHERE id = $1`, [nova.id, promo.desconto.toFixed(2), promo.cupomCodigo, promo.pacoteId, promo.pacoteNome]);
         const usados = [promo.cupomId, promo.pacoteId].filter(Boolean);
-        if (usados.length) await m.query(`UPDATE promocoes SET usos = usos + 1 WHERE id = ANY($1::uuid[])`, [usados]);
+        if (usados.length) await m.query(`UPDATE promocoes_reserva SET usos = usos + 1 WHERE id = ANY($1::uuid[])`, [usados]);
       }
       // quem tinha largado a reserva no meio e voltou: conta como recuperada
       await m.query(`UPDATE reservas_rascunhos SET reserva_id = $3 WHERE empresa_id = $1 AND reserva_id IS NULL AND right(regexp_replace(telefone, '\\D', '', 'g'), 11) = right($2, 11)`,
