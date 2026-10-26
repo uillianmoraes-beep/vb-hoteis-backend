@@ -26,6 +26,7 @@ export class ConfigCaixaDto {
   @IsArray() @ArrayMaxSize(30) @IsString({ each: true }) @MaxLength(60, { each: true }) entradas!: string[];
   @IsOptional() @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) @MaxLength(40, { each: true }) maquininhas?: string[];
   @IsOptional() @IsIn(['nao', 'opcional', 'obrigatorio']) comprovante?: 'nao' | 'opcional' | 'obrigatorio';
+  @IsOptional() @IsIn(['nao', 'cartoes', 'tudo']) ajuda?: 'nao' | 'cartoes' | 'tudo';
 }
 
 export class FecharTurnoDto {

@@ -149,11 +149,15 @@ export class CaixaService {
     }
     const res = await this.resumo(t);
     const verTudo = temPermissao(u, 'caixa.relatorios');
+    const nivel = await this.nivelAjuda(u.empresaId);
+    // ajuda no fechamento: o que o sistema já sabe vem preenchido (Pix/cartão; e o dinheiro, se o gestor liberou)
+    const ajuda = nivel === 'nao' ? null : Object.fromEntries(FORMAS.filter((f) => nivel === 'tudo' || f !== 'dinheiro').map((f) => [f, res.esperado[f] ?? 0]));
     return {
       ambiente: await this.ambienteNome(ambienteId),
       turno: { ...t, trocoInicial: Number(t.trocoInicial) },
       resumo: verTudo ? res : { ...res, esperado: null, recebido: null, totalRecebido: null, totalMovimentado: null, resgates: null, totalResgates: null },
       cego: !verTudo,
+      ajuda: { nivel, valores: ajuda },
     };
   }
 
@@ -249,6 +253,11 @@ export class CaixaService {
     return { ...mv, valor: Number(mv.valor), turno: t ? { numero: t.numero } : null, ambiente: t ? await this.ambienteNome(t.ambienteId) : '' };
   }
 
+  private async nivelAjuda(empresaId: string): Promise<'nao' | 'cartoes' | 'tudo'> {
+    const e = await this.empresas.findOne({ where: { id: empresaId } });
+    return e?.configCaixa?.ajuda ?? 'nao';
+  }
+
   async config(u: UsuarioToken) {
     const e = await this.empresas.findOne({ where: { id: u.empresaId } });
     const cfg = e?.configCaixa ?? {};
@@ -258,6 +267,7 @@ export class CaixaService {
       // cadastro em Contas e maquininhas (as digitadas aqui antes viraram cadastro)
       maquininhas: (await this.empresas.query(`SELECT nome FROM maquininhas WHERE empresa_id = $1 AND ativo ORDER BY nome`, [u.empresaId]) as { nome: string }[]).map((x) => x.nome),
       comprovante: cfg.comprovante ?? 'opcional',
+      ajuda: cfg.ajuda ?? 'nao',
     };
   }
 
@@ -273,6 +283,7 @@ export class CaixaService {
     await this.empresas.update({ id: u.empresaId }, { configCaixa: {
       ...atual, saidas: limpa(dto.saidas), entradas: limpa(dto.entradas),
       ...(dto.comprovante ? { comprovante: dto.comprovante } : {}),
+      ...(dto.ajuda ? { ajuda: dto.ajuda } : {}),
     } });
     // nome novo digitado aqui vira maquininha (as taxas ficam em Contas e maquininhas)
     for (const nome of limpa(dto.maquininhas ?? [])) {
@@ -303,7 +314,7 @@ export class CaixaService {
       await m.update(CaixaTurno, { id: t.id }, {
         status: 'fechado', fechadoPorId: u.sub, fechadoPor: u.nome, fechadoEm: new Date(),
         esperado: res.esperado, contado, diferenca: diferenca.toFixed(2), observacao: dto.observacao?.trim() || null,
-        fundoProximo: r(fundo).toFixed(2), retirado: r(retirado).toFixed(2),
+        fundoProximo: r(fundo).toFixed(2), retirado: r(retirado).toFixed(2), ajudaFechamento: await this.nivelAjuda(u.empresaId),
       });
       // tudo o que foi recebido vai para o caixa ADM, por forma (conciliação bancária):
       // dinheiro = o que foi retirado da gaveta; pix/débito/crédito = o que o sistema registrou
@@ -416,6 +427,7 @@ export class CaixaService {
         id: t.id, numero: t.numero, ambiente: nome.get(t.ambienteId) ?? '', status: t.status, abertoPor: t.abertoPor, abertoEm: t.abertoEm,
         fechadoPor: t.fechadoPor, fechadoEm: t.fechadoEm, totalRecebido: res.totalRecebido, recebido: res.recebido, contas: res.contas,
         totalGorjetas: res.totalGorjetas, sangrias: res.sangrias, totalMovimentado: res.totalMovimentado, diferenca: t.diferenca === null ? null : Number(t.diferenca),
+        ajuda: t.ajudaFechamento,
       });
     }
     return saida;

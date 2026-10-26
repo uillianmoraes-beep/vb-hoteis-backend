@@ -24,6 +24,8 @@ export class CaixaTurno {
   @Column({ name: 'fundo_proximo', type: 'numeric', precision: 10, scale: 2, nullable: true }) fundoProximo!: string | null;
   /** dinheiro retirado/entregue à gerência no fechamento (vai para o caixa ADM) */
   @Column({ type: 'numeric', precision: 10, scale: 2, nullable: true }) retirado!: string | null;
+  /** ajuda que estava ligada quando fechou (nao | cartoes | tudo) — o gerente vê no relatório */
+  @Column({ name: 'ajuda_fechamento', type: 'varchar', length: 10, nullable: true }) ajudaFechamento!: string | null;
 }
 
 @Entity('caixa_movimentos')

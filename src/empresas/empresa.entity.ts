@@ -21,6 +21,8 @@ export class Empresa {
     maquininhas?: string[];
     /** código do comprovante no pix/débito/crédito: não pede, pede (opcional) ou obrigatório */
     comprovante?: 'nao' | 'opcional' | 'obrigatorio';
+    /** ajuda no fechamento (o gestor liga): nao = cego · cartoes = Pix/cartão já vêm do sistema · tudo = mostra até o dinheiro esperado */
+    ajuda?: 'nao' | 'cartoes' | 'tudo';
   };
   @Column({ name: 'config_gorjeta', type: 'jsonb', default: () => "'{}'::jsonb" }) configGorjeta!: { limiteNaHora?: number; taxaPct?: number; periodo?: 'semanal' | 'quinzenal' | 'mensal' };
   @Column({ name: 'ultimo_uso', type: 'int', default: 0 }) ultimoUso!: number;
