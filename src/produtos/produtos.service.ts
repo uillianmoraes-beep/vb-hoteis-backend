@@ -1,3 +1,4 @@
+import { PrecificacaoService } from '../precificacao/precificacao';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -9,7 +10,7 @@ import { COLUNAS_FISCAIS, Chave, LinhaLida, ZEROS, lerPlanilha, planilhaModelo }
 
 @Injectable()
 export class ProdutosService {
-  constructor(@InjectRepository(Produto) private readonly repo: Repository<Produto>) {}
+  constructor(@InjectRepository(Produto) private readonly repo: Repository<Produto>, private readonly precificacao: PrecificacaoService) {}
 
   async listar(empresaId: string, opcoes: { inativos?: boolean; busca?: string; uso?: string; ambienteId?: string } = {}) {
     const qb = this.repo.createQueryBuilder('p').where('p.empresaId = :empresaId', { empresaId });
@@ -325,7 +326,7 @@ export class ProdutosService {
   async criar(empresaId: string, dto: CriarProdutoDto) {
     await this.codigoLivre(empresaId, dto.codigo);
     await this.barrasLivre(empresaId, dto.codigoBarras);
-    return this.repo.save(
+    const salvo = await this.repo.save(
       this.repo.create({
         empresaId,
         nome: dto.nome.trim(),
@@ -345,6 +346,8 @@ export class ProdutosService {
         unidade: dto.unidade?.trim() || 'un',
       }),
     );
+    await this.precificacao.guardarLiquidos(empresaId, [salvo.id]).catch(() => undefined);
+    return salvo;
   }
 
   async atualizar(empresaId: string, id: string, dto: AtualizarProdutoDto) {
@@ -362,11 +365,18 @@ export class ProdutosService {
     if (dto.ativo !== undefined) p.ativo = dto.ativo;
     if (dto.frigobar !== undefined) p.frigobar = dto.frigobar;
     if (dto.ressarcimento !== undefined) p.ressarcimento = dto.ressarcimento;
-    if (dto.fiscal !== undefined) p.fiscal = limparFiscal(dto.fiscal);
+    if (dto.fiscal !== undefined) {
+      // a precificação (lucro, tributos e valor líquido para a nota) fica guardada junto e não se perde ao editar
+      const antes = (p.fiscal ?? {}) as Record<string, unknown>;
+      const manter = Object.fromEntries(['precificacao', 'precoLiquido', 'tributosPct'].filter((k) => antes[k] !== undefined).map((k) => [k, antes[k]]));
+      p.fiscal = { ...limparFiscal(dto.fiscal), ...manter } as typeof p.fiscal;
+    }
     if (dto.controlaEstoque !== undefined) p.controlaEstoque = dto.controlaEstoque;
     if (dto.estoqueMinimo !== undefined) p.estoqueMinimo = String(dto.estoqueMinimo);
     if (dto.unidade !== undefined) p.unidade = dto.unidade.trim() || 'un';
-    return this.repo.save(p);
+    const salvo = await this.repo.save(p);
+    await this.precificacao.guardarLiquidos(empresaId, [id]).catch(() => undefined);
+    return salvo;
   }
 
   async desativar(empresaId: string, id: string) {
