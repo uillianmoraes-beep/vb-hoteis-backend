@@ -5,6 +5,7 @@ import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
 import { fichaDaReserva } from '../reservas/reservas.service';
+import { AvisosService } from '../avisos/avisos';
 
 /**
  * Totem de autoatendimento (tablet ou tela na entrada, logado com um usuário de recepção):
@@ -28,7 +29,7 @@ class ChamadoDto {
 
 @Injectable()
 export class TotemService {
-  constructor(private readonly ds: DataSource) {}
+  constructor(private readonly ds: DataSource, private readonly avisos: AvisosService) {}
 
   /** suítes/quartos livres agora, por categoria, com o preço dos períodos */
   async livres(u: UsuarioToken, ambienteId?: string) {
@@ -101,6 +102,7 @@ export class TotemService {
     const [c] = await this.ds.query(
       `INSERT INTO totem_chamados (empresa_id, tipo, unidade_id, reserva_id, texto, observacao) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
       [u.empresaId, dto.tipo, unidadeId, dto.reservaId ?? null, texto.slice(0, 200), dto.observacao?.trim() || null]);
+    void this.avisos.avisar(u.empresaId, { titulo: 'Totem', texto, link: '/painel' }, ['painel.ver', 'estadias.operar', 'estadias.entrada']);
     return { ok: true, id: c.id };
   }
 

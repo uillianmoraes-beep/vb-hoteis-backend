@@ -5,6 +5,7 @@ import { UsuarioToken } from '../common/permissoes';
 import { ImpressaoService } from '../impressao/impressao.service';
 import { enviarParaLocal } from '../servidor-local/ponte.core';
 import { EstadiasService } from '../estadias/estadias.service';
+import { AvisosService } from '../avisos/avisos';
 
 interface ItemPedido { produtoId: string; nome: string; quantidade: number; preco: number }
 
@@ -18,7 +19,7 @@ const fmt = (p: Record<string, unknown>) => ({
 
 @Injectable()
 export class PedidosService {
-  constructor(private readonly ds: DataSource, private readonly estadias: EstadiasService, private readonly impressao: ImpressaoService) {}
+  constructor(private readonly ds: DataSource, private readonly estadias: EstadiasService, private readonly impressao: ImpressaoService, private readonly avisos: AvisosService) {}
 
   /* ---------------- cliente (QR code, sem login) ---------------- */
 
@@ -77,6 +78,7 @@ export class PedidosService {
       [un.empresa_id, un.id, un.estadia_id, JSON.stringify(itens), total.toFixed(2), dto.observacao?.trim() || null]);
     // empresa com servidor local: o pedido feito pela internet vai para lá pela ponte
     await enviarParaLocal(this.ds, un.empresa_id, 'pedido', { pedido: novo });
+    void this.avisos.avisar(un.empresa_id, { titulo: `Pedido do quarto ${un.codigo}`, texto: itens.map((i) => `${i.quantidade}x ${i.nome}`).join(', ').slice(0, 300), link: '/servico-quartos' }, ['estadias.operar', 'cozinha.ver']);
     return { ok: true };
   }
 

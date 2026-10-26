@@ -8,6 +8,7 @@ import { aplicarPromocoes, type Fidelidade } from './promocoes';
 import { CobrancaService } from '../cobranca/cobranca.service';
 import { enviarParaLocal } from '../servidor-local/ponte.core';
 import { conferirCpfLivre } from './cpf-unico';
+import { AvisosService } from '../avisos/avisos';
 
 interface Q { query: (sql: string, params?: unknown[]) => Promise<any> }
 
@@ -49,7 +50,7 @@ const novoCodigo = () => {
 
 @Injectable()
 export class ReservaOnlineService {
-  constructor(private readonly ds: DataSource, private readonly cobranca: CobrancaService) {}
+  constructor(private readonly ds: DataSource, private readonly cobranca: CobrancaService, private readonly avisos: AvisosService) {}
 
   // ---------------- recepção / gerência ----------------
 
@@ -292,6 +293,7 @@ export class ReservaOnlineService {
     const pix = sinalPct > 0
       ? await this.cobranca.pixReserva(a.empresa_id, { reservaId: r.id, numero: r.numero, nome: dto.nome.trim(), cpf: dto.documento ?? '', telefone: dto.telefone, email: dto.email, valor: r2((r.total * sinalPct) / 100) })
       : null;
+    void this.avisos.avisar(a.empresa_id, { titulo: 'Nova reserva online', texto: `${dto.nome.trim()} · ${dto.chegada.split('-').reverse().join('/')} a ${dto.saida.split('-').reverse().join('/')} · ${r.categoria}${status === 'pendente' ? ' · aguardando confirmação' : ''}`, link: '/reservas' }, ['reservas.gerenciar', 'estadias.operar']);
     // empresa com servidor local: a reserva (e a cobrança do sinal) vai para lá pela ponte
     const [linha] = await this.ds.query(`SELECT * FROM reservas WHERE id = $1`, [r.id]);
     const cobrancas = await this.ds.query(`SELECT * FROM cobrancas WHERE tipo = 'reserva_sinal' AND referencia_id = $1`, [r.id]);

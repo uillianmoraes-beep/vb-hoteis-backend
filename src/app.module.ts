@@ -33,6 +33,7 @@ import { PrecificacaoModule } from './precificacao/precificacao';
 import { AssistenteModule } from './assistente/assistente';
 import { EventosModule } from './eventos/eventos';
 import { TotemModule } from './totem/totem';
+import { AvisosModule } from './avisos/avisos';
 import { ContratosModule } from './contratos/contratos';
 import { BalcaoModule } from './balcao/balcao.module';
 import { DespesasModule } from './despesas/despesas.module';
@@ -99,6 +100,7 @@ import { ManualModule } from './manual/manual.module';
     AssistenteModule,
     EventosModule,
     TotemModule,
+    AvisosModule,
     UniformesModule,
     ContratosModule,
     BalcaoModule,
