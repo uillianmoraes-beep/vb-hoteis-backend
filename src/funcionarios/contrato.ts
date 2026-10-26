@@ -17,7 +17,7 @@ export const JORNADAS = { '6x1': '6x1', '5x2': '5x2', '12x36': '12x36', parcial:
 /** benefícios: cada hotel escolhe (ex.: vale-combustível no lugar do vale-transporte) */
 export const BENEFICIOS = {
   vt: 'Vale-transporte', combustivel: 'Vale-combustível / ajuda de combustível', va: 'Vale-alimentação', vr: 'Vale-refeição', cesta: 'Cesta básica',
-  saude: 'Plano de saúde', ppr: 'PPR / participação nos lucros', abono: 'Abono', gratificacao: 'Gratificação', outro: 'Outro',
+  saude: 'Plano de saúde', ppr: 'PPR / participação nos lucros', abono: 'Abono', gratificacao: 'Gratificação', quebra: 'Quebra de caixa', outro: 'Outro',
 } as const;
 
 class BeneficioDto {

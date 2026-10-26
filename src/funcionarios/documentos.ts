@@ -18,7 +18,7 @@ export const TIPOS_DOCUMENTO = {
   rg: 'RG', cpf: 'CPF', ctps: 'Carteira de trabalho (CTPS)', contrato: 'Contrato de trabalho', aso: 'Exame médico (ASO)', atestado: 'Atestado médico',
   residencia: 'Comprovante de residência', titulo: 'Título de eleitor', reservista: 'Reservista', cnh: 'CNH',
   certidao: 'Certidão (nascimento/casamento)', filhos: 'Documentos dos filhos', escolaridade: 'Escolaridade/cursos',
-  advertencia: 'Advertência/suspensão', ferias: 'Aviso/recibo de férias', rescisao: 'Rescisão', outro: 'Outro',
+  advertencia: 'Advertência/suspensão', ferias: 'Aviso/recibo de férias', holerite: 'Holerite / recibo de pagamento', rescisao: 'Rescisão', outro: 'Outro',
 } as const;
 const TIPOS_ARQUIVO: Record<string, string> = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png' };
 const MAX_BYTES = 8_000_000;
