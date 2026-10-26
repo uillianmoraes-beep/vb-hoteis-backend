@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsBoolean, IsEmail, IsISO8601, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsEmail, IsISO8601, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 
 export class AbrirEstadiaDto {
   @IsUUID() unidadeId!: string;
@@ -94,6 +94,16 @@ export class AtualizarEstadiaDto {
   @IsOptional() @IsString() @MaxLength(10) placa?: string;
   @IsOptional() @IsInt() @Min(1) @Max(20) pessoas?: number;
   @IsOptional() @IsString() @MaxLength(500) observacao?: string;
+}
+
+export class NoiteDto {
+  @Matches(/^\d{4}-\d{2}-\d{2}$/) data!: string;
+  @IsInt() @Min(1) @Max(20) pessoas!: number;
+  /** valor da diária desta noite; vazio = calcula pelas pessoas (Tarifas › Diárias) */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(100000) valor?: number;
+}
+export class NoitesDto {
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(120) @ValidateNested({ each: true }) @Type(() => NoiteDto) noites!: NoiteDto[];
 }
 
 export class LancarItemDto {

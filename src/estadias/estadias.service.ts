@@ -26,7 +26,7 @@ import { Penhora } from '../caixa/penhora.entity';
 import { CaixaMovimento, CaixaTurno } from '../caixa/caixa.entity';
 import { Gorjeta } from '../gorjetas/gorjeta.entity';
 import {
-  AbrirEstadiaDto, AdiantamentoDto, PagamentoDto, AtualizarEstadiaDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
+  AbrirEstadiaDto, AdiantamentoDto, PagamentoDto, AtualizarEstadiaDto, NoitesDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
   LancarItemDto, MudarFormaDto, TransferirDto, TrocarCobrancaDto,
 } from './estadias.dto';
 import { StatusUnidade, UsuarioToken, temPermissao } from '../common/permissoes';
@@ -146,7 +146,7 @@ export class EstadiasService {
     const diaria = centavos(Number(e.diariaCombinada ?? 0));
     const hosp = centavos(Number(e.totalCombinado ?? 0)) + extras * diaria;
     // quantas diárias: as combinadas (total ÷ diária) + as que passaram da saída prevista
-    const combinadas = diaria > 0 ? Math.max(1, Math.round(centavos(Number(e.totalCombinado ?? 0)) / diaria)) : 1;
+    const combinadas = e.noites?.length ? e.noites.length : diaria > 0 ? Math.max(1, Math.round(centavos(Number(e.totalCombinado ?? 0)) / diaria)) : 1;
     const n = combinadas + extras;
     const saidaBr = saida.split('-').reverse().slice(0, 2).join('/');
     return {
@@ -454,7 +454,15 @@ export class EstadiasService {
     if (dto.pessoas !== undefined && dto.pessoas !== e.pessoas && e.totalCombinado !== null && e.diariaCombinada !== null) {
       const und = await this.unidades.findOne({ where: { id: e.unidadeId } });
       const cfg = await this.tarifas.pessoaExtraHotel(u.empresaId, e.ambienteId, e.categoriaId ?? und?.categoriaId ?? null);
-      if (cfg && cfg.valor > 0) {
+      if (e.noites?.length) {
+        // diárias por noite: muda só as noites de hoje em diante (as que já passaram ficam como foram)
+        const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: FUSO });
+        const diariaPara = this.diariaPorPessoas(e, cfg);
+        const noites = e.noites.map((n) => (n.data >= hoje ? { ...n, pessoas: dto.pessoas!, valor: diariaPara(dto.pessoas!) } : n));
+        const total = noites.reduce((s, n) => s + centavos(n.valor), 0);
+        await this.repo.update({ id }, { noites, diariaCombinada: reais(centavos(diariaPara(dto.pessoas))), totalCombinado: reais(total) });
+        mudancas.push(`noites de hoje em diante com ${dto.pessoas} pessoa(s) · total das diárias ${brl(total)}`);
+      } else if (cfg && cfg.valor > 0) {
         const extras = (p: number) => Math.max(0, p - cfg.incluidas);
         const delta = centavos((extras(dto.pessoas) - extras(e.pessoas)) * cfg.valor);
         if (delta !== 0) {
@@ -468,6 +476,77 @@ export class EstadiasService {
       if (und && dto.pessoas > (und.capacidade || 0)) mudancas.push(`acima da capacidade do quarto (${und.capacidade})`);
     }
     if (mudancas.length) await this.registrar(null, u, id, 'ajuste', mudancas.join(' · '));
+    return this.detalhe(u, id);
+  }
+
+  /** valor da diária (reais) para N pessoas, a partir da diária combinada atual (que vale para e.pessoas) */
+  private diariaPorPessoas(e: Estadia, cfg: { incluidas: number; valor: number } | null) {
+    const base = Number(e.diariaCombinada ?? 0);
+    const extras = (p: number) => Math.max(0, p - (cfg?.incluidas ?? 99));
+    return (p: number) => Math.max(0, Math.round((base + (extras(p) - extras(e.pessoas)) * (cfg?.valor ?? 0)) * 100) / 100);
+  }
+
+  /** noites da hospedagem (da entrada até a véspera da saída prevista) */
+  private noitesDe(e: Estadia) {
+    const ini = new Date(e.entradaEm).toLocaleDateString('sv-SE', { timeZone: FUSO });
+    const fim = String(e.saidaPrevista).slice(0, 10);
+    const datas: string[] = [];
+    for (let d = ini; d < fim && datas.length < 120; d = new Date(Date.parse(`${d}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10)) datas.push(d);
+    return datas.length ? datas : [ini];
+  }
+
+  /** hotel: diárias noite a noite (pessoas e valor de cada noite) */
+  async noites(u: UsuarioToken, id: string) {
+    const e = await this.buscar(u, id);
+    if (e.totalCombinado === null || e.diariaCombinada === null || !e.saidaPrevista) throw new BadRequestException('Esta conta não é de diária (hotel com saída prevista).');
+    const und = await this.unidades.findOne({ where: { id: e.unidadeId } });
+    const cfg = await this.tarifas.pessoaExtraHotel(u.empresaId, e.ambienteId, e.categoriaId ?? und?.categoriaId ?? null);
+    const diariaPara = this.diariaPorPessoas(e, cfg);
+    const salvas = new Map((e.noites ?? []).map((n) => [n.data, n]));
+    const datas = this.noitesDe(e);
+    // noites gravadas fora do período (saída mudou) continuam aparecendo para não sumir valor
+    for (const d of salvas.keys()) if (!datas.includes(d)) datas.push(d);
+    datas.sort();
+    const meu = temPermissao(u, '*') ? null : await this.perfis.findOne({ where: { id: u.perfilId } });
+    return {
+      aberta: ABERTAS.includes(e.status), saidaPrevista: e.saidaPrevista, pessoas: e.pessoas, capacidade: und?.capacidade ?? null,
+      pessoasIncluidas: cfg?.incluidas ?? null, valorPessoa: cfg?.valor ?? 0, podeMudarValor: temPermissao(u, '*') || !!meu?.limites?.ajusteDiaria,
+      precos: Object.fromEntries(Array.from({ length: 8 }, (_, i) => [i + 1, diariaPara(i + 1)])),
+      noites: datas.map((d) => {
+        const n = salvas.get(d);
+        return n ? { ...n, calculado: diariaPara(n.pessoas), salva: true } : { data: d, pessoas: e.pessoas, valor: Number(e.diariaCombinada), calculado: diariaPara(e.pessoas), salva: false };
+      }),
+    };
+  }
+
+  async salvarNoites(u: UsuarioToken, id: string, dto: NoitesDto) {
+    const e = await this.buscarAberta(u, id);
+    if (e.totalCombinado === null || e.diariaCombinada === null || !e.saidaPrevista) throw new BadRequestException('Esta conta não é de diária (hotel com saída prevista).');
+    const und = await this.unidades.findOne({ where: { id: e.unidadeId } });
+    const cfg = await this.tarifas.pessoaExtraHotel(u.empresaId, e.ambienteId, e.categoriaId ?? und?.categoriaId ?? null);
+    const diariaPara = this.diariaPorPessoas(e, cfg);
+    const datas = new Set(this.noitesDe(e));
+    for (const n of e.noites ?? []) datas.add(n.data);
+    const vistas = new Set<string>();
+    let mudouValor = false;
+    const noites = dto.noites.map((n) => {
+      if (!datas.has(n.data)) throw new BadRequestException(`A noite de ${n.data.split('-').reverse().join('/')} não é desta hospedagem.`);
+      if (vistas.has(n.data)) throw new BadRequestException('Noite repetida.');
+      vistas.add(n.data);
+      const calc = diariaPara(n.pessoas);
+      const valor = n.valor !== undefined ? Math.round(n.valor * 100) / 100 : calc;
+      if (Math.abs(valor - calc) > 0.009) mudouValor = true;
+      return { data: n.data, pessoas: n.pessoas, valor };
+    }).sort((a, b) => a.data.localeCompare(b.data));
+    if (mudouValor && !temPermissao(u, '*')) {
+      const meu = await this.perfis.findOne({ where: { id: u.perfilId } });
+      if (!meu?.limites?.ajusteDiaria) throw new ForbiddenException('Seu perfil não pode mudar o valor da diária. Deixe o valor calculado ou peça ao gerente.');
+    }
+    const antes = centavos(Number(e.totalCombinado));
+    const total = noites.reduce((s, n) => s + centavos(n.valor), 0);
+    await this.repo.update({ id }, { noites, totalCombinado: reais(total) });
+    const resumo = noites.map((n) => `${n.data.slice(8, 10)}/${n.data.slice(5, 7)} ${n.pessoas}p ${brl(centavos(n.valor))}`).join(', ');
+    await this.registrar(null, u, id, 'ajuste', `diárias por noite: ${resumo} · total ${brl(antes)} → ${brl(total)}`);
     return this.detalhe(u, id);
   }
 

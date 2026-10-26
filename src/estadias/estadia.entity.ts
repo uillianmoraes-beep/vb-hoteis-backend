@@ -27,6 +27,8 @@ export class Estadia {
   @Column({ name: 'diaria_combinada', type: 'numeric', precision: 10, scale: 2, nullable: true }) diariaCombinada!: string | null;
   @Column({ name: 'total_combinado', type: 'numeric', precision: 10, scale: 2, nullable: true }) totalCombinado!: string | null;
   @Column({ name: 'saida_prevista', type: 'date', nullable: true }) saidaPrevista!: string | null;
+  /** hotel: cada noite com as pessoas e o valor (reais); a soma é o total combinado */
+  @Column({ type: 'jsonb', nullable: true }) noites!: { data: string; pessoas: number; valor: number }[] | null;
   @Column({ name: 'valor_consumo', type: 'numeric', precision: 10, scale: 2, nullable: true }) valorConsumo!: string | null;
   @Column({ name: 'saida_em', type: 'timestamptz', nullable: true }) saidaEm!: Date | null;
   @Column({ name: 'periodo_nome', type: 'varchar', length: 60, nullable: true }) periodoNome!: string | null;

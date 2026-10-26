@@ -1,7 +1,7 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
 import { EstadiasService } from './estadias.service';
 import {
-  AbrirEstadiaDto, AdiantamentoDto, AtualizarEstadiaDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
+  AbrirEstadiaDto, AdiantamentoDto, AtualizarEstadiaDto, NoitesDto, CancelarEstadiaDto, CorrigirEstadiaDto, EstornarItemDto, FecharEstadiaDto,
   LancarItemDto, MudarFormaDto, TransferirDto, TrocarCobrancaDto,
 } from './estadias.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
@@ -22,6 +22,18 @@ export class EstadiasController {
   @Requer('painel.ver')
   detalhe(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.detalhe(u, id);
+  }
+
+  @Get(':id/noites')
+  @Requer('estadias.operar', 'estadias.entrada', 'reservas.gerenciar')
+  noites(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.noites(u, id);
+  }
+
+  @Put(':id/noites')
+  @Requer('estadias.operar')
+  salvarNoites(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: NoitesDto) {
+    return this.service.salvarNoites(u, id, dto);
   }
 
   @Patch(':id')
