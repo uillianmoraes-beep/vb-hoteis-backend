@@ -39,6 +39,11 @@ export class RelatoriosService {
     const [tot] = await q(`SELECT count(*)::int AS usos, COALESCE(sum(valor_total),0) AS receita, COALESCE(sum(valor_hospedagem + COALESCE(valor_pessoas,0)),0) AS hosp,
       COALESCE(sum(valor_consumo),0) AS consumo, COALESCE(sum(desconto),0) AS descontos,
       COALESCE(sum(EXTRACT(EPOCH FROM (saida_em - entrada_em)) / 60),0) AS minutos ${base}`);
+    // o mesmo tanto de dias logo antes, para os cartões mostrarem "vs período anterior"
+    const iniAnt = new Date(ini.getTime() - dias * DIA);
+    const [ant] = await this.estadias.query(`SELECT count(*)::int AS usos, COALESCE(sum(valor_total),0) AS receita, COALESCE(sum(valor_hospedagem + COALESCE(valor_pessoas,0)),0) AS hosp,
+      COALESCE(sum(EXTRACT(EPOCH FROM (saida_em - entrada_em)) / 60),0) AS minutos
+      FROM estadias e WHERE e.empresa_id = $1 AND e.ambiente_id = ANY($2::uuid[]) AND e.status = 'fechada' AND e.saida_em >= $3 AND e.saida_em < $4`, [u.empresaId, ambs, iniAnt, ini]);
     const porDia = await q(`SELECT to_char(e.saida_em AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM-DD') AS dia, count(*)::int AS usos, COALESCE(sum(valor_total),0) AS receita ${base} GROUP BY 1 ORDER BY 1`);
     const porHora = await this.estadias.query(
       `SELECT EXTRACT(HOUR FROM e.entrada_em AT TIME ZONE 'America/Sao_Paulo')::int AS hora, count(*)::int AS n FROM estadias e
@@ -78,6 +83,12 @@ export class RelatoriosService {
         adr: usos ? Math.round((hosp / usos) * 100) / 100 : 0,
         revpar: capacidade ? Math.round((hosp / capacidade) * 100) / 100 : 0,
         trevpar: capacidade ? Math.round((receita / capacidade) * 100) / 100 : 0,
+      },
+      anterior: {
+        usos: Number(ant?.usos ?? 0), receita: Number(ant?.receita ?? 0),
+        ticketMedio: Number(ant?.usos) ? Math.round((Number(ant.receita) / Number(ant.usos)) * 100) / 100 : 0,
+        ocupacaoPct: capacidade ? Math.min(100, Math.round((Number(ant?.minutos ?? 0) / (capacidade * 1440)) * 100)) : 0,
+        revpar: capacidade ? Math.round((Number(ant?.hosp ?? 0) / capacidade) * 100) / 100 : 0,
       },
       serie, horas,
       categorias: porCat.map((c: { nome: string; usos: number; receita: string }) => ({ nome: c.nome, usos: Number(c.usos), receita: Number(c.receita) })),
