@@ -72,6 +72,8 @@ class DiaDto {
   @IsOptional() @Matches(HORA) fim?: string;
   @IsOptional() @IsInt() @Min(0) @Max(240) intervaloMin?: number;
   @IsOptional() @IsString() @MaxLength(200) observacao?: string;
+  /** atestado anexado (documento do funcionário); vale para falta e atestado */
+  @IsOptional() @IsUUID() documentoId?: string;
 }
 class DiasDto {
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(500) @ValidateNested({ each: true }) @Type(() => DiaDto) itens!: DiaDto[];
@@ -116,7 +118,7 @@ class RegrasDto {
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(1) @Max(60) horasSemana!: number;
 }
 
-interface DiaEscala { tipo: Tipo; turnoId: string | null; inicio: string | null; fim: string | null; intervaloMin: number; observacao: string | null }
+interface DiaEscala { tipo: Tipo; turnoId: string | null; inicio: string | null; fim: string | null; intervaloMin: number; observacao: string | null; documentoId: string | null }
 
 @Injectable()
 export class EscalaService {
@@ -177,13 +179,13 @@ export class EscalaService {
     const porFunc = new Map<string, Map<string, DiaEscala>>();
     for (const x of linhas) {
       if (!porFunc.has(x.funcionario_id)) porFunc.set(x.funcionario_id, new Map());
-      porFunc.get(x.funcionario_id)!.set(dia(x.data)!, { tipo: x.tipo, turnoId: x.turno_id ?? null, inicio: x.inicio ?? null, fim: x.fim ?? null, intervaloMin: Number(x.intervalo_min) || 0, observacao: x.observacao ?? null });
+      porFunc.get(x.funcionario_id)!.set(dia(x.data)!, { tipo: x.tipo, turnoId: x.turno_id ?? null, inicio: x.inicio ?? null, fim: x.fim ?? null, intervaloMin: Number(x.intervalo_min) || 0, observacao: x.observacao ?? null, documentoId: x.documento_id ?? null });
     }
     // férias programadas aparecem sozinhas na escala
     for (const f of ferias) {
       if (!porFunc.has(f.funcionario_id)) porFunc.set(f.funcionario_id, new Map());
       const ini = dia(f.inicio)!;
-      for (let k = 0; k < Number(f.dias); k++) porFunc.get(f.funcionario_id)!.set(somaDias(ini, k), { tipo: 'ferias', turnoId: null, inicio: null, fim: null, intervaloMin: 0, observacao: null });
+      for (let k = 0; k < Number(f.dias); k++) porFunc.get(f.funcionario_id)!.set(somaDias(ini, k), { tipo: 'ferias', turnoId: null, inicio: null, fim: null, intervaloMin: 0, observacao: null, documentoId: null });
     }
     const datas: string[] = [];
     for (let d = de; d <= ate; d = somaDias(d, 1)) datas.push(d);
@@ -311,6 +313,10 @@ export class EscalaService {
 
   async salvarDias(u: UsuarioToken, dto: DiasDto) {
     await this.conferirFuncionarios(u.empresaId, dto.itens.map((i) => i.funcionarioId));
+    for (const i of dto.itens.filter((x) => x.documentoId)) {
+      const [d] = await this.ds.query(`SELECT 1 FROM funcionario_documentos WHERE id = $1 AND funcionario_id = $2 AND empresa_id = $3`, [i.documentoId, i.funcionarioId, u.empresaId]);
+      if (!d) throw new NotFoundException('Atestado não encontrado nos documentos do funcionário.');
+    }
     const turnos = new Map<string, Awaited<ReturnType<EscalaService['horario']>>>();
     await this.ds.transaction(async (m) => {
       for (const i of dto.itens) {
@@ -325,9 +331,10 @@ export class EscalaService {
           h = turnos.get(chave)!;
         }
         await m.query(
-          `INSERT INTO escala_dias (funcionario_id, data, empresa_id, tipo, turno_id, inicio, fim, intervalo_min, observacao, usuario_nome) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-           ON CONFLICT (funcionario_id, data) DO UPDATE SET tipo=$4, turno_id=$5, inicio=$6, fim=$7, intervalo_min=$8, observacao=$9, usuario_nome=$10, atualizado_em=now()`,
-          [i.funcionarioId, i.data, u.empresaId, i.tipo, h.turnoId, h.inicio, h.fim, h.intervaloMin, i.observacao?.trim() || null, u.nome]);
+          `INSERT INTO escala_dias (funcionario_id, data, empresa_id, tipo, turno_id, inicio, fim, intervalo_min, observacao, usuario_nome, documento_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+           ON CONFLICT (funcionario_id, data) DO UPDATE SET tipo=$4, turno_id=$5, inicio=$6, fim=$7, intervalo_min=$8, observacao=$9, usuario_nome=$10, documento_id=$11, atualizado_em=now()`,
+          [i.funcionarioId, i.data, u.empresaId, i.tipo, h.turnoId, h.inicio, h.fim, h.intervaloMin, i.observacao?.trim() || null, u.nome,
+            i.tipo === 'falta' || i.tipo === 'atestado' ? i.documentoId ?? null : null]);
       }
     });
     return { ok: true, total: dto.itens.length };

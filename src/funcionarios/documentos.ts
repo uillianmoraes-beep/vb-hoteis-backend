@@ -15,7 +15,7 @@ import { UsuarioToken } from '../common/permissoes';
  */
 
 export const TIPOS_DOCUMENTO = {
-  rg: 'RG', cpf: 'CPF', ctps: 'Carteira de trabalho (CTPS)', contrato: 'Contrato de trabalho', aso: 'Exame médico (ASO)',
+  rg: 'RG', cpf: 'CPF', ctps: 'Carteira de trabalho (CTPS)', contrato: 'Contrato de trabalho', aso: 'Exame médico (ASO)', atestado: 'Atestado médico',
   residencia: 'Comprovante de residência', titulo: 'Título de eleitor', reservista: 'Reservista', cnh: 'CNH',
   certidao: 'Certidão (nascimento/casamento)', filhos: 'Documentos dos filhos', escolaridade: 'Escolaridade/cursos',
   advertencia: 'Advertência/suspensão', ferias: 'Aviso/recibo de férias', rescisao: 'Rescisão', outro: 'Outro',
