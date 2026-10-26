@@ -17,7 +17,7 @@ export class FaturamentoController {
   @Get('resumo') @Requer('faturamento.gerenciar')
   resumo(@Usuario() u: UsuarioToken, @Query('cnpj') cnpj?: string) { return this.service.resumo(u, cnpj); }
 
-  @Get('clientes') @Requer('faturamento.gerenciar')
+  @Get('clientes') @Requer('faturamento.gerenciar', 'contratos.gerenciar')
   clientes(@Usuario() u: UsuarioToken, @Query('todos') todos?: string) { return this.service.clientes(u, todos === '1'); }
 
   /** para escolher o cliente ao fechar uma conta como faturado */

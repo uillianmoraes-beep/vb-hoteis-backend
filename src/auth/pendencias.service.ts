@@ -7,6 +7,7 @@ import { LicencasService } from '../funcionarios/licencas';
 import { BancoHorasService } from '../funcionarios/banco-horas';
 import { AreaContadorService } from '../contador/area';
 import { LeitorContadorService } from '../contador/leitor';
+import { ContratosService } from '../contratos/contratos';
 
 export interface Pendencia {
   chave: string;
@@ -123,6 +124,15 @@ export class PendenciasService {
         const c = await new AreaContadorService(this.ds, new LeitorContadorService()).faltando(u.empresaId);
         add({ chave: 'contador-faltando', nivel: 'aviso', titulo: 'O contador ainda não entregou', detalhe: c.competencia ? `mês ${c.competencia.split('-').reverse().join('/')}` : undefined, link: '/contador?aba=entregas' },
           { n: c.nomes.length, nomes: c.nomes.join(', ') });
+      } catch { /* tabelas novas ainda não criadas */ }
+    }
+
+    if (pode('contratos.gerenciar')) {
+      // contratos: esperando a assinatura do outro lado há mais de 3 dias, e os que acabam em 30 dias
+      try {
+        const c = await new ContratosService(this.ds).avisos(u.empresaId);
+        add({ chave: 'contratos-assinatura', nivel: 'info', titulo: 'Contratos esperando assinatura', detalhe: 'mandados há mais de 3 dias', link: '/contratos?status=aguardando' }, { n: c.esperando, nomes: '' }, false);
+        add({ chave: 'contratos-vencendo', nivel: 'aviso', titulo: 'Contratos acabando em 30 dias', detalhe: 'renove ou faça um aditivo', link: '/contratos?status=ativo' }, { n: c.vencendo, nomes: '' }, false);
       } catch { /* tabelas novas ainda não criadas */ }
     }
 
