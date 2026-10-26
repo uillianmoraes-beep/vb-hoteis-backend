@@ -197,10 +197,17 @@ export class HoleriteService {
 
     // 1. totais e líquido (a conta do próprio holerite)
     const tv = r2(rub.reduce((s, r) => s + r.vencimento, 0)), td = r2(rub.reduce((s, r) => s + r.desconto, 0));
-    add({ chave: 'totais', titulo: 'Soma das linhas', status: igual(tv, d.totalVencimentos) && igual(td, d.totalDescontos) ? 'ok' : 'divergente',
-      esperado: `${reais(tv)} − ${reais(td)}`, informado: `${reais(d.totalVencimentos)} − ${reais(d.totalDescontos)}`, texto: 'vencimentos e descontos somados linha por linha' });
-    add({ chave: 'liquido', titulo: 'Valor líquido', status: igual(r2(d.totalVencimentos - d.totalDescontos), d.liquido) ? 'ok' : 'divergente',
-      esperado: reais(r2(d.totalVencimentos - d.totalDescontos)), informado: reais(d.liquido), diferenca: r2(d.liquido - (d.totalVencimentos - d.totalDescontos)) });
+    // rodapé em branco (digitado à mão sem os totais): avisa em vez de dar erro
+    const semRodape = !d.totalVencimentos && !d.totalDescontos && !d.liquido;
+    if (semRodape) {
+      add({ chave: 'totais', titulo: 'Totais do holerite', status: 'atencao', esperado: `${reais(tv)} − ${reais(td)} = ${reais(r2(tv - td))}`, informado: 'em branco',
+        texto: 'o rodapé (total de vencimentos, de descontos e líquido) não foi preenchido: o sistema somou as linhas' });
+    } else {
+      add({ chave: 'totais', titulo: 'Soma das linhas', status: igual(tv, d.totalVencimentos) && igual(td, d.totalDescontos) ? 'ok' : 'divergente',
+        esperado: `${reais(tv)} − ${reais(td)}`, informado: `${reais(d.totalVencimentos)} − ${reais(d.totalDescontos)}`, texto: 'vencimentos e descontos somados linha por linha' });
+      add({ chave: 'liquido', titulo: 'Valor líquido', status: igual(r2(d.totalVencimentos - d.totalDescontos), d.liquido) ? 'ok' : 'divergente',
+        esperado: reais(r2(d.totalVencimentos - d.totalDescontos)), informado: reais(d.liquido), diferenca: r2(d.liquido - (d.totalVencimentos - d.totalDescontos)) });
+    }
 
     if (ctx.semSalario) add({ chave: 'ficha', titulo: 'Ficha do funcionário', status: 'atencao', texto: 'sem salário na ficha (Funcionários → Contrato e salário): não dá para conferir os valores' });
 
@@ -248,7 +255,9 @@ export class HoleriteService {
       }
       // 6. adiantamento
       const adi = soma('adiantamento', 'desconto');
-      if (adi || t.adiantamentoPct) {
+      if (ctx.semSalario) {
+        if (adi) add({ chave: 'adiantamento', titulo: `Desconto do adiantamento (${t.adiantamentoPct}%)`, status: 'atencao', informado: reais(adi), texto: 'sem salário na ficha: não dá para conferir' });
+      } else if (adi || t.adiantamentoPct) {
         const esperado = r2((ctx.salario * t.adiantamentoPct) / 100);
         add({ chave: 'adiantamento', titulo: `Desconto do adiantamento (${t.adiantamentoPct}%)`, status: !adi ? 'atencao' : igual(adi, esperado, 0.5) ? 'ok' : 'divergente', esperado: reais(esperado), informado: reais(adi),
           texto: !adi ? 'não descontou adiantamento: confira se ele recebeu adiantamento no dia 20' : undefined });
@@ -314,6 +323,15 @@ export class HoleriteService {
         texto: ir.reducao ? `com a redução da lei (${reais(ir.reducao)}): até ${reais(t.reducao.isencao)} não paga` : ir.simplificado ? 'pelo desconto simplificado' : undefined });
     }
 
+    // sem salário na ficha, o que depende do salário não é erro do contador: fica para conferir
+    if (ctx.semSalario) {
+      for (const i of itens) {
+        if (i.status === 'divergente' && (['extras', 'faltas', 'vt', 'noturno', 'adiantamento'].includes(i.chave) || i.chave.startsWith('ben:'))) {
+          i.status = 'atencao';
+          i.texto = `${i.texto ? `${i.texto} · ` : ''}sem salário na ficha, não dá para conferir`;
+        }
+      }
+    }
     const resumo = { divergencias: itens.filter((i) => i.status === 'divergente').length, atencoes: itens.filter((i) => i.status === 'atencao').length };
     return { itens, resumo, status: resumo.divergencias ? 'divergente' : resumo.atencoes ? 'atencao' : 'ok' };
   }
