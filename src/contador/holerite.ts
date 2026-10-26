@@ -382,11 +382,24 @@ export class HoleriteService {
   async listar(u: UsuarioToken, competencia?: string) {
     const c = competencia && COMPETENCIA.test(competencia) ? competencia : null;
     const l = await this.ds.query(
-      `SELECT h.id, h.funcionario_id, f.nome, h.competencia, h.tipo, h.status, h.divergencias, h.atencoes, h.liquido, h.documento_id, h.criado_por, h.criado_em
+      `SELECT h.id, h.funcionario_id, f.nome, h.competencia, h.tipo, h.dados, h.status, h.divergencias, h.atencoes, h.liquido, h.documento_id, h.criado_por, h.criado_em
          FROM holerites h JOIN funcionarios f ON f.id = h.funcionario_id WHERE h.empresa_id = $1 ${c ? 'AND h.competencia = $2' : ''} ORDER BY h.competencia DESC, f.nome LIMIT 500`,
       c ? [u.empresaId, c] : [u.empresaId]);
     const ativos: { id: string; nome: string }[] = c ? await this.ds.query(`SELECT id, nome FROM funcionarios WHERE empresa_id = $1 AND ativo ORDER BY nome`, [u.empresaId]) : [];
     const com = new Set(l.filter((x: { tipo: string }) => x.tipo === 'mensal').map((x: { funcionario_id: string }) => x.funcionario_id));
+    // a conferência é refeita com a ficha e as regras de hoje (a ficha pode ter sido corrigida depois de salvar)
+    if (c && l.length <= 200) {
+      const t = await this.tabelas(u.empresaId);
+      for (const x of l as Record<string, unknown>[]) {
+        try {
+          const nova = this.conferir(await this.contexto(u.empresaId, x.funcionario_id as string, x.competencia as string), x.tipo as string, x.dados as DadosDto, t);
+          if (nova.status !== x.status || nova.resumo.divergencias !== Number(x.divergencias) || nova.resumo.atencoes !== Number(x.atencoes)) {
+            await this.ds.query(`UPDATE holerites SET status = $2, divergencias = $3, atencoes = $4 WHERE id = $1`, [x.id, nova.status, nova.resumo.divergencias, nova.resumo.atencoes]);
+          }
+          Object.assign(x, { status: nova.status, divergencias: nova.resumo.divergencias, atencoes: nova.resumo.atencoes });
+        } catch { /* fica o resultado guardado */ }
+      }
+    }
     return {
       competencia: c, ia: this.leitor.disponivel,
       lista: l.map((x: Record<string, unknown>) => ({
