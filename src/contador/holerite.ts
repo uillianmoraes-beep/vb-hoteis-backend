@@ -401,49 +401,49 @@ export class HoleriteController {
   constructor(private readonly service: HoleriteService) {}
 
   @Get()
-  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro')
+  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro', 'contador.acessar')
   listar(@Usuario() u: UsuarioToken, @Query('competencia') competencia?: string) {
     return this.service.listar(u, competencia);
   }
 
   @Get('tabelas')
-  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro')
+  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro', 'contador.acessar')
   tabelas(@Usuario() u: UsuarioToken) {
     return this.service.tabelas(u.empresaId);
   }
 
   @Put('tabelas')
-  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro')
+  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro', 'contador.acessar')
   salvarTabelas(@Usuario() u: UsuarioToken, @Body() dto: TabelasDto) {
     return this.service.salvarTabelas(u, dto);
   }
 
   @Post('ler')
-  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro')
+  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro', 'contador.acessar')
   ler(@Usuario() u: UsuarioToken, @Body() dto: LerDto) {
     return this.service.ler(u, dto);
   }
 
   @Post('previa')
-  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro')
+  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro', 'contador.acessar')
   previa(@Usuario() u: UsuarioToken, @Body() dto: HoleriteDto) {
     return this.service.previa(u, dto);
   }
 
   @Post()
-  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro')
+  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro', 'contador.acessar')
   salvar(@Usuario() u: UsuarioToken, @Body() dto: HoleriteDto) {
     return this.service.salvar(u, dto);
   }
 
   @Get(':id')
-  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro')
+  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro', 'contador.acessar')
   ver(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.ver(u, id);
   }
 
   @Delete(':id')
-  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro')
+  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro', 'contador.acessar')
   apagar(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.apagar(u, id);
   }

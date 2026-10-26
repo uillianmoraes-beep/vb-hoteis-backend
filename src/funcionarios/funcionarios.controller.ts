@@ -11,7 +11,7 @@ export class FuncionariosController {
 
   /** lista (governança usa para escolher a camareira: ?funcao=camareira&ambienteId=) */
   @Get()
-  @Requer('funcionarios.gerenciar', 'governanca.operar', 'unidades.status', 'estadias.operar')
+  @Requer('funcionarios.gerenciar', 'governanca.operar', 'unidades.status', 'estadias.operar', 'contador.acessar', 'ferramentas.gerenciar')
   listar(@Usuario() u: UsuarioToken, @Query('funcao') funcao?: string, @Query('ambienteId') ambienteId?: string, @Query('todos') todos?: string) {
     return this.service.listar(u, { funcao, ambienteId, todos: todos === '1' && temPermissao(u, 'funcionarios.gerenciar') });
   }

@@ -280,37 +280,37 @@ export class SimplesController {
   constructor(private readonly service: SimplesService) {}
 
   @Get()
-  @Requer('relatorios.ver', 'caixa.adm', 'notas.gerenciar')
+  @Requer('relatorios.ver', 'caixa.adm', 'notas.gerenciar', 'contador.acessar')
   listar(@Usuario() u: UsuarioToken) {
     return this.service.listar(u);
   }
 
   @Post('ler')
-  @Requer('relatorios.ver', 'caixa.adm', 'notas.gerenciar')
+  @Requer('relatorios.ver', 'caixa.adm', 'notas.gerenciar', 'contador.acessar')
   ler(@Body() dto: LerDto) {
     return this.service.ler(dto);
   }
 
   @Post('previa')
-  @Requer('relatorios.ver', 'caixa.adm', 'notas.gerenciar')
+  @Requer('relatorios.ver', 'caixa.adm', 'notas.gerenciar', 'contador.acessar')
   previa(@Usuario() u: UsuarioToken, @Body() dto: SimplesDto) {
     return this.service.previa(u, dto);
   }
 
   @Post()
-  @Requer('relatorios.ver', 'caixa.adm', 'notas.gerenciar')
+  @Requer('relatorios.ver', 'caixa.adm', 'notas.gerenciar', 'contador.acessar')
   salvar(@Usuario() u: UsuarioToken, @Body() dto: SalvarSimplesDto) {
     return this.service.salvar(u, dto);
   }
 
   @Get(':id')
-  @Requer('relatorios.ver', 'caixa.adm', 'notas.gerenciar')
+  @Requer('relatorios.ver', 'caixa.adm', 'notas.gerenciar', 'contador.acessar')
   ver(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.ver(u, id);
   }
 
   @Get(':id/arquivo')
-  @Requer('relatorios.ver', 'caixa.adm', 'notas.gerenciar')
+  @Requer('relatorios.ver', 'caixa.adm', 'notas.gerenciar', 'contador.acessar')
   async abrir(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Res({ passthrough: true }) res: { setHeader: (k: string, v: string) => void }) {
     const a = await this.service.arquivo(u, id);
     res.setHeader('Content-Type', a.mime);
@@ -320,7 +320,7 @@ export class SimplesController {
   }
 
   @Delete(':id')
-  @Requer('relatorios.ver', 'caixa.adm', 'notas.gerenciar')
+  @Requer('relatorios.ver', 'caixa.adm', 'notas.gerenciar', 'contador.acessar')
   apagar(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
     return this.service.apagar(u, id);
   }

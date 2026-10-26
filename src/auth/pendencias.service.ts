@@ -5,6 +5,8 @@ import { FeriasService } from '../funcionarios/ferias';
 import { EscalaService } from '../funcionarios/escala';
 import { LicencasService } from '../funcionarios/licencas';
 import { BancoHorasService } from '../funcionarios/banco-horas';
+import { AreaContadorService } from '../contador/area';
+import { LeitorContadorService } from '../contador/leitor';
 
 export interface Pendencia {
   chave: string;
@@ -112,6 +114,15 @@ export class PendenciasService {
                   (SELECT count(*) FROM ferramenta_pedidos WHERE empresa_id = $1 AND status = 'pendente')::int AS pedidos`, [u.empresaId]);
         if (pode('ferramentas.gerenciar')) add({ chave: 'ferramentas-atrasadas', nivel: 'aviso', titulo: 'Ferramentas com devolução atrasada', link: '/ferramentas' }, { n: f[0]?.atrasadas ?? 0, nomes: f[0]?.quem ?? '' });
         if (pode('compras.gerenciar', 'caixa.adm')) add({ chave: 'ferramentas-pedidos', nivel: 'aviso', titulo: 'Pedidos de ferramenta para aprovar', detalhe: 'aprovado já vira cotação', link: '/ferramentas?aba=pedidos' }, { n: f[0]?.pedidos ?? 0, nomes: '' }, false);
+      } catch { /* tabelas novas ainda não criadas */ }
+    }
+
+    if (pode('caixa.adm', 'funcionarios.gerenciar')) {
+      // do dia 15 em diante: o que o contador ainda não entregou do mês passado
+      try {
+        const c = await new AreaContadorService(this.ds, new LeitorContadorService()).faltando(u.empresaId);
+        add({ chave: 'contador-faltando', nivel: 'aviso', titulo: 'O contador ainda não entregou', detalhe: c.competencia ? `mês ${c.competencia.split('-').reverse().join('/')}` : undefined, link: '/contador?aba=entregas' },
+          { n: c.nomes.length, nomes: c.nomes.join(', ') });
       } catch { /* tabelas novas ainda não criadas */ }
     }
 
