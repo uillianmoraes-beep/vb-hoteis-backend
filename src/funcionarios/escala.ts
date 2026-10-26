@@ -101,6 +101,24 @@ class GerarDto {
   /** troca o que já estava na escala (senão só preenche os dias vazios) */
   @IsOptional() @IsBoolean() sobrescrever?: boolean;
 }
+/** escala padrão do funcionário (no cadastro): o mesmo que o Gerar, sem as datas e sem a lista de funcionários */
+class PadraoDto {
+  @IsIn(['semanal', 'ciclo', 'nenhum']) modo!: 'semanal' | 'ciclo' | 'nenhum';
+  @IsOptional() @IsArray() @ArrayMaxSize(6) @IsInt({ each: true }) @Min(0, { each: true }) @Max(6, { each: true }) folgasSemana?: number[];
+  @IsOptional() @IsInt() @Min(1) @Max(14) trabalhaDias?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(7) folgaDias?: number;
+  @IsOptional() @Matches(DATA) inicioCiclo?: string;
+  @IsOptional() @IsUUID() turnoId?: string;
+  @IsOptional() @Matches(HORA) inicio?: string;
+  @IsOptional() @Matches(HORA) fim?: string;
+  @IsOptional() @IsInt() @Min(0) @Max(240) intervaloMin?: number;
+  /** quantos dias para frente já preencher (só os dias vazios) */
+  @IsOptional() @IsInt() @Min(0) @Max(92) preencherDias?: number;
+}
+class AplicarDto {
+  @Matches(DATA) de!: string;
+  @Matches(DATA) ate!: string;
+}
 class CopiarDto {
   @Matches(DATA) origem!: string;
   @Matches(DATA) destino!: string;
@@ -404,6 +422,43 @@ export class EscalaService {
     return { ok: true, gravados };
   }
 
+  async padrao(u: UsuarioToken, funcionarioId: string) {
+    const [f] = await this.ds.query(`SELECT id, nome, escala_padrao FROM funcionarios WHERE id = $1 AND empresa_id = $2`, [funcionarioId, u.empresaId]);
+    if (!f) throw new NotFoundException('Funcionário não encontrado.');
+    return { id: f.id, nome: f.nome, padrao: f.escala_padrao ?? null, turnos: (await this.turnos(u.empresaId)).filter((t: { ativo: boolean }) => t.ativo) };
+  }
+
+  async salvarPadrao(u: UsuarioToken, funcionarioId: string, dto: PadraoDto) {
+    await this.conferirFuncionarios(u.empresaId, [funcionarioId]);
+    if (dto.modo === 'nenhum') {
+      await this.ds.query(`UPDATE funcionarios SET escala_padrao = NULL WHERE id = $1`, [funcionarioId]);
+      return { ok: true, gravados: 0 };
+    }
+    if (dto.modo === 'semanal' && !dto.folgasSemana?.length) throw new BadRequestException('Escolha o(s) dia(s) de folga.');
+    await this.horario(u.empresaId, dto); // confere o turno/horário
+    const { preencherDias, ...padrao } = dto;
+    await this.ds.query(`UPDATE funcionarios SET escala_padrao = $2 WHERE id = $1`, [funcionarioId, JSON.stringify(padrao)]);
+    const dias = preencherDias ?? 60;
+    if (!dias) return { ok: true, gravados: 0 };
+    const hoje = hojeSP();
+    const r = await this.gerar(u, { ...padrao, modo: padrao.modo as 'semanal' | 'ciclo', funcionarioIds: [funcionarioId], de: hoje, ate: somaDias(hoje, dias - 1), sobrescrever: false } as GerarDto);
+    return { ok: true, gravados: r.gravados };
+  }
+
+  /** preenche o período com a escala padrão de cada funcionário (só os dias vazios) */
+  async aplicarPadroes(u: UsuarioToken, dto: AplicarDto) {
+    if (dto.ate < dto.de || difDias(dto.de, dto.ate) > 92) throw new BadRequestException('Escolha até 3 meses.');
+    const fs: { id: string; escala_padrao: PadraoDto }[] = await this.ds.query(`SELECT id, escala_padrao FROM funcionarios WHERE empresa_id = $1 AND ativo AND escala_padrao IS NOT NULL`, [u.empresaId]);
+    let gravados = 0;
+    for (const f of fs) {
+      try {
+        const r = await this.gerar(u, { ...f.escala_padrao, funcionarioIds: [f.id], de: dto.de, ate: dto.ate, sobrescrever: false } as GerarDto);
+        gravados += r.gravados;
+      } catch { /* turno apagado ou padrão incompleto: pula este funcionário */ }
+    }
+    return { ok: true, funcionarios: fs.length, gravados };
+  }
+
   async criarTurno(u: UsuarioToken, dto: TurnoDto) {
     const [r] = await this.ds.query(`INSERT INTO escala_turnos (empresa_id, nome, inicio, fim, intervalo_min, cor) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
       [u.empresaId, dto.nome.trim(), dto.inicio, dto.fim, dto.intervaloMin, dto.cor ?? null]);
@@ -476,6 +531,24 @@ export class EscalaController {
   @Requer('funcionarios.gerenciar')
   gerar(@Usuario() u: UsuarioToken, @Body() dto: GerarDto) {
     return this.service.gerar(u, dto);
+  }
+
+  @Get('padrao/:funcionarioId')
+  @Requer('funcionarios.gerenciar', 'funcionarios.financeiro')
+  padrao(@Usuario() u: UsuarioToken, @Param('funcionarioId', ParseUUIDPipe) id: string) {
+    return this.service.padrao(u, id);
+  }
+
+  @Put('padrao/:funcionarioId')
+  @Requer('funcionarios.gerenciar')
+  salvarPadrao(@Usuario() u: UsuarioToken, @Param('funcionarioId', ParseUUIDPipe) id: string, @Body() dto: PadraoDto) {
+    return this.service.salvarPadrao(u, id, dto);
+  }
+
+  @Post('aplicar-padroes')
+  @Requer('funcionarios.gerenciar')
+  aplicarPadroes(@Usuario() u: UsuarioToken, @Body() dto: AplicarDto) {
+    return this.service.aplicarPadroes(u, dto);
   }
 
   @Post('copiar')

@@ -67,7 +67,11 @@ export class DespesasService {
   }
 
   async criar(u: UsuarioToken, dto: ContaPagarDto) {
-    const n = (dto.recorrente ?? 'nao') === 'mensal' ? 1 : Math.max(1, dto.boletos ?? 1);
+    const mensal = (dto.recorrente ?? 'nao') === 'mensal';
+    // prazos (7/14/21…) contados da data da compra; senão N boletos de 30 em 30 dias a partir do 1º vencimento
+    const prazos = !mensal && dto.prazos?.length ? [...dto.prazos].sort((a, b) => a - b) : null;
+    const n = mensal ? 1 : prazos ? prazos.length : Math.max(1, dto.boletos ?? 1);
+    const vence = (i: number) => (prazos ? somaDias(dto.dataCompra ?? dto.vencimento, prazos[i]) : somaDias(dto.vencimento, i * 30));
     const total = Math.round(dto.valor * 100);
     const lote = n > 1 ? randomUUID() : null;
     const aprovacao = await this.aprovacaoDe(u);
@@ -78,8 +82,8 @@ export class DespesasService {
         await m.query(
           `INSERT INTO contas_pagar (empresa_id, descricao, fornecedor, categoria, valor, vencimento, recorrente, codigo_barras, observacao, criado_por, valor_variavel, cnpj, aprovacao, lote_id, nota_total)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-          [u.empresaId, `${dto.descricao.trim()}${n > 1 ? ` · boleto ${i + 1}/${n}` : ''}`.slice(0, 200), dto.fornecedor?.trim() || null, dto.categoria?.trim() || null,
-            (valor / 100).toFixed(2), somaDias(dto.vencimento, i * 30), dto.recorrente ?? 'nao', i === 0 ? dto.codigoBarras?.trim() || null : null, dto.observacao?.trim() || null, u.nome,
+          [u.empresaId, `${dto.descricao.trim()}${n > 1 ? ` · boleto ${i + 1}/${n}${prazos ? ` (${prazos[i]} dias)` : ''}` : ''}`.slice(0, 200), dto.fornecedor?.trim() || null, dto.categoria?.trim() || null,
+            (valor / 100).toFixed(2), vence(i), dto.recorrente ?? 'nao', i === 0 ? dto.codigoBarras?.trim() || null : null, dto.observacao?.trim() || null, u.nome,
             (dto.recorrente ?? 'nao') === 'mensal' && !!dto.valorVariavel, cnpjDoForm(dto.cnpj), aprovacao, lote, n > 1 ? dto.valor.toFixed(2) : null]);
       }
     });

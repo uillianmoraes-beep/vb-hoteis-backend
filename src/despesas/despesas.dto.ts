@@ -16,6 +16,10 @@ export class ContaPagarDto {
   @IsOptional() @IsString() @MaxLength(18) cnpj?: string;
   /** compra em vários boletos: divide o valor e vence de 30 em 30 dias (só ao criar) */
   @IsOptional() @IsInt() @Min(1) @Max(24) boletos?: number;
+  /** prazos em dias a partir da compra (ex.: 7/14/21/30/60/90): um boleto para cada prazo, valor dividido (só ao criar) */
+  @IsOptional() @IsArray() @ArrayMinSize(1) @ArrayMaxSize(24) @IsInt({ each: true }) @Min(0, { each: true }) @Max(720, { each: true }) prazos?: number[];
+  /** data da compra (base dos prazos) */
+  @IsOptional() @Matches(/^\d{4}-\d{2}-\d{2}$/) dataCompra?: string;
 }
 
 export class AprovarContasDto {
