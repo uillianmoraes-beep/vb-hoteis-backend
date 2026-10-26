@@ -5,6 +5,7 @@ import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsNumber, 
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
+import { TIPOS_LICENCA, buscarLicencas } from './licencas';
 
 /**
  * Escala de trabalho: quem trabalha, em que horário, e quem folga em cada dia.
@@ -17,8 +18,9 @@ import { UsuarioToken } from '../common/permissoes';
 const DATA = /^\d{4}-\d{2}-\d{2}$/;
 const HORA = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DIA = 86_400_000;
-const TIPOS = ['trabalho', 'folga', 'falta', 'atestado'] as const;
-type Tipo = (typeof TIPOS)[number] | 'ferias';
+/** compensa = folga tirada do banco de horas */
+const TIPOS = ['trabalho', 'folga', 'falta', 'atestado', 'compensa'] as const;
+type Tipo = (typeof TIPOS)[number] | 'ferias' | 'licenca';
 const hojeSP = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
 const dia = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : v ? String(v).slice(0, 10) : null);
 const somaDias = (d: string, k: number) => new Date(Date.parse(`${d}T12:00:00Z`) + k * DIA).toISOString().slice(0, 10);
@@ -74,6 +76,8 @@ class DiaDto {
   @IsOptional() @IsString() @MaxLength(200) observacao?: string;
   /** atestado anexado (documento do funcionário); vale para falta e atestado */
   @IsOptional() @IsUUID() documentoId?: string;
+  /** folga do banco de horas: quantos minutos saem do banco (padrão: a jornada do dia) */
+  @IsOptional() @IsInt() @Min(0) @Max(720) minutosBanco?: number;
 }
 class DiasDto {
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(500) @ValidateNested({ each: true }) @Type(() => DiaDto) itens!: DiaDto[];
@@ -118,7 +122,7 @@ class RegrasDto {
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(1) @Max(60) horasSemana!: number;
 }
 
-interface DiaEscala { tipo: Tipo; turnoId: string | null; inicio: string | null; fim: string | null; intervaloMin: number; observacao: string | null; documentoId: string | null }
+interface DiaEscala { tipo: Tipo; turnoId: string | null; inicio: string | null; fim: string | null; intervaloMin: number; observacao: string | null; documentoId: string | null; minutosBanco?: number | null }
 
 @Injectable()
 export class EscalaService {
@@ -165,27 +169,37 @@ export class EscalaService {
     const regras = await this.regras(u.empresaId);
     // busca para trás para os alertas (dias seguidos, domingos) e para fechar a semana que termina no período
     const busca = somaDias(de, -Math.max(14, regras.domingoSemanas * 7 + 7));
-    const [funcs, turnos, feriados, linhas, ferias] = await Promise.all([
+    const [funcs, turnos, feriados, linhas, ferias, licencas] = await Promise.all([
       this.ds.query(
-        `SELECT f.id, f.nome, f.funcao, c.cargo, c.jornada, c.horas_semana, c.adicional_noturno, c.tipo_contrato
+        `SELECT f.id, f.nome, f.funcao, f.telefone, c.cargo, c.jornada, c.horas_semana, c.adicional_noturno, c.tipo_contrato
            FROM funcionarios f LEFT JOIN funcionario_contratos c ON c.funcionario_id = f.id
           WHERE f.empresa_id = $1 AND f.ativo AND (c.demissao IS NULL OR c.demissao >= $2) ORDER BY f.nome`, [u.empresaId, de]),
       this.turnos(u.empresaId),
       this.feriados(u.empresaId, busca, ate),
       this.ds.query(`SELECT * FROM escala_dias WHERE empresa_id = $1 AND data BETWEEN $2 AND $3`, [u.empresaId, busca, ate]),
       this.ds.query(`SELECT funcionario_id, inicio, dias FROM funcionario_ferias WHERE empresa_id = $1 AND status <> 'cancelada' AND inicio <= $3 AND inicio + dias > $2`, [u.empresaId, busca, ate]),
+      buscarLicencas(this.ds, u.empresaId),
     ]);
     const feriadoDe = new Map(feriados.map((f) => [f.data, f]));
     const porFunc = new Map<string, Map<string, DiaEscala>>();
     for (const x of linhas) {
       if (!porFunc.has(x.funcionario_id)) porFunc.set(x.funcionario_id, new Map());
-      porFunc.get(x.funcionario_id)!.set(dia(x.data)!, { tipo: x.tipo, turnoId: x.turno_id ?? null, inicio: x.inicio ?? null, fim: x.fim ?? null, intervaloMin: Number(x.intervalo_min) || 0, observacao: x.observacao ?? null, documentoId: x.documento_id ?? null });
+      porFunc.get(x.funcionario_id)!.set(dia(x.data)!, { tipo: x.tipo, turnoId: x.turno_id ?? null, inicio: x.inicio ?? null, fim: x.fim ?? null, intervaloMin: Number(x.intervalo_min) || 0, observacao: x.observacao ?? null, documentoId: x.documento_id ?? null, minutosBanco: x.minutos_banco ?? null });
     }
     // férias programadas aparecem sozinhas na escala
     for (const f of ferias) {
       if (!porFunc.has(f.funcionario_id)) porFunc.set(f.funcionario_id, new Map());
       const ini = dia(f.inicio)!;
       for (let k = 0; k < Number(f.dias); k++) porFunc.get(f.funcionario_id)!.set(somaDias(ini, k), { tipo: 'ferias', turnoId: null, inicio: null, fim: null, intervaloMin: 0, observacao: null, documentoId: null });
+    }
+    // licenças (maternidade, INSS…) também aparecem sozinhas, por cima da escala
+    for (const l of licencas) {
+      if (l.inicio > ate || (l.fim && l.fim < busca)) continue;
+      if (!porFunc.has(l.funcionarioId)) porFunc.set(l.funcionarioId, new Map());
+      const fim = l.fim && l.fim < ate ? l.fim : ate;
+      for (let d = l.inicio > busca ? l.inicio : busca; d <= fim; d = somaDias(d, 1)) {
+        porFunc.get(l.funcionarioId)!.set(d, { tipo: 'licenca', turnoId: null, inicio: null, fim: null, intervaloMin: 0, observacao: TIPOS_LICENCA[l.tipo]?.nome ?? 'Licença', documentoId: l.documentoId });
+      }
     }
     const datas: string[] = [];
     for (let d = de; d <= ate; d = somaDias(d, 1)) datas.push(d);
@@ -196,6 +210,8 @@ export class EscalaService {
       const horasSemana = f.horas_semana !== null && f.horas_semana !== undefined ? Number(f.horas_semana) : regras.horasSemana;
       const limiteDia = doze ? 720 : Math.max(480, Math.round((horasSemana * 60) / (jornada === '5x2' ? 5 : 6)));
       const maxDia = doze ? 720 : Math.round(regras.jornadaMaxH * 60);
+      /** jornada normal do dia (o que sai do banco numa folga de compensação) */
+      const minutosDia = doze ? 720 : Math.round((horasSemana * 60) / (jornada === '5x2' ? 5 : 6));
       const mapa = porFunc.get(f.id as string) ?? new Map<string, DiaEscala>();
       const alertas: { data: string; texto: string }[] = [];
       const calc = new Map<string, ReturnType<typeof calcular>>();
@@ -227,7 +243,7 @@ export class EscalaService {
       }
 
       // resumo do período; horas extras pela semana (segunda a domingo) que termina dentro do período
-      const r = { diasTrabalho: 0, folgas: 0, faltas: 0, atestados: 0, ferias: 0, semEscala: 0, minutos: 0, noturno: 0, reducao: 0, feriado: 0, domingos: 0, extras: 0 };
+      const r = { diasTrabalho: 0, folgas: 0, faltas: 0, atestados: 0, ferias: 0, licencas: 0, compensa: 0, bancoUsado: 0, semEscala: 0, minutos: 0, noturno: 0, reducao: 0, feriado: 0, domingos: 0, extras: 0 };
       for (const d of datas) {
         const x = mapa.get(d);
         if (!x) { r.semEscala++; continue; }
@@ -236,6 +252,8 @@ export class EscalaService {
         else if (x.tipo === 'falta') r.faltas++;
         else if (x.tipo === 'atestado') r.atestados++;
         else if (x.tipo === 'ferias') r.ferias++;
+        else if (x.tipo === 'licenca') r.licencas++;
+        else if (x.tipo === 'compensa') { r.compensa++; r.bancoUsado += x.minutosBanco ?? minutosDia; }
         const c = calc.get(d);
         if (!c) continue;
         r.minutos += c.trabalhado + c.reducao;
@@ -268,7 +286,7 @@ export class EscalaService {
         if (x) dias[d] = { ...x, minutos: calc.get(d) ? calc.get(d)!.trabalhado : 0, noturno: calc.get(d)?.noturno ?? 0 };
       }
       return {
-        id: f.id as string, nome: f.nome as string, cargo: (f.cargo as string) ?? (f.funcao as string), jornada, horasSemana, adicionalNoturno: !!f.adicional_noturno,
+        id: f.id as string, nome: f.nome as string, telefone: (f.telefone as string) ?? null, cargo: (f.cargo as string) ?? (f.funcao as string), jornada, horasSemana, minutosDia, adicionalNoturno: !!f.adicional_noturno,
         tipoContrato: (f.tipo_contrato as string) ?? null, dias, resumo: r, semanas, alertas,
       };
     });
@@ -331,10 +349,10 @@ export class EscalaService {
           h = turnos.get(chave)!;
         }
         await m.query(
-          `INSERT INTO escala_dias (funcionario_id, data, empresa_id, tipo, turno_id, inicio, fim, intervalo_min, observacao, usuario_nome, documento_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-           ON CONFLICT (funcionario_id, data) DO UPDATE SET tipo=$4, turno_id=$5, inicio=$6, fim=$7, intervalo_min=$8, observacao=$9, usuario_nome=$10, documento_id=$11, atualizado_em=now()`,
+          `INSERT INTO escala_dias (funcionario_id, data, empresa_id, tipo, turno_id, inicio, fim, intervalo_min, observacao, usuario_nome, documento_id, minutos_banco) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+           ON CONFLICT (funcionario_id, data) DO UPDATE SET tipo=$4, turno_id=$5, inicio=$6, fim=$7, intervalo_min=$8, observacao=$9, usuario_nome=$10, documento_id=$11, minutos_banco=$12, atualizado_em=now()`,
           [i.funcionarioId, i.data, u.empresaId, i.tipo, h.turnoId, h.inicio, h.fim, h.intervaloMin, i.observacao?.trim() || null, u.nome,
-            i.tipo === 'falta' || i.tipo === 'atestado' ? i.documentoId ?? null : null]);
+            i.tipo === 'falta' || i.tipo === 'atestado' ? i.documentoId ?? null : null, i.tipo === 'compensa' ? i.minutosBanco ?? null : null]);
       }
     });
     return { ok: true, total: dto.itens.length };

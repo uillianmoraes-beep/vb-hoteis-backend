@@ -5,6 +5,7 @@ import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
 import { custoBeneficios } from './contrato';
+import { INSS, Licenca, buscarLicencas, diasAfastado } from './licencas';
 
 /**
  * Férias, 13º e provisões (o sistema não faz a folha: mostra o que vence, quanto custa e quanto guardar).
@@ -124,7 +125,9 @@ export class FeriasService {
   }
 
   /** períodos de férias de um funcionário, do mais antigo ao atual, com o saldo e a situação */
-  private periodos(f: Func, progs: Prog[], marcas: Map<string, { faltas: number; quitado: boolean; observacao: string | null }>, hoje: string) {
+  private periodos(f: Func, progs: Prog[], marcas: Map<string, { faltas: number; quitado: boolean; observacao: string | null }>, hoje: string, lics: Licenca[] = []) {
+    // dias de afastamento pago pelo INSS (do 16º em diante): mais de 6 meses no período perde as férias (CLT art. 133, IV)
+    const inss = new Set(lics.filter((l) => INSS.includes(l.tipo)).flatMap((l) => diasAfastado(l, hoje)));
     if (!f.admissao || f.admissao > hoje) return [];
     const out = [];
     for (let k = 0; k < 60; k++) {
@@ -134,7 +137,10 @@ export class FeriasService {
       const limite = somaDias(somaMeses(f.admissao, 12 * (k + 2)), -1);
       const marca = marcas.get(ini);
       const faltas = marca?.faltas ?? 0;
-      const direito = direitoPorFaltas(faltas);
+      let diasInss = 0;
+      for (const d of inss) if (d >= ini && d <= fim) diasInss++;
+      const perdeuInss = diasInss > 180;
+      const direito = perdeuInss ? 0 : direitoPorFaltas(faltas);
       const daqui = progs.filter((p) => p.aquisitivoInicio === ini);
       const usados = daqui.reduce((s, p) => s + p.dias + p.abonoDias, 0);
       const gozados = daqui.filter((p) => p.inicio <= hoje).reduce((s, p) => s + p.dias + p.abonoDias, 0);
@@ -146,7 +152,7 @@ export class FeriasService {
       const situacao = marca?.quitado || antigo ? 'quitado' : emAquisicao ? 'aquisicao' : saldo === 0 ? (gozados >= direito ? 'tirado' : 'programado') : limite < hoje ? 'vencido' : 'a_vencer';
       const valorDia = (f.salario / 30) * (4 / 3);
       out.push({
-        aquisitivoInicio: ini, aquisitivoFim: fim, limite, faltas, direito, usados, gozados, saldo, situacao, antigo, quitadoManual: !!marca?.quitado, observacao: marca?.observacao ?? null,
+        aquisitivoInicio: ini, aquisitivoFim: fim, limite, faltas, diasInss, perdeuInss, direito, usados, gozados, saldo, situacao, antigo, quitadoManual: !!marca?.quitado, observacao: marca?.observacao ?? null,
         avos: emAquisicao ? avos(ini, hoje) : 12, comecarAte, diasParaComecar: comecarAte ? difDias(hoje, comecarAte) : null,
         // quanto custa o que falta tirar (vencido paga em dobro)
         valorSaldo: situacao === 'vencido' ? r2(valorDia * saldo * 2) : situacao === 'a_vencer' ? r2(valorDia * saldo) : 0,
@@ -175,9 +181,9 @@ export class FeriasService {
 
   async ferias(u: UsuarioToken) {
     const hoje = hojeSP();
-    const [fs, progs, marcas] = await Promise.all([this.funcionarios(u.empresaId), this.programacoes(u.empresaId), this.marcas(u.empresaId)]);
+    const [fs, progs, marcas, lics] = await Promise.all([this.funcionarios(u.empresaId), this.programacoes(u.empresaId), this.marcas(u.empresaId), buscarLicencas(this.ds, u.empresaId)]);
     const lista = fs.map((f) => {
-      const ps = this.periodos(f, progs.filter((p) => p.funcionarioId === f.id), marcas.get(f.id) ?? new Map(), hoje);
+      const ps = this.periodos(f, progs.filter((p) => p.funcionarioId === f.id), marcas.get(f.id) ?? new Map(), hoje, lics.filter((l) => l.funcionarioId === f.id));
       const abertos = ps.filter((p) => p.situacao === 'vencido' || p.situacao === 'a_vencer');
       const proxima = progs.filter((p) => p.funcionarioId === f.id && p.fim >= hoje)[0] ?? null;
       return {
@@ -207,8 +213,9 @@ export class FeriasService {
     const hoje = hojeSP();
     const progs = await this.programacoes(u.empresaId, f.id);
     const marcas = (await this.marcas(u.empresaId)).get(f.id) ?? new Map();
+    const lics = await buscarLicencas(this.ds, u.empresaId, f.id);
     // programar pode ser de período ainda em aquisição, desde que as férias comecem depois que ele fechar
-    const todos = this.periodos(f, progs, marcas, dto.inicio > hoje ? dto.inicio : hoje);
+    const todos = this.periodos(f, progs, marcas, dto.inicio > hoje ? dto.inicio : hoje, lics);
     const p = todos.find((x) => x.aquisitivoInicio === dto.aquisitivoInicio);
     if (!p) throw new BadRequestException('Período de férias não encontrado.');
     if (p.situacao === 'quitado') throw new BadRequestException('Este período está marcado como já tirado.');
@@ -257,12 +264,15 @@ export class FeriasService {
     const hoje = hojeSP();
     const ano = anoQ && anoQ >= 2000 && anoQ <= 2100 ? anoQ : Number(hoje.slice(0, 4));
     const fs = await this.funcionarios(u.empresaId);
+    const lics = await buscarLicencas(this.ds, u.empresaId);
     const pagos: { funcionario_id: string; parcela: number; valor: string; data: unknown }[] = await this.ds.query(`SELECT * FROM funcionario_decimo WHERE empresa_id = $1 AND ano = $2`, [u.empresaId, ano]);
     const nasFerias: { funcionario_id: string; inicio: unknown }[] = await this.ds.query(
       `SELECT funcionario_id, min(inicio) AS inicio FROM funcionario_ferias WHERE empresa_id = $1 AND status <> 'cancelada' AND adiantar_13 AND extract(year FROM inicio) = $2 GROUP BY 1`, [u.empresaId, ano]);
     const lista = fs.filter((f) => f.admissao && f.admissao <= `${ano}-12-31`).map((f) => {
       const ini = f.admissao! > `${ano}-01-01` ? f.admissao! : `${ano}-01-01`;
       const fimAno = f.demissao && f.demissao < `${ano}-12-31` ? f.demissao : `${ano}-12-31`;
+      // dias pagos pelo INSS (16º em diante) ou licença sem salário não contam para o 13º da empresa
+      const fora = new Set(lics.filter((l) => l.funcionarioId === f.id).flatMap((l) => diasAfastado(l, `${ano}-12-31`)));
       // avo por mês do calendário: 15 dias ou mais trabalhados naquele mês
       const avoMes = (ate: string) => {
         let k = 0;
@@ -270,7 +280,9 @@ export class FeriasService {
           const a = `${ano}-${String(m).padStart(2, '0')}-01`;
           const b = somaDias(somaMeses(a, 1), -1);
           const de = a > ini ? a : ini, ateMes = b < ate ? b : ate;
-          if (ateMes >= de && difDias(de, ateMes) + 1 >= 15) k++;
+          let afast = 0;
+          for (let d = de; d <= ateMes; d = somaDias(d, 1)) if (fora.has(d)) afast++;
+          if (ateMes >= de && difDias(de, ateMes) + 1 - afast >= 15) k++;
         }
         return k;
       };

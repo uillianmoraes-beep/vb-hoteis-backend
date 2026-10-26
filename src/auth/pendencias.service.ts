@@ -3,6 +3,8 @@ import { DataSource } from 'typeorm';
 import { UsuarioToken, temPermissao } from '../common/permissoes';
 import { FeriasService } from '../funcionarios/ferias';
 import { EscalaService } from '../funcionarios/escala';
+import { LicencasService } from '../funcionarios/licencas';
+import { BancoHorasService } from '../funcionarios/banco-horas';
 
 export interface Pendencia {
   chave: string;
@@ -85,6 +87,19 @@ export class PendenciasService {
         const r = await new EscalaService(this.ds).semEscalaProximaSemana(u.empresaId);
         add({ chave: 'escala-proxima-semana', nivel: 'aviso', titulo: 'Escala da semana que vem sem montar', detalhe: `a partir de ${r.segunda}`, link: '/escala' },
           { n: r.nomes.length, nomes: r.nomes.slice(0, 5).join(', ') });
+      } catch { /* tabelas novas ainda não criadas */ }
+    }
+
+    if (pode('funcionarios.gerenciar', 'funcionarios.financeiro')) {
+      // licença terminando (preparar a volta) e afastado do INSS sem data de volta
+      try {
+        const l = await new LicencasService(this.ds).avisos(u.empresaId);
+        add({ chave: 'licencas-volta', nivel: 'info', titulo: 'Funcionário voltando de licença', link: '/funcionarios' }, { n: l.length, nomes: l.slice(0, 5).join(', ') });
+      } catch { /* tabelas novas ainda não criadas */ }
+      // banco de horas: horas vencidas (têm que ser pagas) ou vencendo em 30 dias
+      try {
+        const b = await new BancoHorasService(this.ds, new EscalaService(this.ds)).avisos(u.empresaId);
+        add({ chave: 'banco-horas-vencendo', nivel: 'aviso', titulo: 'Banco de horas vencendo', detalhe: 'dê a folga ou pague as horas', link: '/escala?aba=banco' }, { n: b.length, nomes: b.slice(0, 5).join(', ') });
       } catch { /* tabelas novas ainda não criadas */ }
     }
 
