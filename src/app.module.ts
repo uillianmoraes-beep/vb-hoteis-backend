@@ -31,6 +31,7 @@ import { FerramentasModule } from './ferramentas/ferramentas';
 import { UniformesModule } from './uniformes/uniformes';
 import { PrecificacaoModule } from './precificacao/precificacao';
 import { AssistenteModule } from './assistente/assistente';
+import { EventosModule } from './eventos/eventos';
 import { ContratosModule } from './contratos/contratos';
 import { BalcaoModule } from './balcao/balcao.module';
 import { DespesasModule } from './despesas/despesas.module';
@@ -95,6 +96,7 @@ import { ManualModule } from './manual/manual.module';
     UniformesModule,
     PrecificacaoModule,
     AssistenteModule,
+    EventosModule,
     UniformesModule,
     ContratosModule,
     BalcaoModule,
