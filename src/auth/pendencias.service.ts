@@ -118,6 +118,16 @@ export class PendenciasService {
       } catch { /* tabelas novas ainda não criadas */ }
     }
 
+    if (pode('reservas.gerenciar')) {
+      // reserva online começada e não terminada (últimas 48 h), ainda sem ninguém chamar
+      try {
+        const ab = await this.ds.query(
+          `SELECT count(*)::int AS n, string_agg(COALESCE(nome, telefone), ', ') AS quem FROM reservas_rascunhos
+            WHERE empresa_id = $1 AND reserva_id IS NULL AND contatado_em IS NULL AND atualizado_em BETWEEN now() - interval '48 hours' AND now() - interval '20 minutes'`, [u.empresaId]);
+        add({ chave: 'reservas-abandonadas', nivel: 'info', titulo: 'Reserva online não terminada', detalhe: 'chame no WhatsApp', link: '/promocoes?aba=abandonadas' }, { n: ab[0]?.n ?? 0, nomes: ab[0]?.quem ?? '' });
+      } catch { /* tabelas novas ainda não criadas */ }
+    }
+
     if (pode('uniformes.gerenciar')) {
       // uniformes e EPI: troca vencida, estoque abaixo do mínimo, CA do EPI vencido
       try {

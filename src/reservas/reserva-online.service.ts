@@ -3,7 +3,8 @@ import { fichaDaReserva } from './reservas.service';
 import { DataSource } from 'typeorm';
 import { randomBytes } from 'crypto';
 import { UsuarioToken } from '../common/permissoes';
-import { ConfigReservaOnlineDto, ReservaPublicaDto } from './reservas.dto';
+import { ConfigReservaOnlineDto, RascunhoReservaDto, ReservaPublicaDto } from './reservas.dto';
+import { aplicarPromocoes, type Fidelidade } from './promocoes';
 import { CobrancaService } from '../cobranca/cobranca.service';
 import { enviarParaLocal } from '../servidor-local/ponte.core';
 import { conferirCpfLivre } from './cpf-unico';
@@ -130,7 +131,17 @@ export class ReservaOnlineService {
       `SELECT c.id, c.nome, c.descricao, c.foto, MAX(un.capacidade) AS capacidade, COUNT(un.id) AS quartos
          FROM categorias c JOIN unidades un ON un.categoria_id = c.id AND un.ativo AND un.ambiente_id = $1
         WHERE c.empresa_id = $2 GROUP BY c.id ORDER BY c.ordem, c.nome`, [a.id, a.empresa_id]);
+    const pacotes = await this.ds.query(
+      `SELECT id, nome, descricao, acrescimo, desconto_pct, desconto_valor, min_noites FROM promocoes
+        WHERE empresa_id = $1 AND tipo = 'pacote' AND ativo AND (ambiente_id IS NULL OR ambiente_id = $2) AND (valido_ate IS NULL OR valido_ate >= $3::date)
+          AND (limite_usos = 0 OR usos < limite_usos) ORDER BY nome`, [a.empresa_id, a.id, hojeSP()]).catch(() => []);
+    const [cup] = await this.ds.query(`SELECT count(*)::int AS n FROM promocoes WHERE empresa_id = $1 AND tipo = 'cupom' AND ativo`, [a.empresa_id]).catch(() => [{ n: 0 }]);
+    const [emp] = await this.ds.query(`SELECT fidelidade FROM empresas WHERE id = $1`, [a.empresa_id]).catch(() => [null]);
+    const fid = (emp?.fidelidade ?? {}) as Fidelidade;
     return {
+      pacotes: pacotes.map((p: Record<string, unknown>) => ({ id: p.id, nome: p.nome, descricao: p.descricao, acrescimo: Number(p.acrescimo), descontoPct: Number(p.desconto_pct), descontoValor: Number(p.desconto_valor), minNoites: Number(p.min_noites) })),
+      temCupom: Number(cup?.n ?? 0) > 0,
+      clube: fid.ativo ? `Clube de fidelidade: a cada ${fid.aCada} hospedagens, ${fid.descontoPct}% de desconto na próxima.` : null,
       hotel: a.empresa, ambiente: a.nome, mensagem: cfg.mensagem ?? null, escolherQuarto: !!cfg.escolherQuarto, confirmacao: cfg.confirmacao ?? 'recepcao',
       sinalPct, minNoites: cfg.minNoites ?? 1, maxNoites: cfg.maxNoites ?? 30, hoje: hojeSP(), ate: somaDias(hojeSP(), cfg.janelaDias ?? 365), whatsapp: cfg.whatsapp ?? null,
       categorias: cats.filter((c: { id: string }) => cfg.categorias?.[c.id]?.ativo && (cfg.categorias[c.id].diaria ?? 0) > 0).map((c: Record<string, unknown>) => ({
@@ -200,6 +211,29 @@ export class ReservaOnlineService {
     };
   }
 
+  /** o hóspede vê o total com pacote, cupom e clube antes de reservar */
+  async simular(token: string, q: { chegada: string; saida: string; adultos: number; criancas: number; categoriaId: string; unidadeId?: string; cupom?: string; pacoteId?: string; telefone?: string; documento?: string }) {
+    const { a, cfg } = await this.ambientePorToken(token);
+    const n = this.validarDatas(cfg, q.chegada, q.saida);
+    if (!cfg.categorias?.[q.categoriaId]?.ativo) throw new BadRequestException('Categoria indisponível.');
+    const { total } = this.preco(cfg, q.categoriaId, q.unidadeId ?? null, n, Math.max(1, q.adultos) + Math.max(0, q.criancas));
+    const r = await aplicarPromocoes(this.ds, { empresaId: a.empresa_id, ambienteId: a.id, total, noites: n, chegada: q.chegada, cupom: q.cupom, pacoteId: q.pacoteId, telefone: q.telefone, documento: q.documento });
+    return { bruto: total, total: r.total, desconto: r.desconto, acrescimo: r.acrescimo, detalhes: r.detalhes, fidelidade: r.fidelidade };
+  }
+
+  /** guarda o contato de quem começou a reservar (para a recepção chamar se não terminar) */
+  async rascunho(token: string, dto: RascunhoReservaDto) {
+    const { a } = await this.ambientePorToken(token);
+    const fone = dto.telefone.replace(/\D/g, '');
+    if (fone.length < 10) return { ok: true };
+    const [ja] = await this.ds.query(
+      `SELECT id FROM reservas_rascunhos WHERE ambiente_id = $1 AND reserva_id IS NULL AND right(regexp_replace(telefone, '\\D', '', 'g'), 11) = right($2, 11) AND atualizado_em > now() - interval '2 days' LIMIT 1`, [a.id, fone]);
+    const v = [dto.nome?.trim() || null, dto.telefone.trim(), dto.email?.trim() || null, dto.chegada || null, dto.saida || null, dto.adultos ?? null, dto.criancas ?? null, dto.categoriaId || null, dto.total ?? null];
+    if (ja) await this.ds.query(`UPDATE reservas_rascunhos SET nome=COALESCE($2,nome), telefone=$3, email=COALESCE($4,email), chegada=COALESCE($5,chegada), saida=COALESCE($6,saida), adultos=COALESCE($7,adultos), criancas=COALESCE($8,criancas), categoria_id=COALESCE($9,categoria_id), total=COALESCE($10,total), atualizado_em=now() WHERE id=$1`, [ja.id, ...v]);
+    else await this.ds.query(`INSERT INTO reservas_rascunhos (empresa_id, ambiente_id, nome, telefone, email, chegada, saida, adultos, criancas, categoria_id, total) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`, [a.empresa_id, a.id, ...v]);
+    return { ok: true };
+  }
+
   async reservar(token: string, dto: ReservaPublicaDto) {
     const { a, cfg } = await this.ambientePorToken(token);
     const n = this.validarDatas(cfg, dto.chegada, dto.saida);
@@ -231,7 +265,9 @@ export class ReservaOnlineService {
       // sem escolha: primeiro quarto livre da categoria, preferindo os sem acréscimo
       if (!quarto) quarto = [...daCat].sort((x: { id: string }, y: { id: string }) => (cfg.quartos?.[x.id]?.acrescimo ?? 0) - (cfg.quartos?.[y.id]?.acrescimo ?? 0))[0];
       if (!quarto) throw new BadRequestException('Não há mais quartos livres nessa categoria para essas datas.');
-      const { diaria, total } = this.preco(cfg, dto.categoriaId, dto.unidadeId ? quarto.id : null, n, pessoas);
+      const { diaria, total: bruto } = this.preco(cfg, dto.categoriaId, dto.unidadeId ? quarto.id : null, n, pessoas);
+      const promo = await aplicarPromocoes(m, { empresaId: a.empresa_id, ambienteId: a.id, total: bruto, noites: n, chegada: dto.chegada, cupom: dto.cupom, pacoteId: dto.pacoteId, telefone: dto.telefone, documento: dto.documento });
+      const total = promo.total;
       const c = await m.query('UPDATE empresas SET ultima_reserva = ultima_reserva + 1 WHERE id = $1 RETURNING ultima_reserva', [a.empresa_id]);
       const linha = Array.isArray(c?.[0]) ? c[0][0] : c?.[0];
       const [cat] = await m.query(`SELECT nome FROM categorias WHERE id = $1`, [dto.categoriaId]);
@@ -242,7 +278,15 @@ export class ReservaOnlineService {
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,0,'Online',$15,$16,'Reserva online',NULL,$17,$18,$19) RETURNING id, numero`,
         [a.empresa_id, linha ? Number(linha.ultima_reserva) : null, quarto.id, a.id, dto.nome.trim(), dto.telefone.trim(), dto.email?.trim() || null,
           dto.documento?.trim() || null, dto.chegada, dto.saida, dto.adultos, dto.criancas ?? 0, diaria.toFixed(2), total.toFixed(2),
-          dto.observacao?.trim() || null, status, codigo, cat?.nome ?? null, !!dto.unidadeId]);
+          [dto.observacao?.trim(), ...promo.detalhes].filter(Boolean).join(' · ').slice(0, 500) || null, status, codigo, cat?.nome ?? null, !!dto.unidadeId]);
+      if (promo.desconto || promo.pacoteId || promo.cupomCodigo) {
+        await m.query(`UPDATE reservas SET desconto = $2, cupom_codigo = $3, pacote_id = $4, pacote_nome = $5 WHERE id = $1`, [nova.id, promo.desconto.toFixed(2), promo.cupomCodigo, promo.pacoteId, promo.pacoteNome]);
+        const usados = [promo.cupomId, promo.pacoteId].filter(Boolean);
+        if (usados.length) await m.query(`UPDATE promocoes SET usos = usos + 1 WHERE id = ANY($1::uuid[])`, [usados]);
+      }
+      // quem tinha largado a reserva no meio e voltou: conta como recuperada
+      await m.query(`UPDATE reservas_rascunhos SET reserva_id = $3 WHERE empresa_id = $1 AND reserva_id IS NULL AND right(regexp_replace(telefone, '\\D', '', 'g'), 11) = right($2, 11)`,
+        [a.empresa_id, fone, nova.id]);
       return { ...nova, codigo, quarto, total, categoria: cat?.nome ?? '' };
     });
     const pix = sinalPct > 0

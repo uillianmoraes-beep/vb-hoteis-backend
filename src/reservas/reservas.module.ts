@@ -5,6 +5,7 @@ import { ReservasService } from './reservas.service';
 import { ReservasController } from './reservas.controller';
 import { ReservaOnlineService } from './reserva-online.service';
 import { ReservaOnlineController } from './reserva-online.controller';
+import { PromocoesController, PromocoesService } from './promocoes';
 
-@Module({ imports: [EstadiasModule, CobrancaModule], providers: [ReservasService, ReservaOnlineService], controllers: [ReservasController, ReservaOnlineController] })
+@Module({ imports: [EstadiasModule, CobrancaModule], providers: [ReservasService, ReservaOnlineService, PromocoesService], controllers: [ReservasController, ReservaOnlineController, PromocoesController] })
 export class ReservasModule {}

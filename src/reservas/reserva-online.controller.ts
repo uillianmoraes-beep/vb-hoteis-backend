@@ -1,6 +1,6 @@
 import { BadRequestException, Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { ReservaOnlineService } from './reserva-online.service';
-import { ConfigReservaOnlineDto, ReservaPublicaDto } from './reservas.dto';
+import { ConfigReservaOnlineDto, RascunhoReservaDto, ReservaPublicaDto } from './reservas.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { Publico } from '../common/decorators/publico.decorator';
@@ -9,6 +9,8 @@ import { UsuarioToken } from '../common/permissoes';
 const tk = (t: string) => t.replace(/[^a-f0-9]/gi, '').slice(0, 24);
 const cod = (t: string) => t.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 16);
 const int = (v: string | undefined, padrao: number) => { const n = Number(v); return Number.isInteger(n) && n >= 0 && n <= 20 ? n : padrao; };
+
+const uuid = (v?: string) => (v && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v) ? v : undefined);
 
 @Controller()
 export class ReservaOnlineController {
@@ -22,6 +24,18 @@ export class ReservaOnlineController {
   disponibilidade(@Param('token') t: string, @Query('chegada') chegada = '', @Query('saida') saida = '', @Query('adultos') adultos?: string, @Query('criancas') criancas?: string) {
     return this.service.disponibilidade(tk(t), chegada, saida, Math.max(1, int(adultos, 2)), int(criancas, 0));
   }
+
+  @Publico() @Get('publico/reserva/:token/simular')
+  simular(@Param('token') t: string, @Query() q: Record<string, string>) {
+    return this.service.simular(tk(t), {
+      chegada: String(q.chegada ?? ''), saida: String(q.saida ?? ''), adultos: Math.max(1, int(q.adultos, 2)), criancas: int(q.criancas, 0),
+      categoriaId: uuid(q.categoriaId) ?? '', unidadeId: uuid(q.unidadeId), cupom: q.cupom ? String(q.cupom).slice(0, 30) : undefined,
+      pacoteId: uuid(q.pacoteId), telefone: q.telefone ? String(q.telefone).slice(0, 30) : undefined, documento: q.documento ? String(q.documento).slice(0, 30) : undefined,
+    });
+  }
+
+  @Publico() @Post('publico/reserva/:token/rascunho') @HttpCode(200)
+  rascunho(@Param('token') t: string, @Body() dto: RascunhoReservaDto) { return this.service.rascunho(tk(t), dto); }
 
   @Publico() @Post('publico/reserva/:token') @HttpCode(200)
   reservar(@Param('token') t: string, @Body() dto: ReservaPublicaDto) { return this.service.reservar(tk(t), dto); }

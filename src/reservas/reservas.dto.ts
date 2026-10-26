@@ -96,4 +96,19 @@ export class ReservaPublicaDto {
   @IsOptional() @IsEmail() @MaxLength(120) email?: string;
   @IsOptional() @IsString() @MaxLength(30) documento?: string;
   @IsOptional() @IsString() @MaxLength(500) observacao?: string;
+  @IsOptional() @IsString() @MaxLength(30) cupom?: string;
+  @IsOptional() @IsUUID() pacoteId?: string;
+}
+
+/** o hóspede deixou o telefone e ainda não terminou a reserva */
+export class RascunhoReservaDto {
+  @IsOptional() @IsString() @MaxLength(120) nome?: string;
+  @IsString() @MinLength(8) @MaxLength(30) telefone!: string;
+  @IsOptional() @IsEmail() @MaxLength(120) email?: string;
+  @IsOptional() @Matches(DATA) chegada?: string;
+  @IsOptional() @Matches(DATA) saida?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(20) adultos?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(20) criancas?: number;
+  @IsOptional() @IsUUID() categoriaId?: string;
+  @IsOptional() @IsNumber() @Min(0) @Max(10_000_000) total?: number;
 }
