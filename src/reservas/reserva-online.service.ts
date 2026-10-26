@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { fichaDaReserva } from './reservas.service';
 import { DataSource } from 'typeorm';
 import { randomBytes } from 'crypto';
 import { UsuarioToken } from '../common/permissoes';
@@ -259,7 +260,7 @@ export class ReservaOnlineService {
 
   async consulta(codigo: string) {
     const [r] = await this.ds.query(
-      `SELECT r.id, r.sinal, r.numero, r.hospede, r.chegada, r.saida, r.adultos, r.criancas, r.valor_total, r.status, r.categoria_pedida, r.quarto_escolhido,
+      `SELECT r.id, r.empresa_id, r.unidade_id, r.telefone, r.email, r.documento, r.sinal, r.numero, r.hospede, r.chegada, r.saida, r.adultos, r.criancas, r.valor_total, r.status, r.categoria_pedida, r.quarto_escolhido,
               un.codigo AS quarto, a.nome AS ambiente, a.reserva_online, e.nome AS hotel
          FROM reservas r JOIN unidades un ON un.id = r.unidade_id JOIN ambientes a ON a.id = r.ambiente_id JOIN empresas e ON e.id = r.empresa_id
         WHERE r.codigo_publico = $1`, [codigo]);
@@ -267,7 +268,10 @@ export class ReservaOnlineService {
     const cfg = (r.reserva_online ?? {}) as ConfigOnline;
     const [pix] = r.status === 'pendente' ? await this.ds.query(
       `SELECT valor, pix_copia_cola, pix_imagem, vencimento FROM cobrancas WHERE tipo = 'reserva_sinal' AND referencia_id = $1 AND status = 'pendente' ORDER BY criado_em DESC LIMIT 1`, [r.id]) : [];
+    // pré-check-in: o hóspede já preenche a ficha (documento e assinatura) pelo celular antes de chegar
+    const ficha = ['pendente', 'confirmada'].includes(r.status) ? await fichaDaReserva(this.ds, r).catch(() => null) : null;
     return {
+      preCheckin: ficha ? { token: ficha.token, preenchida: ficha.status === 'preenchida' } : null,
       pix: pix ? { valor: Number(pix.valor), copiaECola: pix.pix_copia_cola, imagem: pix.pix_imagem, vencimento: dia(pix.vencimento) } : null,
       sinalPago: Number(r.sinal ?? 0),
       numero: r.numero, hospede: String(r.hospede).split(' ')[0], chegada: dia(r.chegada), saida: dia(r.saida), adultos: r.adultos, criancas: r.criancas,

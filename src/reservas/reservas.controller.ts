@@ -72,6 +72,13 @@ export class ReservasController {
     return this.service.cancelar(u, id, dto);
   }
 
+  @Post(':id/pre-checkin')
+  @HttpCode(200)
+  @Requer('reservas.gerenciar', 'estadias.operar', 'estadias.entrada')
+  preCheckin(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) {
+    return this.service.preCheckin(u, id);
+  }
+
   @Post(':id/checkin')
   @HttpCode(200)
   @Requer('reservas.gerenciar', 'estadias.operar', 'estadias.entrada')

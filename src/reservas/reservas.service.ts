@@ -27,7 +27,22 @@ const fmt = (r: Record<string, unknown>) => ({
   sinal: Number(r.sinal), sinalForma: r.sinal_forma, origem: r.origem, observacao: r.observacao, status: r.status,
   estadiaId: r.estadia_id, nova: !r.vista_em, motivoCancelamento: r.motivo_cancelamento, criadoPor: r.criado_por, criadoEm: r.criado_em,
   grupoId: r.grupo_id ?? null, codigoPublico: r.codigo_publico ?? null, categoriaPedida: r.categoria_pedida ?? null, quartoEscolhido: !!r.quarto_escolhido,
+  preCheckin: r.ficha_status ?? null,
 });
+
+/** a ficha do pré-check-in da reserva (cria na primeira vez, já com nome, telefone e datas) */
+export async function fichaDaReserva(ds: DataSource, r: Record<string, unknown>): Promise<{ token: string; status: string }> {
+  const [ja] = await ds.query(`SELECT token, status FROM fichas_hospede WHERE reserva_id = $1 ORDER BY criado_em DESC LIMIT 1`, [r.id]);
+  if (ja) return ja;
+  const dados: Record<string, unknown> = { nome: r.hospede, checkin: `${dia(r.chegada)}T14:00`, checkout: `${dia(r.saida)}T12:00` };
+  if (r.telefone) dados.telefone = r.telefone;
+  if (r.email) dados.email = r.email;
+  if (r.documento) dados.documento = r.documento;
+  const token = randomBytes(9).toString('base64url');
+  await ds.query(`INSERT INTO fichas_hospede (empresa_id, reserva_id, unidade_id, token, dados, criado_por) VALUES ($1,$2,$3,$4,$5::jsonb,'pré-check-in')`,
+    [r.empresa_id, r.id, r.unidade_id, token, JSON.stringify(dados)]);
+  return { token, status: 'pendente' };
+}
 
 @Injectable()
 export class ReservasService {
@@ -58,7 +73,9 @@ export class ReservasService {
       where = `r.empresa_id = $1 AND (lower(r.hospede) LIKE $2 OR r.telefone LIKE $2 OR r.numero::text = $3)`;
     }
     const l = await this.ds.query(
-      `SELECT r.*, un.codigo AS unidade_codigo, c.nome AS categoria_nome FROM reservas r
+      `SELECT r.*, un.codigo AS unidade_codigo, c.nome AS categoria_nome,
+              (SELECT f.status FROM fichas_hospede f WHERE f.reserva_id = r.id ORDER BY f.criado_em DESC LIMIT 1) AS ficha_status
+         FROM reservas r
          LEFT JOIN unidades un ON un.id = r.unidade_id LEFT JOIN categorias c ON c.id = un.categoria_id
         WHERE ${where} ORDER BY r.chegada, r.hospede LIMIT 1000`, params);
     const [chegHoje] = await this.ds.query(`SELECT count(*)::int AS n FROM reservas WHERE empresa_id = $1 AND chegada = $2 AND status IN ('pendente','confirmada')`, [u.empresaId, hoje]);
@@ -197,6 +214,17 @@ export class ReservasService {
     return { ok: true };
   }
 
+  /** pré-check-in: link da ficha para o hóspede preencher (com foto do documento e assinatura) antes de chegar */
+  async preCheckin(u: UsuarioToken, id: string) {
+    const r = await this.buscar(u, id);
+    if (!['pendente', 'confirmada'].includes(r.status)) throw new BadRequestException('O pré-check-in é para reserva ainda não hospedada.');
+    const f = await fichaDaReserva(this.ds, r);
+    const [emp] = await this.ds.query(`SELECT nome FROM empresas WHERE id = $1`, [u.empresaId]);
+    const texto = `Olá, ${String(r.hospede).split(' ')[0]}! Para agilizar sua chegada em ${emp?.nome ?? 'nosso hotel'} no dia ${br(dia(r.chegada))}, preencha sua ficha de hóspede pelo link (leva 2 minutos): `;
+    const fone = String(r.telefone ?? '').replace(/\D/g, '');
+    return { token: f.token, status: f.status, texto, telefone: fone.length >= 10 ? (fone.length <= 11 ? `55${fone}` : fone) : null, email: r.email ?? null };
+  }
+
   async checkin(u: UsuarioToken, id: string, dto: CheckinReservaDto) {
     const r = await this.buscar(u, id);
     if (!['pendente', 'confirmada'].includes(r.status)) throw new BadRequestException('Esta reserva já foi hospedada ou cancelada.');
@@ -227,7 +255,9 @@ export class ReservasService {
       await this.ds.query(`UPDATE estadias SET total_combinado = $2, diaria_combinada = $3, saida_prevista = $4 WHERE id = $1`,
         [estadiaId, Number(r.valor_total).toFixed(2), Number(r.valor_diaria) > 0 ? Number(r.valor_diaria).toFixed(2) : (Number(r.valor_total) / Math.max(1, noites(dia(r.chegada), dia(r.saida)))).toFixed(2), dia(r.saida)]);
     }
-    // já deixa a ficha FNRH começada com o que a reserva tem
+    // se o hóspede fez o pré-check-in, a ficha dele passa para a conta; senão já deixa a ficha FNRH começada com o que a reserva tem
+    const pre = await this.ds.query(`UPDATE fichas_hospede SET estadia_id = $2, unidade_id = $3, atualizado_em = now() WHERE reserva_id = $1 AND estadia_id IS NULL RETURNING id`, [id, estadiaId, r.unidade_id]);
+    if ((Array.isArray(pre[0]) ? pre[0] : pre).length) return { ok: true, estadiaId, preCheckin: true };
     try {
       const dados: Record<string, unknown> = { nome: r.hospede, checkin: `${dia(r.chegada)}T14:00`, checkout: `${dia(r.saida)}T12:00` };
       if (r.telefone) dados.telefone = r.telefone;
