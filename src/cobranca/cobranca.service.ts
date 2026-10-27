@@ -204,6 +204,26 @@ export class CobrancaService {
     return { ok: true, vencimento, faturas: feitas.map((f, i) => ({ ...f, envio: envios[i] })) };
   }
 
+  /**
+   * Conta fechada como faturado para um cliente com "faturar sozinho" ligado: fatura só com esta conta,
+   * boleto/Pix (se o Asaas estiver ligado) e nota pendente, na hora. Sem cliente com isso ligado, não faz nada.
+   */
+  async faturarConta(u: UsuarioToken, estadiaId: string) {
+    const l: { id: string; cliente_id: string; nome: string; auto_cobrar: string }[] = await this.ds.query(
+      `SELECT r.id, r.cliente_id, c.nome, c.auto_cobrar FROM contas_receber r JOIN clientes_faturados c ON c.id = r.cliente_id
+        WHERE r.empresa_id = $1 AND r.estadia_id = $2 AND r.status = 'aberta' AND r.fatura_id IS NULL AND c.auto_faturar AND c.ativo`, [u.empresaId, estadiaId]);
+    if (!l.length) return { feito: false };
+    const porCliente = new Map<string, typeof l>();
+    for (const x of l) porCliente.set(x.cliente_id, [...(porCliente.get(x.cliente_id) ?? []), x]);
+    const resultado: { cliente: string; faturas: Awaited<ReturnType<CobrancaService['faturarCliente']>>['faturas'] }[] = [];
+    for (const [clienteId, contas] of porCliente) {
+      const cobrar = (['BOLETO', 'PIX'].includes(contas[0].auto_cobrar) ? contas[0].auto_cobrar : 'nao') as 'BOLETO' | 'PIX' | 'nao';
+      const r = await this.faturarCliente(u, clienteId, { contas: contas.map((c) => c.id), cobrar, nota: true });
+      resultado.push({ cliente: contas[0].nome, faturas: r.faturas });
+    }
+    return { feito: true, resultado };
+  }
+
   /** texto pronto para mandar a fatura por WhatsApp ou e-mail */
   async envio(u: UsuarioToken, faturaId: string) {
     const [f] = await this.ds.query(

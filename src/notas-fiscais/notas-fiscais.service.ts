@@ -414,6 +414,12 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
         else { alvoHosp = Math.min(v, hospNet); alvoCons = r2(v - alvoHosp); }
       }
     }
+    // conta faturada para uma empresa: a nota sai no CNPJ dela
+    if (!doc && !dto.parteId) {
+      const [cli] = await this.ds.query(
+        `SELECT c.nome, c.documento FROM contas_receber r JOIN clientes_faturados c ON c.id = r.cliente_id WHERE r.estadia_id = $1 AND r.status <> 'cancelada' LIMIT 1`, [estadiaId]);
+      if (cli && [11, 14].includes(so(cli.documento).length)) { doc = so(cli.documento); nome = cli.nome; }
+    }
     if (doc && doc.length !== 11 && doc.length !== 14) doc = null;
 
     const quais = dto.quais ?? 'tudo';

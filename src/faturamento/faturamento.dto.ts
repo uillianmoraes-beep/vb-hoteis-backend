@@ -14,6 +14,9 @@ export class ClienteFaturadoDto {
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) limite?: number | null;
   @IsOptional() @IsString() @MaxLength(300) observacao?: string;
   @IsOptional() @IsBoolean() ativo?: boolean;
+  /** ao fechar a conta como faturado: fatura + boleto/Pix + nota pendente na hora */
+  @IsOptional() @IsBoolean() autoFaturar?: boolean;
+  @IsOptional() @IsIn(['BOLETO', 'PIX', 'nao']) autoCobrar?: 'BOLETO' | 'PIX' | 'nao';
 }
 
 export class LancamentoManualDto {

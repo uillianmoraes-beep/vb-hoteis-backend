@@ -16,6 +16,7 @@ const formaCaixa = (f: string) => f;
 const fmtCliente = (c: Record<string, unknown>) => ({
   id: c.id, nome: c.nome, documento: c.documento, contato: c.contato, telefone: c.telefone, email: c.email, endereco: c.endereco,
   prazoDias: c.prazo_dias, limite: c.limite === null ? null : Number(c.limite), observacao: c.observacao, ativo: c.ativo,
+  autoFaturar: !!c.auto_faturar, autoCobrar: c.auto_cobrar ?? 'BOLETO',
   devendo: Number(c.devendo ?? 0), vencido: Number(c.vencido ?? 0), credito: Number(c.credito ?? 0),
 });
 const fmtConta = (r: Record<string, unknown>) => ({
@@ -59,21 +60,21 @@ export class FaturamentoService {
   private valoresCliente(dto: ClienteFaturadoDto) {
     return [dto.nome.trim(), dto.documento?.replace(/[^\dA-Za-z]/g, '') || null, dto.contato?.trim() || null, dto.telefone?.trim() || null,
       dto.email?.trim() || null, dto.endereco?.trim() || null, dto.prazoDias ?? 30, dto.limite === null || dto.limite === undefined ? null : dto.limite.toFixed(2),
-      dto.observacao?.trim() || null, dto.ativo ?? true];
+      dto.observacao?.trim() || null, dto.ativo ?? true, dto.autoFaturar ?? false, dto.autoCobrar ?? 'BOLETO'];
   }
 
   async criarCliente(u: UsuarioToken, dto: ClienteFaturadoDto) {
     const [c] = await this.ds.query(
-      `INSERT INTO clientes_faturados (empresa_id, nome, documento, contato, telefone, email, endereco, prazo_dias, limite, observacao, ativo)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, [u.empresaId, ...this.valoresCliente(dto)]);
+      `INSERT INTO clientes_faturados (empresa_id, nome, documento, contato, telefone, email, endereco, prazo_dias, limite, observacao, ativo, auto_faturar, auto_cobrar)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`, [u.empresaId, ...this.valoresCliente(dto)]);
     return { ok: true, id: c.id };
   }
 
   async atualizarCliente(u: UsuarioToken, id: string, dto: ClienteFaturadoDto) {
     await this.cliente(u, id);
     await this.ds.query(
-      `UPDATE clientes_faturados SET nome=$3, documento=$4, contato=$5, telefone=$6, email=$7, endereco=$8, prazo_dias=$9, limite=$10, observacao=$11, ativo=$12
-        WHERE id=$1 AND empresa_id=$2`, [id, u.empresaId, ...this.valoresCliente(dto)]);
+      `UPDATE clientes_faturados SET nome=$3, documento=$4, contato=$5, telefone=$6, email=$7, endereco=$8, prazo_dias=$9, limite=$10, observacao=$11, ativo=$12,
+         auto_faturar=$13, auto_cobrar=$14 WHERE id=$1 AND empresa_id=$2`, [id, u.empresaId, ...this.valoresCliente(dto)]);
     return { ok: true };
   }
 

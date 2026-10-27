@@ -44,6 +44,10 @@ export class CobrancaController {
   @Post('faturamento/clientes/:id/faturar') @HttpCode(200) @Requer('faturamento.gerenciar')
   faturar(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: FaturarClienteDto) { return this.service.faturarCliente(u, id, dto); }
 
+  /** chamado ao fechar a conta: fatura sozinho o cliente que tem isso ligado */
+  @Post('faturamento/conta/:estadiaId/faturar') @HttpCode(200) @Requer('estadias.operar', 'faturamento.gerenciar')
+  faturarConta(@Usuario() u: UsuarioToken, @Param('estadiaId', ParseUUIDPipe) estadiaId: string) { return this.service.faturarConta(u, estadiaId); }
+
   @Get('faturamento/faturas/:id/envio') @Requer('faturamento.gerenciar')
   envio(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.envio(u, id); }
 
