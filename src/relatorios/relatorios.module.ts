@@ -9,10 +9,11 @@ import { RelatoriosController } from './relatorios.controller';
 import { RelatoriosService } from './relatorios.service';
 import { EstornosController, EstornosService } from './estornos';
 import { ConferenciaGarcomController, ConferenciaGarcomService } from './conferencia-garcom';
+import { GestaoController, GestaoService } from './gestao';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Estadia, EstadiaPagamento, Unidade, Ambiente, Categoria])],
-  providers: [RelatoriosService, EstornosService, ConferenciaGarcomService],
-  controllers: [EstornosController, ConferenciaGarcomController, RelatoriosController],
+  providers: [RelatoriosService, EstornosService, ConferenciaGarcomService, GestaoService],
+  controllers: [EstornosController, ConferenciaGarcomController, GestaoController, RelatoriosController],
 })
 export class RelatoriosModule {}
