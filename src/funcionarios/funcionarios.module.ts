@@ -8,6 +8,7 @@ import { AniversariantesController, AniversariantesService } from './aniversaria
 import { ContratoController, ContratoService } from './contrato';
 import { DocumentosController, DocumentosService } from './documentos';
 import { PainelRhController, PainelRhService } from './painel-rh';
+import { RhExtraController, RhExtraService } from './rh-extra';
 import { FeriasController, FeriasService } from './ferias';
 import { EscalaController, EscalaService } from './escala';
 import { LicencasController, LicencasService } from './licencas';
@@ -17,8 +18,8 @@ import { ObrigatoriosController, ObrigatoriosService } from './obrigatorios';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Funcionario, FuncionarioLancamento, Revisao])],
-  providers: [FuncionariosService, RefeicoesService, AniversariantesService, ContratoService, DocumentosService, FeriasService, EscalaService, LicencasService, BancoHorasService, DesempenhoService, ObrigatoriosService, PainelRhService],
+  providers: [FuncionariosService, RefeicoesService, AniversariantesService, ContratoService, DocumentosService, FeriasService, EscalaService, LicencasService, BancoHorasService, DesempenhoService, ObrigatoriosService, PainelRhService, RhExtraService],
   exports: [ContratoService, FeriasService, EscalaService, LicencasService, BancoHorasService],
-  controllers: [RefeicoesController, AniversariantesController, ContratoController, DocumentosController, FeriasController, EscalaController, LicencasController, BancoHorasController, DesempenhoController, ProvaPublicaController, ObrigatoriosController, PainelRhController, FuncionariosController],
+  controllers: [RefeicoesController, AniversariantesController, ContratoController, DocumentosController, FeriasController, EscalaController, LicencasController, BancoHorasController, DesempenhoController, ProvaPublicaController, ObrigatoriosController, PainelRhController, RhExtraController, FuncionariosController],
 })
 export class FuncionariosModule {}
