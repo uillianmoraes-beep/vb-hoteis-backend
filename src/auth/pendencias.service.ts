@@ -254,6 +254,19 @@ export class PendenciasService {
           WHERE x.empresa_id = $1 AND x.status = 'novo'${filtroAmb('un.ambiente_id', p)}`, p));
     }
 
+    if (pode('cozinha.ver', 'estadias.operar', 'painel.ver')) {
+      // pedidos na tela da cozinha que ainda não foram entregues
+      const p: unknown[] = [u.empresaId];
+      add({ chave: 'cozinha', nivel: 'aviso', titulo: 'Pedidos na cozinha e bar', detalhe: 'novos, em preparo ou prontos para entregar', link: '/cozinha' },
+        await contar(`SELECT count(*) AS n, ${lista('pp.local')} AS nomes FROM producao_pedidos pp
+          WHERE pp.empresa_id = $1 AND pp.status IN ('novo','preparando','pronto') AND pp.criado_em > now() - interval '24 hours'${filtroAmb('pp.ambiente_id', p)}`, p));
+    }
+
+    if (pode('enxoval.aprovar')) {
+      add({ chave: 'enxoval-assinar', nivel: 'aviso', titulo: 'Relatório do enxoval esperando a sua assinatura', detalhe: 'o responsável já assinou', link: '/enxoval' },
+        await contar(`SELECT count(*) AS n, '' AS nomes FROM enxoval_relatorios WHERE empresa_id = $1 AND status = 'assinado_responsavel'`, [u.empresaId]), false);
+    }
+
     if (pode('caixa.principal', 'caixa.adm')) {
       let p: unknown[] = [u.empresaId];
       add({ chave: 'caixa-antigo', nivel: 'alerta', titulo: 'Caixa aberto há mais de 24 horas', detalhe: 'confira e feche o turno', link: '/caixa' },
