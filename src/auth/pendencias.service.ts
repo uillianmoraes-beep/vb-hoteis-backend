@@ -247,6 +247,12 @@ export class PendenciasService {
         await contar(`SELECT count(*) AS n, ${lista('r.hospede')} AS nomes FROM reservas r WHERE r.empresa_id = $1 AND r.status IN ('pendente','confirmada') AND r.chegada = ${HOJE}${filtroAmb('r.ambiente_id', p)}`, p));
     }
 
+    if (pode('estadias.operar', 'reservas.gerenciar')) {
+      // WhatsApp: clientes esperando um atendente (a IA chamou ou ninguém respondeu)
+      add({ chave: 'whatsapp-aguardando', nivel: 'alerta', titulo: 'Clientes esperando no WhatsApp', link: '/atendimento' },
+        await contar(`SELECT count(*) AS n, ${lista(`COALESCE(nome, telefone)`)} AS nomes FROM whatsapp_conversas WHERE empresa_id = $1 AND status = 'aberta' AND nao_lidas > 0`, [u.empresaId]));
+    }
+
     if (pode('estadias.operar')) {
       const p: unknown[] = [u.empresaId];
       add({ chave: 'pedidos', nivel: 'alerta', titulo: 'Pedidos da comanda esperando', link: '/comanda' },

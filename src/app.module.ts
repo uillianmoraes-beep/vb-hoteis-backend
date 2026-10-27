@@ -35,6 +35,7 @@ import { EventosModule } from './eventos/eventos';
 import { TotemModule } from './totem/totem';
 import { AvisosModule } from './avisos/avisos';
 import { WhatsappModule } from './avisos/whatsapp';
+import { AtendimentoModule } from './avisos/atendimento';
 import { ConcorrenciaModule } from './tarifas/concorrencia';
 import { FundoModule } from './empresas/fundo';
 import { ContratosModule } from './contratos/contratos';
@@ -106,6 +107,7 @@ import { NotasFiscaisModule } from './notas-fiscais/notas-fiscais.module';
     TotemModule,
     AvisosModule,
     WhatsappModule,
+    AtendimentoModule,
     ConcorrenciaModule,
     FundoModule,
     UniformesModule,
