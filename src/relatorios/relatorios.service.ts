@@ -171,6 +171,64 @@ export class RelatoriosService {
     };
   }
 
+  /**
+   * Ocupação por categoria: suítes da categoria, usos, ocupação (tempo ocupado ÷ tempo disponível), giro (usos por suíte por dia),
+   * diária média (ADR), RevPAR e receita, comparando com o mesmo tanto de dias logo antes.
+   */
+  async ocupacaoCategoria(u: UsuarioToken, filtro: { de?: string; ate?: string; ambienteId?: string }) {
+    const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const okData = (d?: string) => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d);
+    const ateD = okData(filtro.ate) ? filtro.ate! : hoje;
+    const deD = okData(filtro.de) ? filtro.de! : new Date(Date.parse(`${ateD}T12:00:00Z`) - 29 * DIA).toISOString().slice(0, 10);
+    const de = new Date(`${deD}T00:00:00-03:00`), ate = new Date(`${ateD}T23:59:59.999-03:00`);
+    const dias = Math.max(1, Math.round((ate.getTime() - de.getTime()) / DIA));
+    const deAnt = new Date(de.getTime() - dias * DIA);
+    const ambs: string[] = filtro.ambienteId ? [filtro.ambienteId]
+      : u.ambientesIds?.length ? u.ambientesIds
+      : (await this.ambientes.find({ where: { empresaId: u.empresaId } })).map((a) => a.id);
+    if (!ambs.length) return { de: deD, ate: ateD, dias, categorias: [], total: null };
+    const suites: { cat: string | null; nome: string; n: number }[] = await this.estadias.query(
+      `SELECT un.categoria_id AS cat, COALESCE(c.nome, 'Sem categoria') AS nome, count(*)::int AS n FROM unidades un LEFT JOIN categorias c ON c.id = un.categoria_id
+        WHERE un.empresa_id = $1 AND un.ambiente_id = ANY($2::uuid[]) AND un.ativo GROUP BY 1, 2`, [u.empresaId, ambs]);
+    const mov = (ini: Date, fim: Date) => this.estadias.query(
+      `SELECT COALESCE(e.categoria_id, un.categoria_id) AS cat, count(*)::int AS usos, COALESCE(sum(e.valor_total),0) AS receita,
+              COALESCE(sum(COALESCE(e.valor_hospedagem,0) + COALESCE(e.valor_pessoas,0)),0) AS hosp, COALESCE(sum(COALESCE(e.valor_consumo,0)),0) AS consumo,
+              COALESCE(sum(EXTRACT(EPOCH FROM (e.saida_em - e.entrada_em)) / 60),0) AS minutos
+         FROM estadias e LEFT JOIN unidades un ON un.id = e.unidade_id
+        WHERE e.empresa_id = $1 AND e.ambiente_id = ANY($2::uuid[]) AND e.status = 'fechada' AND e.saida_em BETWEEN $3 AND $4 GROUP BY 1`, [u.empresaId, ambs, ini, fim]);
+    const atual: Record<string, string | number | null>[] = await mov(de, ate);
+    const ant: Record<string, string | number | null>[] = await mov(deAnt, de);
+    const calc = (n: number, m?: Record<string, string | number | null>) => {
+      const usos = Number(m?.usos ?? 0), receita = Number(m?.receita ?? 0), hosp = Number(m?.hosp ?? 0), minutos = Number(m?.minutos ?? 0);
+      const cap = n * dias;
+      return {
+        usos, receita, hospedagem: hosp, consumo: Number(m?.consumo ?? 0),
+        ocupacaoPct: cap ? Math.min(100, Math.round((minutos / (cap * 1440)) * 1000) / 10) : 0,
+        giro: cap ? Math.round((usos / cap) * 100) / 100 : 0,
+        permanenciaMin: usos ? Math.round(minutos / usos) : 0,
+        ticketMedio: usos ? Math.round((receita / usos) * 100) / 100 : 0,
+        adr: usos ? Math.round((hosp / usos) * 100) / 100 : 0,
+        revpar: cap ? Math.round((hosp / cap) * 100) / 100 : 0,
+        trevpar: cap ? Math.round((receita / cap) * 100) / 100 : 0,
+      };
+    };
+    const chaves = new Set<string>([...suites.map((s) => String(s.cat)), ...atual.map((m) => String(m.cat))]);
+    const categorias = [...chaves].map((k) => {
+      const s = suites.find((x) => String(x.cat) === k);
+      const n = s?.n ?? 0;
+      const a = calc(n, atual.find((m) => String(m.cat) === k));
+      const p = calc(n, ant.find((m) => String(m.cat) === k));
+      return { id: k === 'null' ? null : k, nome: s?.nome ?? 'Sem categoria', suites: n, ...a, anterior: { ocupacaoPct: p.ocupacaoPct, receita: p.receita, usos: p.usos, revpar: p.revpar } };
+    }).sort((x, y) => y.receita - x.receita);
+    const nTot = suites.reduce((s, x) => s + x.n, 0);
+    const soma = (l: Record<string, string | number | null>[]) => ({
+      usos: l.reduce((s, m) => s + Number(m.usos), 0), receita: l.reduce((s, m) => s + Number(m.receita), 0), hosp: l.reduce((s, m) => s + Number(m.hosp), 0),
+      consumo: l.reduce((s, m) => s + Number(m.consumo), 0), minutos: l.reduce((s, m) => s + Number(m.minutos), 0),
+    });
+    const ta = calc(nTot, soma(atual)), tp = calc(nTot, soma(ant));
+    return { de: deD, ate: ateD, dias, categorias, total: { suites: nTot, ...ta, anterior: { ocupacaoPct: tp.ocupacaoPct, receita: tp.receita, usos: tp.usos, revpar: tp.revpar } } };
+  }
+
   async vendas(u: UsuarioToken, filtro: { de?: string; ate?: string; ambienteId?: string; forma?: string }) {
     const ate = filtro.ate ? new Date(`${filtro.ate}T23:59:59.999-03:00`) : new Date();
     const de = filtro.de ? new Date(`${filtro.de}T00:00:00-03:00`) : new Date(ate.getTime() - 7 * DIA);

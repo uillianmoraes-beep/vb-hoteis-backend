@@ -22,6 +22,13 @@ export class RelatoriosController {
   }
 
   /** Dias e horas mais movimentados, suítes mais e menos alugadas, produtos mais vendidos e os sem venda no período. */
+  /** ocupação, giro, diária média e RevPAR por categoria de suíte (com o período anterior) */
+  @Get('ocupacao-categoria')
+  @Requer('relatorios.ver')
+  ocupacaoCategoria(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string, @Query('ambienteId') ambienteId?: string) {
+    return this.service.ocupacaoCategoria(u, { de, ate, ambienteId });
+  }
+
   @Get('desempenho')
   @Requer('relatorios.ver')
   desempenho(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string, @Query('ambienteId') ambienteId?: string) {

@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, HttpCode, Ip, Param, ParseUUIDPipe, Patch, Post, Put, Query } from '@nestjs/common';
 import { EnxovalService } from './enxoval.service';
-import { AssinarRelatorioDto, KitDto, MovimentoEnxovalDto, NovoRelatorioDto, ResponsavelEnxovalDto, TipoEnxovalDto } from './enxoval.dto';
+import { AssinarRelatorioDto, KitDto, MovimentoEnxovalDto, NovoRelatorioDto, ResponsavelEnxovalDto, TipoEnxovalDto, PrecoKgDto } from './enxoval.dto';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
@@ -53,6 +53,19 @@ export class EnxovalController {
 
   @Get('movimentos/:id/fotos') @Requer('enxoval.gerenciar', 'governanca.operar', 'enxoval.aprovar')
   fotos(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.service.fotosMovimento(u, id); }
+
+  /** custo da lavanderia por locação: ?de=AAAA-MM-DD&ate=AAAA-MM-DD */
+  @Get('custo-lavanderia') @Requer('enxoval.gerenciar', 'enxoval.aprovar', 'relatorios.ver')
+  custo(@Usuario() u: UsuarioToken, @Query('de') de?: string, @Query('ate') ate?: string) {
+    const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const ok = (d?: string) => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d);
+    const a = ok(ate) ? ate! : hoje;
+    const d = ok(de) ? de! : new Date(Date.parse(`${a}T12:00:00Z`) - 29 * 86_400_000).toISOString().slice(0, 10);
+    return this.service.custoLavanderia(u, d, a);
+  }
+
+  @Put('config/preco-kg') @Requer('enxoval.gerenciar')
+  precoKg(@Usuario() u: UsuarioToken, @Body() dto: PrecoKgDto) { return this.service.salvarPrecoKg(u, dto.precoKg); }
 
   @Get('config') @Requer('enxoval.gerenciar', 'enxoval.aprovar')
   config(@Usuario() u: UsuarioToken) { return this.service.config(u); }

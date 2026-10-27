@@ -1,4 +1,5 @@
 import { BadRequestException, Controller, Get, Injectable, Query } from '@nestjs/common';
+import { BensService } from './bens';
 import { DataSource } from 'typeorm';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
@@ -42,7 +43,7 @@ interface Maq { nome: string; taxa_debito: string | null; taxa_credito: string |
 
 @Injectable()
 export class RelatoriosFinanceirosService {
-  constructor(private readonly ds: DataSource, private readonly plano: PlanoContasService) {}
+  constructor(private readonly ds: DataSource, private readonly plano: PlanoContasService, private readonly bens: BensService) {}
 
   /** conta e grupo de cada lançamento de texto (categoria) */
   private async classificador(empresaId: string) {
@@ -146,6 +147,12 @@ export class RelatoriosFinanceirosService {
       `SELECT to_char(data, 'YYYY-MM') AS mes, sum(custo) AS custo FROM refeicoes_funcionarios
         WHERE empresa_id = $1 AND NOT cancelada AND data >= ($2::timestamptz ${tz})::date AND data < ($3::timestamptz ${tz})::date GROUP BY 1`, [u.empresaId, ini, fim]).catch(() => []);
     const temEstoque = cmv.some((x) => Number(x.custo) > 0);
+    // depreciação: bens cadastrados (linear) e o desgaste do enxoval pelas lavagens do mês (custo da peça ÷ vida em lavagens)
+    const deprBens = await this.bens.porMes(u.empresaId, meses);
+    const deprEnxoval: { mes: string; v: string }[] = await this.ds.query(
+      `SELECT to_char(m.criado_em ${tz}, 'YYYY-MM') AS mes, sum(m.quantidade * t.custo / GREATEST(t.limite_lavagens, 1)) AS v
+         FROM enxoval_movimentos m JOIN enxoval_tipos t ON t.id = m.tipo_id
+        WHERE m.empresa_id = $1 AND m.movimento = 'retorno' AND m.criado_em >= $2 AND m.criado_em < $3 GROUP BY 1`, [u.empresaId, ini, fim]).catch(() => []);
     const taxas = await this.taxas(u.empresaId, ini, fim);
     const cls = await this.classificador(u.empresaId);
     const lancs = await this.lancamentos(u.empresaId, ini, fim, 'competencia');
@@ -214,7 +221,15 @@ export class RelatoriosFinanceirosService {
     const tCusto = somaLinhas(custos);
     const tBruto = meses.map((_, i) => r2(tLiquida[i] - tCusto[i]));
     const tDespesa = somaLinhas(despesas);
-    const tOperacional = meses.map((_, i) => r2(tBruto[i] - tDespesa[i]));
+    const tEbitda = meses.map((_, i) => r2(tBruto[i] - tDespesa[i]));
+    const vEnxoval = zero();
+    for (const x of deprEnxoval) soma(vEnxoval, x.mes, Number(x.v));
+    const depreciacao = [
+      ...deprBens.map((d) => ({ chave: `depr:${d.categoria}`, nome: d.nome, tipo: 'conta' as const, valores: d.valores })),
+      ...(vEnxoval.some((v) => v) ? [{ chave: 'depr:enxoval', nome: 'Enxoval (desgaste pelas lavagens)', tipo: 'conta' as const, valores: vEnxoval }] : []),
+    ];
+    const tDepreciacao = somaLinhas(depreciacao);
+    const tOperacional = meses.map((_, i) => r2(tEbitda[i] - tDepreciacao[i]));
     // financeiro: entradas (rendimentos) somam, saídas (juros, tarifas) subtraem; aqui as contas vêm com saída positiva
     const tFinanceiro = somaLinhas(financeiro).map((v) => -v);
     const tLucro = meses.map((_, i) => r2(tOperacional[i] + tFinanceiro[i]));
@@ -227,7 +242,12 @@ export class RelatoriosFinanceirosService {
       { chave: 'custo', nome: '(−) Custos variáveis', tipo: 'grupo', valores: tCusto.map((v) => -v) }, ...custos.map((l) => ({ ...l, valores: l.valores.map((v) => -v) })),
       { chave: 'bruto', nome: '= Lucro bruto', tipo: 'total', valores: tBruto },
       { chave: 'despesa', nome: '(−) Despesas fixas e operacionais', tipo: 'grupo', valores: tDespesa.map((v) => -v) }, ...despesas.map((l) => ({ ...l, valores: l.valores.map((v) => -v) })),
-      { chave: 'operacional', nome: '= Resultado operacional (EBITDA)', tipo: 'total', valores: tOperacional },
+      { chave: 'ebitda', nome: '= EBITDA (resultado antes da depreciação)', tipo: 'total', valores: tEbitda, ajuda: 'Quanto a operação gera de caixa: vendas menos custos e despesas, sem a depreciação dos bens nem juros.' },
+      ...(depreciacao.length ? [
+        { chave: 'depreciacao', nome: '(−) Depreciação', tipo: 'grupo' as const, valores: tDepreciacao.map((v) => -v), ajuda: 'O desgaste dos bens (colchões, TVs, ar, enxoval) dividido pelos meses de vida útil. Não sai do caixa no mês, mas um dia precisa trocar.' },
+        ...depreciacao.map((l) => ({ ...l, valores: l.valores.map((v) => -v) })),
+      ] : []),
+      { chave: 'operacional', nome: '= Resultado operacional', tipo: 'total', valores: tOperacional },
       ...(financeiro.length ? [{ chave: 'financeiro', nome: '(±) Resultado financeiro', tipo: 'grupo' as const, valores: tFinanceiro }, ...financeiro.map((l) => ({ ...l, valores: l.valores.map((v) => -v) }))] : []),
       { chave: 'lucro', nome: '= Lucro líquido', tipo: 'total', valores: tLucro },
     ];
@@ -239,13 +259,14 @@ export class RelatoriosFinanceirosService {
     return {
       meses: meses.map((m) => ({ mes: m, nome: rotuloMes(m) })), linhas, fora,
       indicadores: {
-        margemBruta: pct(tBruto, tReceita), margemLiquida: pct(tLucro, tReceita), contas: usos,
+        margemBruta: pct(tBruto, tReceita), margemLiquida: pct(tLucro, tReceita), margemEbitda: pct(tEbitda, tReceita), contas: usos,
         ticketMedio: meses.map((_, i) => (usos[i] ? r2(tReceita[i] / usos[i]) : 0)),
       },
       avisos: [
         ...(semContaNomes.size ? [`Lançamentos sem conta no plano: ${[...semContaNomes].slice(0, 8).join(', ')}. Ligue cada um a uma conta em Financeiro › Plano de contas.`] : []),
         ...(taxaEstimada ? ['Parte das taxas de cartão foi estimada pelas taxas do contrato (sem o relatório da maquininha importado na Conciliação).'] : []),
         ...(!temEstoque ? ['Sem baixa de estoque nas vendas: o custo das mercadorias entra pelas compras lançadas em despesas.'] : []),
+        ...(!deprBens.length ? ['Sem bens cadastrados: cadastre colchões, TVs, ar-condicionado e reformas em Financeiro › Bens e depreciação para a DRE mostrar a depreciação.'] : []),
       ],
     };
   }

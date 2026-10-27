@@ -5,6 +5,13 @@ export class TipoEnxovalDto {
   @IsString() @MinLength(2) @MaxLength(80) nome!: string;
   @IsOptional() @IsInt() @Min(1) @Max(2000) limiteLavagens?: number;
   @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) custo?: number;
+  /** quanto a lavanderia cobra por peça (se cobra por quilo, use o peso) */
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(10_000) custoLavagem?: number;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 3 }) @Min(0) @Max(100) pesoKg?: number;
+}
+
+export class PrecoKgDto {
+  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(10_000) precoKg!: number;
 }
 
 export class ItemMovDto {

@@ -37,6 +37,7 @@ export class EnxovalService {
           id: t.id, nome: t.nome, fotoUrl: urlFoto(u.empresaId, t.foto as string | null), total, rouparia: Number(t.rouparia), lavanderia: Number(t.lavanderia), emUso, perdas: Number(t.perdas),
           lavagensMedia: Math.round(media), limiteLavagens: Number(t.limite_lavagens), vidaUsadaPct: Math.min(100, Math.round((media / Number(t.limite_lavagens)) * 100)),
           custo: Number(t.custo), porRodada: rodada, jogos: rodada ? Math.round((total / rodada) * 10) / 10 : null,
+          custoLavagem: Number(t.custo_lavagem ?? 0), pesoKg: Number(t.peso_kg ?? 0),
         };
       }),
       kits: kits.map((k: Record<string, unknown>) => ({ categoriaId: k.categoria_id, tipoId: k.tipo_id, quantidade: Number(k.quantidade) })),
@@ -44,14 +45,14 @@ export class EnxovalService {
   }
 
   async criarTipo(u: UsuarioToken, dto: TipoEnxovalDto) {
-    await this.ds.query(`INSERT INTO enxoval_tipos (empresa_id, nome, limite_lavagens, custo) VALUES ($1,$2,$3,$4)`,
-      [u.empresaId, dto.nome.trim(), dto.limiteLavagens ?? 240, (dto.custo ?? 0).toFixed(2)]);
+    await this.ds.query(`INSERT INTO enxoval_tipos (empresa_id, nome, limite_lavagens, custo, custo_lavagem, peso_kg) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [u.empresaId, dto.nome.trim(), dto.limiteLavagens ?? 240, (dto.custo ?? 0).toFixed(2), (dto.custoLavagem ?? 0).toFixed(2), dto.pesoKg ?? 0]);
     return this.painel(u);
   }
 
   async editarTipo(u: UsuarioToken, id: string, dto: TipoEnxovalDto) {
-    await this.ds.query(`UPDATE enxoval_tipos SET nome = $3, limite_lavagens = $4, custo = $5 WHERE id = $1 AND empresa_id = $2`,
-      [id, u.empresaId, dto.nome.trim(), dto.limiteLavagens ?? 240, (dto.custo ?? 0).toFixed(2)]);
+    await this.ds.query(`UPDATE enxoval_tipos SET nome = $3, limite_lavagens = $4, custo = $5, custo_lavagem = COALESCE($6, custo_lavagem), peso_kg = COALESCE($7, peso_kg) WHERE id = $1 AND empresa_id = $2`,
+      [id, u.empresaId, dto.nome.trim(), dto.limiteLavagens ?? 240, (dto.custo ?? 0).toFixed(2), dto.custoLavagem === undefined ? null : dto.custoLavagem.toFixed(2), dto.pesoKg ?? null]);
     return this.painel(u);
   }
 
@@ -190,11 +191,49 @@ export class EnxovalService {
 
   /* ---------------- responsável pelo enxoval ---------------- */
 
+  async salvarPrecoKg(u: UsuarioToken, precoKg: number) {
+    await this.ds.query(`INSERT INTO enxoval_config (empresa_id, preco_kg) VALUES ($1,$2) ON CONFLICT (empresa_id) DO UPDATE SET preco_kg = $2, atualizado_em = now()`,
+      [u.empresaId, precoKg.toFixed(2)]);
+    return { ok: true };
+  }
+
+  /**
+   * Custo da lavanderia por locação no período: peças que voltaram lavadas × preço da lavagem (por peça, ou peso × preço do quilo),
+   * mais o desgaste das peças (custo ÷ vida em lavagens), dividido pelos usos (contas fechadas) do período.
+   */
+  async custoLavanderia(u: UsuarioToken, de: string, ate: string) {
+    const ini = new Date(`${de}T00:00:00-03:00`), fim = new Date(`${ate}T23:59:59.999-03:00`);
+    const [cfg] = await this.ds.query(`SELECT preco_kg FROM enxoval_config WHERE empresa_id = $1`, [u.empresaId]);
+    const precoKg = Number(cfg?.preco_kg ?? 0);
+    const linhas: Record<string, unknown>[] = await this.ds.query(
+      `SELECT t.id, t.nome, t.custo, t.custo_lavagem, t.peso_kg, t.limite_lavagens, COALESCE(sum(m.quantidade), 0)::int AS lavadas
+         FROM enxoval_tipos t LEFT JOIN enxoval_movimentos m ON m.tipo_id = t.id AND m.movimento = 'retorno' AND m.criado_em BETWEEN $2 AND $3
+        WHERE t.empresa_id = $1 AND t.ativo GROUP BY t.id ORDER BY t.nome`, [u.empresaId, ini, fim]);
+    const [usos] = await this.ds.query(`SELECT count(*)::int AS n FROM estadias WHERE empresa_id = $1 AND status = 'fechada' AND saida_em BETWEEN $2 AND $3`, [u.empresaId, ini, fim]);
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    const tipos = linhas.map((t) => {
+      const porPeca = Number(t.custo_lavagem) > 0 ? Number(t.custo_lavagem) : r2(Number(t.peso_kg) * precoKg);
+      const lavadas = Number(t.lavadas);
+      const desgaste = r2((lavadas * Number(t.custo)) / Math.max(1, Number(t.limite_lavagens)));
+      return { id: t.id, nome: t.nome, lavadas, porPeca, semPreco: porPeca === 0, lavagem: r2(lavadas * porPeca), desgaste, total: r2(lavadas * porPeca + desgaste) };
+    });
+    const nUsos = Number(usos?.n ?? 0);
+    const lavagem = r2(tipos.reduce((s, t) => s + t.lavagem, 0));
+    const desgaste = r2(tipos.reduce((s, t) => s + t.desgaste, 0));
+    return {
+      de, ate, precoKg, usos: nUsos, tipos, lavagem, desgaste, total: r2(lavagem + desgaste),
+      porLocacao: nUsos ? r2((lavagem + desgaste) / nUsos) : 0,
+      lavagemPorLocacao: nUsos ? r2(lavagem / nUsos) : 0,
+      pecasPorLocacao: nUsos ? Math.round((tipos.reduce((s, t) => s + t.lavadas, 0) / nUsos) * 10) / 10 : 0,
+      semPreco: tipos.filter((t) => t.semPreco && t.lavadas > 0).map((t) => t.nome),
+    };
+  }
+
   async config(u: UsuarioToken) {
     const [c] = await this.ds.query(`SELECT * FROM enxoval_config WHERE empresa_id = $1`, [u.empresaId]);
     const usuarios = await this.ds.query(
       `SELECT x.id, x.nome, p.nome AS perfil FROM usuarios x JOIN perfis p ON p.id = x.perfil_id WHERE x.empresa_id = $1 AND x.ativo ORDER BY x.nome`, [u.empresaId]);
-    return { responsavelId: c?.responsavel_usuario_id ?? null, responsavelNome: c?.responsavel_nome ?? null, usuarios: usuarios.map((x: Record<string, unknown>) => ({ id: x.id, nome: x.nome, perfil: x.perfil })) };
+    return { responsavelId: c?.responsavel_usuario_id ?? null, responsavelNome: c?.responsavel_nome ?? null, precoKg: Number(c?.preco_kg ?? 0), usuarios: usuarios.map((x: Record<string, unknown>) => ({ id: x.id, nome: x.nome, perfil: x.perfil })) };
   }
 
   async definirResponsavel(u: UsuarioToken, usuarioId: string | null | undefined) {
