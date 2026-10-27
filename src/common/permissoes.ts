@@ -50,6 +50,7 @@ export const PERMISSOES = {
   'uniformes.gerenciar': 'Uniformes e EPI: estoque, entrega ao funcionário (grátis, desconto ou venda), devolução e avarias, ficha de EPI',
   'funcionarios.gerenciar': 'Funcionários: cadastro, crachá e itens da revisão',
   'funcionarios.financeiro': 'Ficha financeira dos funcionários (vales, descontos, pagamentos e gorjetas)',
+  'ponto.registrar': 'Tablet do ponto: deixar os funcionários baterem o ponto com o rosto',
   'empresa.editar': 'Editar dados da empresa',
   'vistorias.fazer': 'Vistoriadoras: fazer a vistoria das suítes e quartos (fotos, checklist, frigobar)',
   'vistorias.decidir': 'Vistorias: decidir as reprovadas (limpeza ou manutenção) e dar ciência das ressalvas',
@@ -75,7 +76,7 @@ export const GRUPOS_PERMISSAO: { grupo: string; permissoes: Permissao[] }[] = [
   { grupo: 'Satisfação', permissoes: ['avaliacoes.ver'] },
   { grupo: 'Cadastros', permissoes: ['unidades.gerenciar', 'categorias.gerenciar', 'ambientes.gerenciar', 'motivos.gerenciar'] },
   { grupo: 'Vistoriadoras / Revisões', permissoes: ['vistorias.fazer', 'vistorias.decidir', 'vistorias.configurar', 'vistorias.relatorio', 'piscinas.registrar'] },
-  { grupo: 'Equipe e empresa', permissoes: ['usuarios.gerenciar', 'perfis.gerenciar', 'empresa.editar', 'funcionarios.gerenciar', 'funcionarios.financeiro'] },
+  { grupo: 'Equipe e empresa', permissoes: ['usuarios.gerenciar', 'perfis.gerenciar', 'empresa.editar', 'funcionarios.gerenciar', 'funcionarios.financeiro', 'ponto.registrar'] },
 ];
 
 /**

@@ -15,11 +15,12 @@ import { LicencasController, LicencasService } from './licencas';
 import { BancoHorasController, BancoHorasService } from './banco-horas';
 import { DesempenhoController, DesempenhoService, ProvaPublicaController } from './desempenho';
 import { ObrigatoriosController, ObrigatoriosService } from './obrigatorios';
+import { PontoController, PontoService } from './ponto';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Funcionario, FuncionarioLancamento, Revisao])],
-  providers: [FuncionariosService, RefeicoesService, AniversariantesService, ContratoService, DocumentosService, FeriasService, EscalaService, LicencasService, BancoHorasService, DesempenhoService, ObrigatoriosService, PainelRhService, RhExtraService],
+  providers: [FuncionariosService, RefeicoesService, AniversariantesService, ContratoService, DocumentosService, FeriasService, EscalaService, LicencasService, BancoHorasService, DesempenhoService, ObrigatoriosService, PainelRhService, RhExtraService, PontoService],
   exports: [ContratoService, FeriasService, EscalaService, LicencasService, BancoHorasService],
-  controllers: [RefeicoesController, AniversariantesController, ContratoController, DocumentosController, FeriasController, EscalaController, LicencasController, BancoHorasController, DesempenhoController, ProvaPublicaController, ObrigatoriosController, PainelRhController, RhExtraController, FuncionariosController],
+  controllers: [RefeicoesController, AniversariantesController, ContratoController, DocumentosController, FeriasController, EscalaController, LicencasController, BancoHorasController, DesempenhoController, ProvaPublicaController, ObrigatoriosController, PainelRhController, RhExtraController, PontoController, FuncionariosController],
 })
 export class FuncionariosModule {}
