@@ -14,25 +14,49 @@ import { UsuarioToken } from '../common/permissoes';
  * Avisa no sino quando vence ou está perto de vencer, e lista os que faltam.
  */
 
-/** [nome, obrigatório para todos, validade típica em meses (sugestão)] */
-export const TIPOS_DOC_EMPRESA: Record<string, [string, boolean, number | null]> = {
-  alvara: ['Alvará de funcionamento', true, 12],
-  bombeiros: ['AVCB / certificado dos bombeiros', true, 36],
-  sanitaria: ['Licença sanitária (vigilância)', true, 12],
-  dedetizacao: ['Dedetização e desratização', true, 6],
-  caixa_agua: ["Limpeza da caixa d'água", true, 6],
-  extintores: ['Recarga dos extintores', true, 12],
-  pcmso: ['PCMSO (saúde ocupacional)', true, 12],
-  pgr: ['PGR (riscos ocupacionais)', true, 24],
-  pmoc: ['PMOC (ar-condicionado)', false, 12],
-  ambiental: ['Licença ambiental', false, 48],
-  ecad: ['ECAD (música ambiente)', false, 12],
-  seguro: ['Seguro do imóvel', false, 12],
-  piscina: ['Análise da água da piscina', false, 1],
-  cnd: ['Certidões negativas (CND)', false, 6],
-  contrato_social: ['Contrato social / alterações', false, null],
-  cartao_cnpj: ['Cartão CNPJ', false, null],
-  outro: ['Outro', false, null],
+export const GRUPOS_DOC_EMPRESA = {
+  municipal: 'Prefeitura',
+  bombeiros: 'Corpo de Bombeiros',
+  registro: 'Registros federais e estaduais',
+  normas: 'Normas e conformidade',
+  alimentos: 'Cozinha e alimentos (Anvisa RDC 216)',
+  lazer: 'Piscinas e hidromassagens',
+  manutencao: 'Manutenção e saúde',
+  outros: 'Outros',
+} as const;
+type GrupoDoc = keyof typeof GRUPOS_DOC_EMPRESA;
+/** [nome, obrigatório para todos, validade típica em meses (sugestão), grupo, explicação] */
+export const TIPOS_DOC_EMPRESA: Record<string, [string, boolean, number | null, GrupoDoc, string]> = {
+  zoneamento: ['Consulta prévia de zoneamento / viabilidade', true, null, 'municipal', 'Confirma que o endereço permite motel ou hotel.'],
+  habite_se: ['Habite-se / certificado de conclusão de obra', true, null, 'municipal', 'A obra foi feita conforme o projeto e tem uso comercial/hoteleiro.'],
+  alvara: ['Alvará de localização e funcionamento', true, 12, 'municipal', 'Autorização da prefeitura para funcionar neste endereço.'],
+  sanitaria: ['Licença sanitária (vigilância)', true, 12, 'municipal', 'Obrigatória por causa do enxoval, da limpeza e da comida/bebida servida.'],
+  publicidade: ['Licença de publicidade (letreiro e fachada)', false, 12, 'municipal', 'No Rio e em várias cidades o letreiro e a fachada pagam licença à prefeitura. Confira a regra da sua cidade.'],
+  ambiental: ['Licença ambiental', false, 48, 'municipal', 'Exigida conforme o porte, o esgoto, a lavanderia própria e o descarte de resíduos.'],
+  bombeiros: ['AVCB / CLCB (Corpo de Bombeiros)', true, 36, 'bombeiros', 'Rotas de fuga, extintores, iluminação de emergência e alarme.'],
+  extintores: ['Recarga e inspeção dos extintores', true, 12, 'bombeiros', 'Recarga anual e o selo do Inmetro em dia.'],
+  cadastur: ['Cadastur (Ministério do Turismo)', true, 24, 'registro', 'Obrigatório para meios de hospedagem (Lei 11.771/2008); renova a cada 2 anos.'],
+  cartao_cnpj: ['CNPJ e registro na Junta Comercial', true, null, 'registro', 'Cartão CNPJ e o registro na Junta Comercial do estado.'],
+  contrato_social: ['Contrato social / alterações', false, null, 'registro', ''],
+  inscricao_estadual: ['Inscrição estadual (se vende mercadorias)', false, null, 'registro', 'Para a nota fiscal do consumo (NFC-e).'],
+  inscricao_municipal: ['Inscrição municipal (ISS)', true, null, 'registro', 'Para a nota de serviço (NFS-e) da hospedagem.'],
+  cnd: ['Certidões negativas (CND)', false, 6, 'registro', ''],
+  acessibilidade: ['Acessibilidade (suítes adaptadas / laudo)', true, null, 'normas', 'Percentual mínimo de suítes adaptadas para pessoas com deficiência (ABNT e leis locais).'],
+  lgpd: ['LGPD: política de privacidade e sigilo', true, 12, 'normas', 'Regras de sigilo e proteção dos dados dos clientes; revisar todo ano.'],
+  eca: ['ECA: procedimento contra entrada de menores', true, null, 'normas', 'Identificação na portaria e a placa de proibição de menores desacompanhados.'],
+  boas_praticas: ['Manual de Boas Práticas e POPs da cozinha', true, 12, 'alimentos', 'Obrigatório (RDC 216): regras de manipulação, higiene, armazenamento e sobras. Revisar todo ano.'],
+  aso_manipuladores: ['Exames médicos dos manipuladores de alimentos', true, 12, 'alimentos', 'Atestado de saúde (ASO/PCMSO) de quem trabalha na cozinha. Os de cada funcionário ficam em RH › Documentos.'],
+  armazenamento: ['Armazenamento e temperatura dos alimentos', true, null, 'alimentos', 'Separação por temperatura, controle de validade e sem reaproveitar sobras. O registro diário fica em Temperaturas.'],
+  piso_antiderrapante: ['Piso antiderrapante nas piscinas e hidros', false, null, 'lazer', 'O piso em volta da piscina e da hidromassagem precisa ser antiderrapante (foto ou laudo).'],
+  dedetizacao: ['Dedetização e desratização', true, 6, 'manutencao', 'Certificado da empresa controladora de pragas.'],
+  caixa_agua: ["Limpeza da caixa d'água", true, 6, 'manutencao', ''],
+  pcmso: ['PCMSO (saúde ocupacional)', true, 12, 'manutencao', ''],
+  pgr: ['PGR (riscos ocupacionais)', true, 24, 'manutencao', ''],
+  pmoc: ['PMOC (ar-condicionado)', false, 12, 'manutencao', ''],
+  piscina: ['Análise da água da piscina (laboratório)', false, 1, 'lazer', 'O cloro e o pH do dia a dia ficam em Piscinas e hidros.'],
+  ecad: ['ECAD (música ambiente)', false, 12, 'outros', ''],
+  seguro: ['Seguro do imóvel', false, 12, 'outros', ''],
+  outro: ['Outro', false, null, 'outros', ''],
 };
 const TIPOS_ARQUIVO: Record<string, string> = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png' };
 const MAX_BYTES = 8_000_000;
@@ -101,9 +125,10 @@ export class DocumentosEmpresaService {
     const atuais = docs.filter((d) => d.atual);
     const faltando = Object.entries(TIPOS_DOC_EMPRESA)
       .filter(([k, [, obrig]]) => obrig && !dispensados.includes(k) && !atuais.some((d) => d.tipo === k))
-      .map(([k, [nome]]) => ({ tipo: k, nome }));
+      .map(([k, [nome, , , grupo]]) => ({ tipo: k, nome, grupo }));
     return {
-      tipos: Object.fromEntries(Object.entries(TIPOS_DOC_EMPRESA).map(([k, [nome, obrig, meses]]) => [k, { nome, obrigatorio: obrig, meses }])),
+      tipos: Object.fromEntries(Object.entries(TIPOS_DOC_EMPRESA).map(([k, [nome, obrig, meses, grupo, ajuda]]) => [k, { nome, obrigatorio: obrig, meses, grupo, ajuda }])),
+      grupos: GRUPOS_DOC_EMPRESA,
       dispensados,
       documentos: docs,
       faltando,

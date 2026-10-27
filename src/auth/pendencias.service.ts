@@ -282,6 +282,21 @@ export class PendenciasService {
       } catch { /* tabela nova ainda não criada */ }
     }
 
+    if (pode('cozinha.ver', 'estoque.gerenciar', 'produtos.gerenciar')) {
+      // temperatura dos equipamentos de frio: leitura fora da faixa (última) e leituras que faltam hoje (depois das 10h)
+      const [fora] = await this.ds.query(
+        `SELECT count(*)::int AS n, string_agg(e.nome, ', ') AS nomes FROM equipamentos_frio e
+          WHERE e.empresa_id = $1 AND e.ativo AND (SELECT fora_da_faixa FROM temperaturas_registros WHERE equipamento_id = e.id ORDER BY criado_em DESC LIMIT 1)`, [u.empresaId]).catch(() => [{ n: 0, nomes: '' }]);
+      add({ chave: 'temperatura-fora', nivel: 'alerta', titulo: 'Equipamento de frio fora da temperatura', detalhe: 'confira e anote de novo', link: '/temperaturas' }, { n: Number(fora?.n ?? 0), nomes: fora?.nomes ?? '' });
+      const hora = Number(new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', hour12: false }).slice(0, 2));
+      if (hora >= 10) {
+        const [falta] = await this.ds.query(
+          `SELECT count(*)::int AS n, string_agg(e.nome, ', ') AS nomes FROM equipamentos_frio e
+            WHERE e.empresa_id = $1 AND e.ativo AND NOT EXISTS (SELECT 1 FROM temperaturas_registros r WHERE r.equipamento_id = e.id AND (r.criado_em AT TIME ZONE 'America/Sao_Paulo')::date = ${HOJE})`, [u.empresaId]).catch(() => [{ n: 0, nomes: '' }]);
+        add({ chave: 'temperatura-hoje', nivel: 'aviso', titulo: 'Temperatura das geladeiras e freezers sem anotar hoje', link: '/temperaturas' }, { n: Number(falta?.n ?? 0), nomes: falta?.nomes ?? '' });
+      }
+    }
+
     if (pode('caixa.principal', 'caixa.adm')) {
       let p: unknown[] = [u.empresaId];
       add({ chave: 'caixa-antigo', nivel: 'alerta', titulo: 'Caixa aberto há mais de 24 horas', detalhe: 'confira e feche o turno', link: '/caixa' },
