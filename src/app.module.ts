@@ -59,6 +59,7 @@ import { ImpressaoModule } from './impressao/impressao.module';
 import { ManutencaoModule } from './manutencao/manutencao.module';
 import { VistoriasModule } from './vistorias/vistorias.module';
 import { ManualModule } from './manual/manual.module';
+import { NotasFiscaisModule } from './notas-fiscais/notas-fiscais.module';
 
 @Module({
   imports: [
@@ -130,6 +131,7 @@ import { ManualModule } from './manual/manual.module';
     ManutencaoModule,
     VistoriasModule,
     ManualModule,
+    NotasFiscaisModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },
