@@ -4,6 +4,7 @@ import { createHash, randomBytes } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { AssinarRelatorioDto, KitDto, MovimentoEnxovalDto, NovoRelatorioDto, TipoEnxovalDto } from './enxoval.dto';
 import { temPermissao, UsuarioToken } from '../common/permissoes';
+import { urlFoto } from '../produtos/fotos';
 
 const FUSO = 'America/Sao_Paulo';
 const hojeSP = () => new Date().toLocaleDateString('sv-SE', { timeZone: FUSO });
@@ -33,7 +34,7 @@ export class EnxovalService {
         const media = total ? Number(t.lavagens) / total : 0;
         const rodada = porRodada.get(String(t.id)) ?? 0;
         return {
-          id: t.id, nome: t.nome, total, rouparia: Number(t.rouparia), lavanderia: Number(t.lavanderia), emUso, perdas: Number(t.perdas),
+          id: t.id, nome: t.nome, fotoUrl: urlFoto(u.empresaId, t.foto as string | null), total, rouparia: Number(t.rouparia), lavanderia: Number(t.lavanderia), emUso, perdas: Number(t.perdas),
           lavagensMedia: Math.round(media), limiteLavagens: Number(t.limite_lavagens), vidaUsadaPct: Math.min(100, Math.round((media / Number(t.limite_lavagens)) * 100)),
           custo: Number(t.custo), porRodada: rodada, jogos: rodada ? Math.round((total / rodada) * 10) / 10 : null,
         };
@@ -139,7 +140,7 @@ export class EnxovalService {
   /* ---------------- lotes (QR code) ---------------- */
 
   private async fmtLote(u: UsuarioToken, l: Record<string, unknown>) {
-    const tipos = await this.ds.query(`SELECT id, total, lavagens, limite_lavagens FROM enxoval_tipos WHERE empresa_id = $1`, [u.empresaId]);
+    const tipos = await this.ds.query(`SELECT id, total, lavagens, limite_lavagens, foto FROM enxoval_tipos WHERE empresa_id = $1`, [u.empresaId]);
     const mapa = new Map<string, Record<string, unknown>>(tipos.map((t: Record<string, unknown>) => [String(t.id), t]));
     const itens = (l.itens as ItemLote[]).map((i) => {
       const t = mapa.get(i.tipoId);
@@ -147,7 +148,7 @@ export class EnxovalService {
       // estimativa: o que a peça já tinha + o quanto o enxoval desse tipo lavou desde a compra
       const est = Math.round(Number(l.lavagens_iniciais) + Math.max(0, mediaAgora - i.mediaNaCompra));
       const limite = Number(t?.limite_lavagens ?? 240);
-      return { ...i, lavagensEstimadas: est, limiteLavagens: limite, vidaUsadaPct: Math.min(100, Math.round((est / limite) * 100)) };
+      return { ...i, fotoUrl: urlFoto(u.empresaId, (t?.foto as string | null) ?? null), lavagensEstimadas: est, limiteLavagens: limite, vidaUsadaPct: Math.min(100, Math.round((est / limite) * 100)) };
     });
     return {
       id: l.id, numero: l.numero, codigo: l.codigo, token: l.token, itens, usadas: l.usadas, lavagensIniciais: Number(l.lavagens_iniciais), mesesUso: l.meses_uso,
@@ -286,8 +287,11 @@ export class EnxovalService {
       }
     }
     const finalOk = r.ger_assinado_em ? this.hashFinal(r) === r.hash_final : null;
+    // mini foto de cada peça (pelo nome; fica fora do conteúdo assinado)
+    const fotosTipos: Record<string, string> = {};
+    for (const t of await this.ds.query(`SELECT nome, foto FROM enxoval_tipos WHERE empresa_id = $1 AND foto IS NOT NULL`, [u.empresaId])) fotosTipos[t.nome] = urlFoto(u.empresaId, t.foto)!;
     return {
-      id: r.id, numero: r.numero, de: dia(r.de), ate: dia(r.ate), status: r.status, hash: r.hash, hashFinal: r.hash_final, conteudo, fotos,
+      id: r.id, numero: r.numero, de: dia(r.de), ate: dia(r.ate), status: r.status, hash: r.hash, hashFinal: r.hash_final, conteudo, fotos, fotosTipos,
       integro: conteudoIntegro && finalOk !== false && Object.values(fotos).every((l) => l.every((f) => f.confere)),
       responsavel: r.resp_assinado_em ? { nome: r.resp_nome, assinatura: r.resp_assinatura, em: r.resp_assinado_em, ip: r.resp_ip } : null,
       gerente: r.ger_assinado_em ? { nome: r.ger_nome, assinatura: r.ger_assinatura, em: r.ger_assinado_em, ip: r.ger_ip } : null,

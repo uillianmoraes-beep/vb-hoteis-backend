@@ -5,6 +5,7 @@ import { UsuarioToken } from '../common/permissoes';
 import { ImpressaoService } from '../impressao/impressao.service';
 import { enviarParaLocal } from '../servidor-local/ponte.core';
 import { EstadiasService } from '../estadias/estadias.service';
+import { urlFoto } from '../produtos/fotos';
 import { AvisosService } from '../avisos/avisos';
 
 interface ItemPedido { produtoId: string; nome: string; quantidade: number; preco: number }
@@ -36,20 +37,20 @@ export class PedidosService {
     const un = await this.unidadePorToken(token);
     // serviços sem custo (toalha extra, cobertor, limpeza) também aparecem
     const cardapio = await this.ds.query(
-      `SELECT id, nome, grupo, preco, tipo FROM produtos WHERE empresa_id = $1 AND ativo AND uso = 'venda' AND NOT ressarcimento AND cardapio AND (preco > 0 OR tipo = 'servico') AND NOT frigobar
+      `SELECT id, nome, grupo, preco, tipo, foto FROM produtos WHERE empresa_id = $1 AND ativo AND uso = 'venda' AND NOT ressarcimento AND cardapio AND (preco > 0 OR tipo = 'servico') AND NOT frigobar
           AND (ambientes_ids IS NULL OR cardinality(ambientes_ids) = 0 OR $2::uuid = ANY(ambientes_ids))
         ORDER BY (tipo = 'servico') DESC, grupo NULLS LAST, nome`, [un.empresa_id, un.ambiente_id]);
     // frigobar desta suíte/quarto: o que a categoria tem (ex.: presidencial com champanhe e vinho)
     const frigobar = un.categoria_id ? await this.ds.query(
-      `SELECT p.id, p.nome, p.preco, f.quantidade FROM frigobar_categoria f JOIN produtos p ON p.id = f.produto_id
+      `SELECT p.id, p.nome, p.preco, p.foto, f.quantidade FROM frigobar_categoria f JOIN produtos p ON p.id = f.produto_id
         WHERE f.empresa_id = $1 AND f.categoria_id = $2 AND p.ativo ORDER BY p.nome`, [un.empresa_id, un.categoria_id]) : [];
     const meus = un.estadia_id
       ? await this.ds.query(`SELECT id, itens, total, status, motivo, criado_em FROM pedidos WHERE estadia_id = $1 ORDER BY criado_em DESC LIMIT 20`, [un.estadia_id])
       : [];
     return {
       empresa: un.empresa, unidade: un.codigo, tipo: un.tipo, aberto: !!un.estadia_id,
-      cardapio: cardapio.map((p: Record<string, unknown>) => ({ id: p.id, nome: p.nome, grupo: p.tipo === 'servico' && Number(p.preco) === 0 ? (p.grupo ?? 'Pedidos ao quarto') : p.grupo, preco: Number(p.preco), servico: p.tipo === 'servico' })),
-      frigobar: frigobar.map((p: Record<string, unknown>) => ({ id: p.id, nome: p.nome, preco: Number(p.preco), quantidade: Number(p.quantidade) })),
+      cardapio: cardapio.map((p: Record<string, unknown>) => ({ id: p.id, nome: p.nome, grupo: p.tipo === 'servico' && Number(p.preco) === 0 ? (p.grupo ?? 'Pedidos ao quarto') : p.grupo, preco: Number(p.preco), servico: p.tipo === 'servico', fotoUrl: urlFoto(un.empresa_id, p.foto as string | null) })),
+      frigobar: frigobar.map((p: Record<string, unknown>) => ({ id: p.id, nome: p.nome, preco: Number(p.preco), quantidade: Number(p.quantidade), fotoUrl: urlFoto(un.empresa_id, p.foto as string | null) })),
       pedidos: meus.map((p: Record<string, unknown>) => ({ id: p.id, itens: p.itens, total: Number(p.total), status: p.status, motivo: p.motivo, criadoEm: p.criado_em })),
     };
   }

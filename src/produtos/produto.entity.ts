@@ -27,6 +27,9 @@ export class Produto {
   @Column({ name: 'controla_estoque', default: false }) controlaEstoque!: boolean;
   @Column({ name: 'estoque_minimo', type: 'numeric', precision: 12, scale: 3, default: 0 }) estoqueMinimo!: string;
   @Column({ type: 'varchar', length: 8, default: 'un' }) unidade!: string;
+  /** nome do arquivo da foto (pasta do servidor) e de onde veio: auto, manual, removida, nao_achou */
+  @Column({ type: 'varchar', length: 60, nullable: true }) foto!: string | null;
+  @Column({ name: 'foto_origem', type: 'varchar', length: 12, nullable: true }) fotoOrigem!: string | null;
   @Column({ default: true }) ativo!: boolean;
   @CreateDateColumn({ name: 'criado_em', type: 'timestamptz' }) criadoEm!: Date;
   @UpdateDateColumn({ name: 'atualizado_em', type: 'timestamptz' }) atualizadoEm!: Date;

@@ -7,6 +7,7 @@ import { AmbientesEmLoteDto, AtualizarProdutoDto, CriarProdutoDto, RenomearGrupo
 import { limparFiscal } from '../common/fiscal';
 import { moverEstoque } from '../estoque/estoque.core';
 import { COLUNAS_FISCAIS, Chave, LinhaLida, ZEROS, lerPlanilha, planilhaModelo } from './importacao';
+import { urlFoto } from './fotos';
 
 @Injectable()
 export class ProdutosService {
@@ -45,7 +46,7 @@ export class ProdutosService {
       const f = mapaFicha.get(p.id);
       const rend = Number(p.fichaRendimento) > 0 ? Number(p.fichaRendimento) : 1;
       return {
-        ...p, custoEstoque: Math.round((mapa.get(p.id) ?? 0) * 100) / 100 || null,
+        ...p, fotoUrl: urlFoto(empresaId, p.foto), custoEstoque: Math.round((mapa.get(p.id) ?? 0) * 100) / 100 || null,
         insumos: f?.n ?? 0, custoFicha: f ? Math.round((Number(f.custo) / rend) * 100) / 100 : null,
       };
     });
