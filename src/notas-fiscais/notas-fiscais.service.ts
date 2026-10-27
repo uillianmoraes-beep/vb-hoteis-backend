@@ -5,6 +5,7 @@ import { DadosFiscais, tributacaoEfetiva } from '../common/fiscal';
 import { moduloAtivo } from '../common/modulos';
 import { UsuarioToken } from '../common/permissoes';
 import { conferirItem } from '../fiscal/conferencia';
+import { liberarPermissao } from '../common/liberacao';
 import { AmbienteFocus, CaminhoFocus, ErroFocus, Focus, RespostaFocus, mensagemFocus } from './focus';
 import type { CancelarNotaDto, CartaCorrecaoDto, DestinatarioDto, EmissorDto, EmitirContaDto, EmitirDevolucaoDto, EmitirNfeDto, ItemNotaDto } from './notas-fiscais.dto';
 
@@ -45,6 +46,11 @@ const NOME_TIPO: Record<TipoNota, string> = { nfce: 'NFC-e', nfe: 'NF-e', devolu
 /** forma de pagamento da nota (tPag): 01 dinheiro, 03 crédito, 04 débito, 17 Pix, 99 outros */
 const TPAG: Record<string, [string, string?]> = { dinheiro: ['01'], credito: ['03'], debito: ['04'], pix: ['17'], faturado: ['99', 'Faturado'], penhora: ['99', 'Penhora'] };
 const CARTAO = ['03', '04', '17'];
+const PRAZO_CANCELAR: Partial<Record<TipoNota, { ms: number; texto: string; saida: string }>> = {
+  nfce: { ms: 30 * 60_000, texto: 'até 30 minutos depois de emitida', saida: 'Agora o caminho é a nota de devolução (o cliente devolveu).' },
+  nfe: { ms: 24 * 3600_000, texto: 'até 24 horas depois de emitida', saida: 'Agora o caminho é a nota de devolução ou uma carta de correção.' },
+  devolucao: { ms: 24 * 3600_000, texto: 'até 24 horas depois de emitida', saida: 'Fale com o contador.' },
+};
 const CFOP_ST = ['5405', '5403', '5401', '6403', '6404'];
 const so = (v: unknown) => String(v ?? '').replace(/\D/g, '');
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -724,13 +730,21 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     await this.exigirModulo(u);
     const n = await this.linha(u.empresaId, id);
     if (n.status !== 'autorizado') throw new BadRequestException('Só dá para cancelar uma nota autorizada.');
-    const focus = await this.focusDa(u.empresaId, n);
+    // prazo da Fazenda: NFC-e até 30 minutos e NF-e até 24 horas depois da autorização (NFS-e: regra da prefeitura)
+    const prazo = PRAZO_CANCELAR[n.tipo];
+    const desde = new Date(String(n.criado_em)).getTime();
+    if (prazo && Date.now() - desde > prazo.ms) {
+      throw new BadRequestException(`Passou o prazo para cancelar a ${NOME_TIPO[n.tipo]} (${prazo.texto}). ${prazo.saida}`);
+    }
     const j = dto.justificativa.trim();
+    const liberou = await liberarPermissao(this.ds, u, 'notas.cancelar', 'cancelar nota fiscal', dto.autorizacao,
+      { estadiaId: n.estadia_id, detalhe: `${NOME_TIPO[n.tipo]} ${n.numero ?? ''} · ${j}`, valor: Number(n.valor_total) });
+    const focus = await this.focusDa(u.empresaId, n);
     const r = await focus.cancelar(TIPO_CAMINHO[n.tipo], n.ref!, j);
     const st = String(r.json.status ?? '');
     if (st === 'cancelado') {
       await this.ds.query(`UPDATE notas_fiscais SET status = 'cancelado', justificativa_cancelamento = $2, cancelada_em = now(), cancelada_por = $3, mensagem = $4, atualizado_em = now() WHERE id = $1`,
-        [id, j, u.nome, r.json.mensagem_sefaz ?? 'Cancelada.']);
+        [id, j, liberou ? `${u.nome} (liberado por ${liberou})` : u.nome, r.json.mensagem_sefaz ?? 'Cancelada.']);
       if (n.estadia_id) await this.sincronizarConta(u.empresaId, n.estadia_id, n.parte_id, u.nome);
       if (n.estadia_id) await this.ds.query(`INSERT INTO estadia_eventos (empresa_id, estadia_id, tipo, descricao, usuario_nome) VALUES ($1,$2,'nota',$3,$4)`,
         [u.empresaId, n.estadia_id, `${NOME_TIPO[n.tipo]} ${n.numero ?? ''} cancelada · ${j}`, u.nome]);

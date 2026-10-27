@@ -267,6 +267,21 @@ export class PendenciasService {
         await contar(`SELECT count(*) AS n, '' AS nomes FROM enxoval_relatorios WHERE empresa_id = $1 AND status = 'assinado_responsavel'`, [u.empresaId]), false);
     }
 
+    if (pode('empresa.editar', 'caixa.adm')) {
+      // documentos da empresa: o mais recente de cada tipo (e ambiente)
+      const docs = await contar(
+        `SELECT count(*) FILTER (WHERE validade < ${HOJE}) AS n, string_agg(tipo, ', ') FILTER (WHERE validade < ${HOJE}) AS nomes,
+                count(*) FILTER (WHERE validade >= ${HOJE} AND validade <= ${HOJE} + avisar_dias) AS v
+           FROM (SELECT DISTINCT ON (tipo, ambiente_id) tipo, validade, avisar_dias FROM empresa_documentos WHERE empresa_id = $1 ORDER BY tipo, ambiente_id, criado_em DESC) d`, [u.empresaId]);
+      add({ chave: 'docs-empresa-vencidos', nivel: 'alerta', titulo: 'Documentos da empresa vencidos', detalhe: 'alvará, bombeiros, dedetização…: renove e envie o novo', link: '/documentos-empresa' }, docs, false);
+      try {
+        const [v] = await this.ds.query(
+          `SELECT count(*) AS n FROM (SELECT DISTINCT ON (tipo, ambiente_id) validade, avisar_dias FROM empresa_documentos WHERE empresa_id = $1 ORDER BY tipo, ambiente_id, criado_em DESC) d
+            WHERE validade >= ${HOJE} AND validade <= ${HOJE} + avisar_dias`, [u.empresaId]);
+        add({ chave: 'docs-empresa-vencendo', nivel: 'aviso', titulo: 'Documentos da empresa perto de vencer', detalhe: 'já providencie a renovação', link: '/documentos-empresa' }, { n: Number(v?.n ?? 0), nomes: '' }, false);
+      } catch { /* tabela nova ainda não criada */ }
+    }
+
     if (pode('caixa.principal', 'caixa.adm')) {
       let p: unknown[] = [u.empresaId];
       add({ chave: 'caixa-antigo', nivel: 'alerta', titulo: 'Caixa aberto há mais de 24 horas', detalhe: 'confira e feche o turno', link: '/caixa' },

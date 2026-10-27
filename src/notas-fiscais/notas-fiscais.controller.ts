@@ -80,9 +80,10 @@ export class NotasFiscaisController {
     return this.service.atualizar(u, id);
   }
 
+  /** quem não tem "notas.cancelar" pede a liberação do gerente */
   @Post(':id/cancelar')
   @HttpCode(200)
-  @Requer('notas.gerenciar')
+  @Requer('notas.gerenciar', 'notas.cancelar', 'estadias.operar')
   cancelar(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CancelarNotaDto) {
     return this.service.cancelar(u, id, dto);
   }

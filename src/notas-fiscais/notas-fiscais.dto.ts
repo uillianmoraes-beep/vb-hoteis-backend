@@ -1,4 +1,5 @@
 import { Type } from 'class-transformer';
+import { AutorizacaoDto } from '../estadias/estadias.dto';
 import {
   ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsEmail, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Length, Max, MaxLength, Min, MinLength, ValidateNested,
 } from 'class-validator';
@@ -80,6 +81,8 @@ export class EmitirDevolucaoDto {
 
 export class CancelarNotaDto {
   @IsString() @MinLength(15, { message: 'A justificativa precisa ter pelo menos 15 letras.' }) @MaxLength(255) justificativa!: string;
+  /** liberação do gerente (quem não tem a permissão de cancelar) */
+  @IsOptional() @ValidateNested() @Type(() => AutorizacaoDto) autorizacao?: AutorizacaoDto;
 }
 
 export class CartaCorrecaoDto {
