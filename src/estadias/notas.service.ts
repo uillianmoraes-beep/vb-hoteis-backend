@@ -11,6 +11,11 @@ import { limparFiscal } from '../common/fiscal';
 import { moduloAtivo } from '../common/modulos';
 
 const DIA = 86_400_000;
+const NOME_MODELO: Record<string, string> = { nfce: 'NFC-e', nfse: 'NFS-e', nfe: 'NF-e' };
+const SO_FORMA = ['dinheiro', 'pix', 'debito', 'credito', 'faturado', 'penhora', 'cortesia', 'misto'];
+
+/** última nota de cada modelo de uma conta (ou parte), emitida pelo sistema */
+interface NotaConta { id: string; tipo: string; nome: string; status: string; numero: string | null; mensagem: string | null; urlPdf: string | null; valor: number; criadoEm: Date }
 
 /** Relatórios de notas: para emitir / emitidas, e marcação de emissão. */
 @Injectable()
@@ -41,7 +46,7 @@ export class NotasService {
     return fiscal;
   }
 
-  async listar(u: UsuarioToken, filtro: { status?: string; de?: string; ate?: string; ambienteId?: string }) {
+  async listar(u: UsuarioToken, filtro: { status?: string; de?: string; ate?: string; ambienteId?: string; forma?: string }) {
     await this.exigirModulo(u);
     const status = filtro.status === 'emitida' ? 'emitida' : 'pendente';
     const ate = filtro.ate ? new Date(`${filtro.ate}T23:59:59.999-03:00`) : new Date();
@@ -58,6 +63,11 @@ export class NotasService {
       .andWhere('e.saidaEm BETWEEN :de AND :ate', { de, ate });
     if (u.ambientesIds?.length) qb.andWhere('e.ambienteId IN (:...amb)', { amb: u.ambientesIds });
     if (filtro.ambienteId) qb.andWhere('e.ambienteId = :a', { a: filtro.ambienteId });
+    // forma de pagamento: a conta tem algum pagamento nessa forma (conta dividida entra em cada forma usada)
+    if (filtro.forma && SO_FORMA.includes(filtro.forma)) {
+      if (filtro.forma === 'misto') qb.andWhere(`e.formaPagamento = 'misto'`);
+      else qb.andWhere(`(e.formaPagamento = :fp OR EXISTS (SELECT 1 FROM estadia_pagamentos p WHERE p.estadia_id = e.id AND p.forma = :fp))`, { fp: filtro.forma });
+    }
     const lista: Estadia[] = await qb.orderBy('e.saidaEm', 'DESC').limit(2000).getMany();
 
     const unidades = lista.length ? await this.unidades.find({ where: { id: In([...new Set(lista.map((e) => e.unidadeId))]) } }) : [];
@@ -93,7 +103,53 @@ export class NotasService {
         notaNumero: p.numero, notaEmitidaEm: p.emitida_em, notaEmitidaPor: p.emitida_por,
       }));
     });
-    return { status, de, ate, itens, totais: this.totais(itens) };
+    // notas do sistema de cada linha: situação certa (processando, recusada) e os modelos emitidos
+    const notas = await this.notasDasContas(lista.map((e) => e.id));
+    const comNotas = itens.map((i) => {
+      const ns = notas.filter((n) => n.estadiaId === (i.estadiaId ?? i.id) && n.parteId === (i.parteId ?? null)).map(({ estadiaId: _e, parteId: _p, ...n }) => n);
+      const situacao = status === 'emitida' ? 'emitida' : ns.some((n) => n.status === 'processando') ? 'processando' : ns.some((n) => n.status === 'erro') ? 'recusada' : 'pendente';
+      return { ...i, notas: ns, situacao };
+    });
+    // totais por modelo de nota (só as autorizadas contam como emitidas)
+    const modelos: Record<string, { nome: string; quantidade: number; valor: number; processando: number; recusadas: number }> = {};
+    for (const n of comNotas.flatMap((i) => i.notas)) {
+      const m = (modelos[n.tipo] ??= { nome: n.nome, quantidade: 0, valor: 0, processando: 0, recusadas: 0 });
+      if (n.status === 'autorizado') { m.quantidade++; m.valor = Math.round((m.valor + n.valor) * 100) / 100; }
+      if (n.status === 'processando') m.processando++;
+      if (n.status === 'erro') m.recusadas++;
+    }
+    return { status, de, ate, itens: comNotas, totais: this.totais(itens), modelos: Object.entries(modelos).map(([tipo, m]) => ({ tipo, ...m })) };
+  }
+
+  /** última tentativa de cada modelo de nota (NFC-e, NFS-e, NF-e) das contas */
+  private async notasDasContas(ids: string[]): Promise<(NotaConta & { estadiaId: string; parteId: string | null })[]> {
+    if (!ids.length) return [];
+    const l: Record<string, unknown>[] = await this.repo.query(
+      `SELECT DISTINCT ON (estadia_id, parte_id, CASE WHEN tipo = 'nfsen' THEN 'nfse' ELSE tipo END)
+              id, estadia_id, parte_id, CASE WHEN tipo = 'nfsen' THEN 'nfse' ELSE tipo END AS tipo, status, numero, mensagem, url_pdf, valor_total, criado_em
+         FROM notas_fiscais WHERE estadia_id = ANY($1::uuid[]) AND tipo <> 'devolucao'
+        ORDER BY estadia_id, parte_id, CASE WHEN tipo = 'nfsen' THEN 'nfse' ELSE tipo END, criado_em DESC`, [ids]).catch(() => []);
+    return l.map((n) => ({
+      id: n.id as string, estadiaId: n.estadia_id as string, parteId: (n.parte_id as string | null) ?? null, tipo: n.tipo as string,
+      nome: NOME_MODELO[n.tipo as string] ?? String(n.tipo), status: n.status as string, numero: (n.numero as string | null) ?? null,
+      mensagem: (n.mensagem as string | null) ?? null, urlPdf: (n.url_pdf as string | null) ?? null, valor: Number(n.valor_total ?? 0), criadoEm: n.criado_em as Date,
+    }));
+  }
+
+  /** últimas contas fechadas da suíte/quarto, com as notas (para a recepção emitir ou conferir depois) */
+  async daUnidade(u: UsuarioToken, unidadeId: string, limite = 3) {
+    const e = await this.empresas.findOne({ where: { id: u.empresaId } });
+    if (!moduloAtivo(e?.modulos, 'notas')) return [];
+    const contas: Estadia[] = await this.repo.createQueryBuilder('e')
+      .where('e.empresaId = :emp AND e.unidadeId = :un AND e.status = :st', { emp: u.empresaId, un: unidadeId, st: 'fechada' })
+      .andWhere(u.ambientesIds?.length ? 'e.ambienteId IN (:...amb)' : '1=1', { amb: u.ambientesIds ?? [] })
+      .orderBy('e.saidaEm', 'DESC').limit(Math.min(Math.max(limite, 1), 10)).getMany();
+    const notas = await this.notasDasContas(contas.map((c) => c.id));
+    return contas.map((c) => ({
+      id: c.id, numero: c.numero, entradaEm: c.entradaEm, saidaEm: c.saidaEm, total: Number(c.valorTotal ?? 0), formaPagamento: c.formaPagamento,
+      notaStatus: c.notaStatus, notaNumero: c.notaNumero,
+      notas: notas.filter((n) => n.estadiaId === c.id).map(({ estadiaId: _e, parteId, ...n }) => ({ ...n, parteId })),
+    }));
   }
 
   private totais(itens: { hospedagem: number; consumo: number; total: number }[]) {

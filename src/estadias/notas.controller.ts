@@ -12,8 +12,16 @@ export class NotasController {
   /** ?status=pendente|emitida&de=AAAA-MM-DD&ate=AAAA-MM-DD */
   @Get()
   @Requer('estadias.operar', 'notas.gerenciar')
-  listar(@Usuario() u: UsuarioToken, @Query('status') status?: string, @Query('de') de?: string, @Query('ate') ate?: string, @Query('ambienteId') ambienteId?: string) {
-    return this.service.listar(u, { status, de, ate, ambienteId });
+  listar(@Usuario() u: UsuarioToken, @Query('status') status?: string, @Query('de') de?: string, @Query('ate') ate?: string, @Query('ambienteId') ambienteId?: string,
+    @Query('forma') forma?: string) {
+    return this.service.listar(u, { status, de, ate, ambienteId, forma });
+  }
+
+  /** últimas contas fechadas de uma suíte/quarto com as notas (a recepção emite depois sem abrir Notas fiscais) */
+  @Get('unidade/:unidadeId')
+  @Requer('estadias.operar', 'notas.gerenciar')
+  daUnidade(@Usuario() u: UsuarioToken, @Param('unidadeId', ParseUUIDPipe) unidadeId: string, @Query('limite') limite?: string) {
+    return this.service.daUnidade(u, unidadeId, Number(limite) || 3);
   }
 
   @Get('config')
