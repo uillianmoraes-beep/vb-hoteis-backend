@@ -184,7 +184,7 @@ export class Spedy {
       status: st,
       mensagem_sefaz: st === 'autorizado' ? (msg || 'Autorizada.') : msg,
       ...(st.startsWith('erro') ? { mensagem: msg || `Nota ${n.status === 'denied' ? 'denegada' : 'recusada'} (sem motivo informado pela Spedy).` } : {}),
-      numero: n.number ?? undefined,
+      numero: n.number || undefined, // a Spedy devolve 0 enquanto a nota não tem número
       serie: n.series ?? n.rps?.series ?? undefined,
       chave_nfe: n.accessKey ?? undefined,
       codigo_verificacao: modelo === 'service-invoices' ? (n.authorization?.protocol ?? undefined) : undefined,
