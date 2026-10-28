@@ -1,11 +1,13 @@
-import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Put, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
+import { Publico } from '../common/decorators/publico.decorator';
 import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
 import { NotasFiscaisService } from './notas-fiscais.service';
 import { CancelarNotaDto, CartaCorrecaoDto, EmissorDto, EmitirContaDto, EmitirDevolucaoDto, EmitirNfeDto } from './notas-fiscais.dto';
 
-/** Notas emitidas pelo sistema (Focus NFe): NFC-e, NF-e, NFS-e e devolução. */
+/** Notas emitidas pelo sistema (Focus NFe ou Spedy): NFC-e, NF-e, NFS-e e devolução. */
 @Controller('notas-fiscais')
 export class NotasFiscaisController {
   constructor(private readonly service: NotasFiscaisService) {}
@@ -93,5 +95,20 @@ export class NotasFiscaisController {
   @Requer('notas.gerenciar')
   cartaCorrecao(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: CartaCorrecaoDto) {
     return this.service.cartaCorrecao(u, id, dto);
+  }
+}
+
+/** PDF e XML das notas da Spedy (o endereço vem assinado; a Spedy pede a chave, que fica só no servidor) */
+@Controller('publico/notas-arquivo')
+export class NotasArquivoController {
+  constructor(private readonly service: NotasFiscaisService) {}
+
+  @Publico()
+  @Get()
+  async arquivo(@Query() q: Record<string, string>, @Res() res: Response) {
+    const a = await this.service.arquivoSpedy(q);
+    res.setHeader('Content-Type', a.tipo);
+    res.setHeader('Content-Disposition', `inline; filename="nota.${a.tipo.endsWith('pdf') ? 'pdf' : 'xml'}"`);
+    res.send(a.dados);
   }
 }

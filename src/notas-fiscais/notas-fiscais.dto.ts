@@ -20,6 +20,10 @@ export class EmissorDto {
   @IsIn(['homologacao', 'producao']) ambiente!: 'homologacao' | 'producao';
   @IsOptional() @IsString() @MaxLength(200) tokenHomologacao?: string;
   @IsOptional() @IsString() @MaxLength(200) tokenProducao?: string;
+  /** quem leva a nota: Focus NFe ou Spedy */
+  @IsOptional() @IsIn(['focus', 'spedy']) provedor?: 'focus' | 'spedy';
+  @IsOptional() @IsString() @MaxLength(300) spedyHomologacao?: string;
+  @IsOptional() @IsString() @MaxLength(300) spedyProducao?: string;
   @IsOptional() @IsIn(['nacional', 'municipal']) nfsePadrao?: 'nacional' | 'municipal';
   @IsOptional() @ValidateNested() @Type(() => DadosEmissorDto) dados?: DadosEmissorDto;
   @IsOptional() @IsInt() @Min(1) @Max(49999) dpsSerie?: number;

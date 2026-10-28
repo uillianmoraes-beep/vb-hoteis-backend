@@ -7,6 +7,11 @@ import { UsuarioToken } from '../common/permissoes';
 import { conferirItem } from '../fiscal/conferencia';
 import { liberarPermissao } from '../common/liberacao';
 import { AmbienteFocus, CaminhoFocus, ErroFocus, Focus, RespostaFocus, mensagemFocus } from './focus';
+import { Spedy, assinarArquivo } from './spedy';
+
+/** empresa que leva a nota à SEFAZ/prefeitura (as duas falam o mesmo "idioma" para o resto do sistema) */
+type Provedor = Focus | Spedy;
+const NOME_PROVEDOR = { focus: 'Focus NFe', spedy: 'Spedy' } as const;
 import type { CancelarNotaDto, CartaCorrecaoDto, DestinatarioDto, EmissorDto, EmitirContaDto, EmitirDevolucaoDto, EmitirNfeDto, ItemNotaDto } from './notas-fiscais.dto';
 
 /**
@@ -21,6 +26,9 @@ type StatusNota = 'processando' | 'autorizado' | 'erro' | 'cancelado';
 interface Emissor {
   cnpj: string;
   ambiente: AmbienteFocus;
+  provedor: 'focus' | 'spedy';
+  spedy_chave_homologacao: string | null;
+  spedy_chave_producao: string | null;
   token_homologacao: string | null;
   token_producao: string | null;
   nfse_padrao: 'nacional' | 'municipal';
@@ -142,14 +150,35 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     return { cnpj: so(e.cnpj), chave: 'principal' };
   }
 
-  private async emissor(empresaId: string, cnpj: string): Promise<{ e: Emissor; focus: Focus }> {
+  private async emissor(empresaId: string, cnpj: string): Promise<{ e: Emissor; focus: Provedor }> {
     const [e] = await this.ds.query(`SELECT * FROM focus_emissores WHERE empresa_id = $1 AND cnpj = $2`, [empresaId, cnpj]);
-    if (!e) throw new BadRequestException(`O CNPJ ${cnpj} ainda não está ligado à Focus NFe. Configure em Configuração fiscal › Emissor de notas.`);
-    const cripto = e.ambiente === 'producao' ? e.token_producao : e.token_homologacao;
-    if (!cripto) throw new BadRequestException(`Falta o token de ${e.ambiente === 'producao' ? 'produção' : 'homologação (testes)'} da Focus para o CNPJ ${cnpj}.`);
-    let token: string;
-    try { token = decifrar(cripto, 'vb-focus'); } catch { throw new BadRequestException('Não consegui ler o token guardado da Focus. Salve o token de novo.'); }
-    return { e: e as Emissor, focus: new Focus(token, e.ambiente) };
+    if (!e) throw new BadRequestException(`O CNPJ ${cnpj} ainda não está ligado a um emissor de notas. Configure em Configuração fiscal › Emissor de notas.`);
+    return { e: e as Emissor, focus: this.provedor(empresaId, e as Emissor, e.ambiente, e.provedor) };
+  }
+
+  /** cliente da Focus ou da Spedy com a chave do ambiente pedido */
+  private provedor(empresaId: string, e: Emissor, ambiente: AmbienteFocus, qual: 'focus' | 'spedy'): Provedor {
+    const prod = ambiente === 'producao';
+    const nome = NOME_PROVEDOR[qual] ?? 'emissor';
+    const cripto = qual === 'spedy' ? (prod ? e.spedy_chave_producao : e.spedy_chave_homologacao) : (prod ? e.token_producao : e.token_homologacao);
+    if (!cripto) throw new BadRequestException(`Falta a chave de ${prod ? 'produção' : 'testes'} da ${nome} para o CNPJ ${e.cnpj}.`);
+    let chave: string;
+    try { chave = decifrar(cripto, qual === 'spedy' ? 'vb-spedy' : 'vb-focus'); } catch { throw new BadRequestException(`Não consegui ler a chave guardada da ${nome}. Salve a chave de novo.`); }
+    if (qual !== 'spedy') return new Focus(chave, ambiente);
+    return new Spedy(chave, ambiente, (caminho) => {
+      const d = `${empresaId}|${e.cnpj}|${ambiente}|${caminho}`;
+      return `/publico/notas-arquivo?e=${empresaId}&c=${e.cnpj}&a=${ambiente}&p=${encodeURIComponent(caminho)}&s=${assinarArquivo(d)}`;
+    });
+  }
+
+  /** PDF/XML de uma nota da Spedy (o endereço vem assinado pelo próprio sistema) */
+  async arquivoSpedy(q: { e?: string; c?: string; a?: string; p?: string; s?: string }) {
+    const d = `${q.e}|${q.c}|${q.a}|${q.p}`;
+    if (!q.e || !q.c || !q.p || !q.s || !['producao', 'homologacao'].includes(q.a ?? '') || assinarArquivo(d) !== q.s) throw new NotFoundException('Arquivo não encontrado.');
+    const [e] = await this.ds.query(`SELECT * FROM focus_emissores WHERE empresa_id = $1 AND cnpj = $2`, [q.e, q.c]);
+    if (!e) throw new NotFoundException('Arquivo não encontrado.');
+    const sp = this.provedor(q.e, e as Emissor, q.a as AmbienteFocus, 'spedy') as Spedy;
+    return sp.baixar(q.p);
   }
 
   /** próximo número da série (só em produção; nos testes a Focus numera sozinha) */
@@ -190,6 +219,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     const salvos: (Emissor & { atualizado_em: Date; atualizado_por: string | null; dps_proximo_homologacao: number; dps_proximo_producao: number })[] =
       await this.ds.query(`SELECT * FROM focus_emissores WHERE empresa_id = $1`, [u.empresaId]);
     const fim = (c: string | null) => { if (!c) return null; try { const t = decifrar(c, 'vb-focus'); return `••••${t.slice(-4)}`; } catch { return '(precisa salvar de novo)'; } };
+    const fimSpedy = (c: string | null) => { if (!c) return null; try { const t = decifrar(c, 'vb-spedy'); return `••••${t.slice(-4)}`; } catch { return '(precisa salvar de novo)'; } };
     return lista.map((c) => {
       const s = salvos.find((x) => x.cnpj === c.cnpj);
       return {
@@ -198,8 +228,11 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
         ambiente: s?.ambiente ?? 'homologacao',
         nfsePadrao: s?.nfse_padrao ?? 'nacional',
         dados: s?.dados ?? {},
+        provedor: s?.provedor ?? 'focus',
         tokenHomologacao: fim(s?.token_homologacao ?? null),
         tokenProducao: fim(s?.token_producao ?? null),
+        spedyHomologacao: fimSpedy(s?.spedy_chave_homologacao ?? null),
+        spedyProducao: fimSpedy(s?.spedy_chave_producao ?? null),
         dps: s ? { serie: s.dps_serie, proximoHomologacao: s.dps_proximo_homologacao, proximoProducao: s.dps_proximo_producao } : null,
         atualizadoEm: s?.atualizado_em ?? null,
         atualizadoPor: s?.atualizado_por ?? null,
@@ -211,7 +244,8 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     const e = await this.empresa(u.empresaId);
     if (!moduloAtivo(e.modulos, 'notas')) return { ligado: false, ambiente: null };
     const [r] = await this.ds.query(
-      `SELECT ambiente FROM focus_emissores WHERE empresa_id = $1 AND (CASE WHEN ambiente = 'producao' THEN token_producao ELSE token_homologacao END) IS NOT NULL LIMIT 1`, [u.empresaId]);
+      `SELECT ambiente FROM focus_emissores WHERE empresa_id = $1 AND (CASE WHEN provedor = 'spedy' THEN (CASE WHEN ambiente = 'producao' THEN spedy_chave_producao ELSE spedy_chave_homologacao END)
+         ELSE (CASE WHEN ambiente = 'producao' THEN token_producao ELSE token_homologacao END) END) IS NOT NULL LIMIT 1`, [u.empresaId]);
     return { ligado: !!r, ambiente: r?.ambiente ?? null };
   }
 
@@ -231,18 +265,22 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     if (dados.codigoMunicipio && dados.codigoMunicipio.length !== 7) throw new BadRequestException('O código IBGE do município tem 7 números (ex.: Barra do Piraí = 3300308).');
     const th = dto.tokenHomologacao?.trim() ? cifrar(dto.tokenHomologacao.trim(), 'vb-focus') : null;
     const tp = dto.tokenProducao?.trim() ? cifrar(dto.tokenProducao.trim(), 'vb-focus') : null;
-    if (dto.ambiente === 'producao' && !tp) {
-      const [s] = await this.ds.query(`SELECT token_producao FROM focus_emissores WHERE empresa_id = $1 AND cnpj = $2`, [u.empresaId, c]);
-      if (!s?.token_producao) throw new BadRequestException('Para usar produção, informe o token de produção.');
+    const provedor = dto.provedor === 'spedy' ? 'spedy' : 'focus';
+    const sh = dto.spedyHomologacao?.trim() ? cifrar(dto.spedyHomologacao.trim(), 'vb-spedy') : null;
+    const sp = dto.spedyProducao?.trim() ? cifrar(dto.spedyProducao.trim(), 'vb-spedy') : null;
+    if (dto.ambiente === 'producao' && !(provedor === 'spedy' ? sp : tp)) {
+      const [s] = await this.ds.query(`SELECT token_producao, spedy_chave_producao FROM focus_emissores WHERE empresa_id = $1 AND cnpj = $2`, [u.empresaId, c]);
+      if (!(provedor === 'spedy' ? s?.spedy_chave_producao : s?.token_producao)) throw new BadRequestException(`Para usar produção, informe a chave de produção da ${NOME_PROVEDOR[provedor]}.`);
     }
     await this.ds.query(
-      `INSERT INTO focus_emissores (empresa_id, cnpj, ambiente, token_homologacao, token_producao, nfse_padrao, dados, dps_serie, atualizado_por)
-       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,COALESCE($8,1),$9)
-       ON CONFLICT (empresa_id, cnpj) DO UPDATE SET ambiente = EXCLUDED.ambiente,
+      `INSERT INTO focus_emissores (empresa_id, cnpj, ambiente, token_homologacao, token_producao, nfse_padrao, dados, dps_serie, atualizado_por, provedor, spedy_chave_homologacao, spedy_chave_producao)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,COALESCE($8,1),$9,$11,$12,$13)
+       ON CONFLICT (empresa_id, cnpj) DO UPDATE SET ambiente = EXCLUDED.ambiente, provedor = $11,
+         spedy_chave_homologacao = COALESCE($12, focus_emissores.spedy_chave_homologacao), spedy_chave_producao = COALESCE($13, focus_emissores.spedy_chave_producao),
          token_homologacao = COALESCE($4, focus_emissores.token_homologacao), token_producao = COALESCE($5, focus_emissores.token_producao),
          nfse_padrao = EXCLUDED.nfse_padrao, dados = EXCLUDED.dados, dps_serie = COALESCE($8, focus_emissores.dps_serie),
          dps_proximo_producao = COALESCE($10, focus_emissores.dps_proximo_producao), atualizado_em = now(), atualizado_por = $9`,
-      [u.empresaId, c, dto.ambiente, th, tp, dto.nfsePadrao ?? 'nacional', JSON.stringify(dados), dto.dpsSerie ?? null, u.nome, dto.dpsProximoProducao ?? null]);
+      [u.empresaId, c, dto.ambiente, th, tp, dto.nfsePadrao ?? 'nacional', JSON.stringify(dados), dto.dpsSerie ?? null, u.nome, dto.dpsProximoProducao ?? null, provedor, sh, sp]);
     return (await this.emissores(u)).find((x) => x.cnpj === c);
   }
 
@@ -250,7 +288,8 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     await this.exigirModulo(u);
     const { focus, e } = await this.emissor(u.empresaId, so(cnpj));
     await focus.testar();
-    return { ok: true, ambiente: e.ambiente, mensagem: `Token aceito pela Focus (${e.ambiente === 'producao' ? 'produção' : 'homologação — notas de teste, sem valor fiscal'}).` };
+    const nome = NOME_PROVEDOR[e.provedor ?? 'focus'];
+    return { ok: true, ambiente: e.ambiente, mensagem: `Chave aceita pela ${nome} (${e.ambiente === 'producao' ? 'produção' : `${e.provedor === 'spedy' ? 'sandbox' : 'homologação'} — notas de teste, sem valor fiscal`}).` };
   }
 
   /* ------------------------------------------------------------- consultas */
@@ -301,16 +340,16 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
 
   /** cria a linha da nota, manda para a Focus e guarda o resultado */
   private async enviar(empresaId: string, quem: string, a: {
-    tipo: TipoNota; cnpj: string; emissor: { e: Emissor; focus: Focus }; corpo: Record<string, unknown>; valor: number;
+    tipo: TipoNota; cnpj: string; emissor: { e: Emissor; focus: Provedor }; corpo: Record<string, unknown>; valor: number;
     destinatario?: { nome?: string | null; documento?: string | null }; origem: string; estadiaId?: string | null; parteId?: string | null;
     notaReferenciadaId?: string | null; chaveReferenciada?: string | null;
   }) {
     const [linha] = await this.ds.query(
       `INSERT INTO notas_fiscais (empresa_id, cnpj_emitente, tipo, ambiente, ref, origem, estadia_id, parte_id, nota_referenciada_id, chave_referenciada,
-         valor_total, destinatario_nome, destinatario_documento, envio, criado_por)
-       VALUES ($1,$2,$3,$4,'vb-' || gen_random_uuid()::text,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14) RETURNING id, ref`,
+         valor_total, destinatario_nome, destinatario_documento, envio, criado_por, provedor)
+       VALUES ($1,$2,$3,$4,'vb-' || gen_random_uuid()::text,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14,$15) RETURNING id, ref`,
       [empresaId, a.cnpj, a.tipo, a.emissor.e.ambiente, a.origem, a.estadiaId ?? null, a.parteId ?? null, a.notaReferenciadaId ?? null, a.chaveReferenciada ?? null,
-        r2(a.valor), a.destinatario?.nome ?? null, so(a.destinatario?.documento) || null, JSON.stringify(a.corpo), quem]);
+        r2(a.valor), a.destinatario?.nome ?? null, so(a.destinatario?.documento) || null, JSON.stringify(a.corpo), quem, a.emissor.e.provedor ?? 'focus']);
     try {
       const r = await a.emissor.focus.emitir(TIPO_CAMINHO[a.tipo], linha.ref, a.corpo);
       await this.guardarResposta(empresaId, linha.id, a.emissor.focus, r.json, quem);
@@ -326,7 +365,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** traduz a resposta da Focus para a linha da nota (e marca a conta quando autorizada) */
-  private async guardarResposta(empresaId: string, id: string, focus: Focus, j: RespostaFocus, quem: string) {
+  private async guardarResposta(empresaId: string, id: string, focus: Provedor, j: RespostaFocus, quem: string) {
     const st = String(j.status ?? '');
     const status: StatusNota = st === 'autorizado' ? 'autorizado' : st === 'cancelado' ? 'cancelado'
       : st.startsWith('processando') ? 'processando' : st === 'erro_cancelamento' ? 'autorizado' : 'erro';
@@ -472,7 +511,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** NFS-e da hospedagem (ou de um serviço): padrão nacional (DPS) ou o da prefeitura */
-  private async emitirServico(u: UsuarioToken, em: { e: Emissor; focus: Focus }, regime: 'simples' | 'mei' | 'normal', f: DadosFiscais,
+  private async emitirServico(u: UsuarioToken, em: { e: Emissor; focus: Provedor }, regime: 'simples' | 'mei' | 'normal', f: DadosFiscais,
     a: { valor: number; descricao: string; doc: string | null; nome: string | null; estadiaId: string | null; parteId: string | null }) {
     const d = em.e.dados;
     if (!d.codigoMunicipio) throw new BadRequestException('Falta o código IBGE do município no emissor de notas (Configuração fiscal › Emissor de notas).');
@@ -718,11 +757,10 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** usa o token do ambiente em que a nota foi emitida (mesmo que o emissor tenha mudado depois) */
-  private async focusDa(empresaId: string, n: { cnpj_emitente: string | null; ambiente: AmbienteFocus }) {
-    const [e] = await this.ds.query(`SELECT token_homologacao, token_producao FROM focus_emissores WHERE empresa_id = $1 AND cnpj = $2`, [empresaId, n.cnpj_emitente]);
-    const cripto = n.ambiente === 'producao' ? e?.token_producao : e?.token_homologacao;
-    if (!cripto) throw new BadRequestException('O token da Focus deste CNPJ não está mais salvo.');
-    return new Focus(decifrar(cripto, 'vb-focus'), n.ambiente);
+  private async focusDa(empresaId: string, n: { cnpj_emitente: string | null; ambiente: AmbienteFocus; provedor?: string | null }): Promise<Provedor> {
+    const [e] = await this.ds.query(`SELECT * FROM focus_emissores WHERE empresa_id = $1 AND cnpj = $2`, [empresaId, n.cnpj_emitente]);
+    if (!e) throw new BadRequestException('O emissor deste CNPJ não está mais configurado.');
+    return this.provedor(empresaId, e as Emissor, n.ambiente, n.provedor === 'spedy' ? 'spedy' : 'focus');
   }
 
   private async atualizarNota(empresaId: string, id: string, quem: string) {
@@ -730,7 +768,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     const focus = await this.focusDa(empresaId, n);
     const r = await focus.consultar(TIPO_CAMINHO[n.tipo], n.ref!);
     if (r.status === 404) {
-      await this.ds.query(`UPDATE notas_fiscais SET status = 'erro', mensagem = 'A Focus não tem esta nota (não chegou a ser recebida).', atualizado_em = now() WHERE id = $1 AND status = 'processando'`, [id]);
+      await this.ds.query(`UPDATE notas_fiscais SET status = 'erro', mensagem = 'O emissor não tem esta nota (não chegou a ser recebida).', atualizado_em = now() WHERE id = $1 AND status = 'processando'`, [id]);
     } else await this.guardarResposta(empresaId, id, focus, r.json, quem);
     const [x] = await this.ds.query(`SELECT * FROM notas_fiscais WHERE id = $1`, [id]);
     return this.formatar(x);
@@ -764,7 +802,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
       if (n.estadia_id) await this.ds.query(`INSERT INTO estadia_eventos (empresa_id, estadia_id, tipo, descricao, usuario_nome) VALUES ($1,$2,'nota',$3,$4)`,
         [u.empresaId, n.estadia_id, `${NOME_TIPO[n.tipo]} ${n.numero ?? ''} cancelada · ${j}`, u.nome]);
     } else if (st.startsWith('processando')) {
-      await this.ds.query(`UPDATE notas_fiscais SET justificativa_cancelamento = $2, mensagem = 'Cancelamento enviado; aguardando a prefeitura.', atualizado_em = now() WHERE id = $1`, [id, j]);
+      await this.ds.query(`UPDATE notas_fiscais SET justificativa_cancelamento = $2, mensagem = 'Cancelamento enviado; aguardando a confirmação.', atualizado_em = now() WHERE id = $1`, [id, j]);
     } else {
       throw new BadRequestException(`Cancelamento recusado: ${mensagemFocus(r.json) || 'sem motivo informado'}`);
     }
