@@ -145,8 +145,11 @@ export class DespesasService {
     const valor = dto.valorPago ?? Number(v.valor);
     const pagoEm = dto.pagoEm ?? hojeSP();
     await this.ds.transaction(async (m) => {
-      await m.query(`UPDATE contas_pagar SET status='paga', pago_em=$3, valor_pago=$4, forma_pagamento=$5, pago_por=$6 WHERE id=$1 AND empresa_id=$2`,
+      // só baixa se ainda estiver aberta: dois cliques ao mesmo tempo não lançam a saída duas vezes
+      const r = await m.query(`UPDATE contas_pagar SET status='paga', pago_em=$3, valor_pago=$4, forma_pagamento=$5, pago_por=$6 WHERE id=$1 AND empresa_id=$2 AND status='aberta' RETURNING id`,
         [id, u.empresaId, pagoEm, valor.toFixed(2), dto.forma, u.nome]);
+      const linhas = Array.isArray(r?.[0]) ? r[0] : r;
+      if (!linhas?.length) throw new BadRequestException('Esta conta já foi paga ou cancelada.');
       if ((dto.lancarCaixa ?? 'sim') === 'sim') {
         await m.query(`INSERT INTO caixa_movimentos (empresa_id, turno_id, caixa, tipo, forma, valor, descricao, categoria, usuario_id, usuario_nome, cnpj) VALUES ($1, NULL, 'adm', 'saida', $2, $3, $4, $5, $6, $7, $8)`,
           [u.empresaId, dto.forma, valor.toFixed(2), `Conta paga: ${v.descricao}${v.fornecedor ? ` · ${v.fornecedor}` : ''}`.slice(0, 300), v.categoria ?? 'Contas a pagar', u.sub, u.nome, v.cnpj ?? null]);
