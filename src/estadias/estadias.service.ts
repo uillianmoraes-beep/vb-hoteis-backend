@@ -612,9 +612,11 @@ export class EstadiasService {
     const libE = await this.liberarAcao(u, 'estadias.estornar', 'estornar itens', dto.autorizacao, { ambienteId: e.ambienteId, estadiaId: e.id, detalhe: dto.motivo });
     if (libE) dto.motivo = `${dto.motivo.trim()} · liberado por ${libE}`;
     await this.ds.transaction(async (m) => {
-      await m.update(EstadiaItem, { id: item.id }, { status: 'estornado', motivoEstorno: dto.motivo.trim(), estornadoPor: u.nome, estornadoEm: new Date() });
+      // só estorna se ainda estiver ativo: dois cliques juntos não devolvem o produto duas vezes ao estoque
+      const r = await m.update(EstadiaItem, { id: item.id, status: 'ativo' }, { status: 'estornado', motivoEstorno: dto.motivo.trim(), estornadoPor: u.nome, estornadoEm: new Date() });
+      if (!r.affected) throw new BadRequestException('Este item já foi estornado.');
       await devolverConsumo(m, u.empresaId, `item:${item.id}`, u.nome);
-      await this.registrar(m, u, e.id, 'estorno', `Estorno: ${item.descricao} · ${brl(centavos(item.total))} · ${dto.motivo.trim()}`);
+      await this.registrar(m, u, e.id, 'estorno', `Estorno:${item.descricao} · ${brl(centavos(item.total))} · ${dto.motivo.trim()}`);
     });
     return this.detalhe(u, id);
   }
