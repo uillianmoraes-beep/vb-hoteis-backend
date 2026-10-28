@@ -5,7 +5,7 @@ import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
 import { NotasFiscaisService } from './notas-fiscais.service';
-import { CancelarNotaDto, CartaCorrecaoDto, EmissorDto, EmitirContaDto, EmitirDevolucaoDto, EmitirNfeDto } from './notas-fiscais.dto';
+import { CancelarNotaDto, CartaCorrecaoDto, CertificadoA1Dto, EmissorDto, EmitirContaDto, EmitirDevolucaoDto, EmitirNfeDto } from './notas-fiscais.dto';
 
 /** Notas emitidas pelo sistema (Focus NFe ou Spedy): NFC-e, NF-e, NFS-e e devolução. */
 @Controller('notas-fiscais')
@@ -23,6 +23,13 @@ export class NotasFiscaisController {
   @Requer('notas.gerenciar')
   salvarEmissor(@Usuario() u: UsuarioToken, @Param('cnpj') cnpj: string, @Body() dto: EmissorDto) {
     return this.service.salvarEmissor(u, cnpj, dto);
+  }
+
+  /** certificado A1 do emissor próprio (a senha não volta nunca) */
+  @Put('emissores/:cnpj/certificado')
+  @Requer('notas.gerenciar')
+  salvarCertificado(@Usuario() u: UsuarioToken, @Param('cnpj') cnpj: string, @Body() dto: CertificadoA1Dto) {
+    return this.service.salvarCertificado(u, cnpj, dto);
   }
 
   @Post('emissores/:cnpj/testar')

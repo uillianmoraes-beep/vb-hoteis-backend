@@ -24,10 +24,18 @@ export class EmissorDto {
   @IsOptional() @IsIn(['focus', 'spedy']) provedor?: 'focus' | 'spedy';
   @IsOptional() @IsString() @MaxLength(300) spedyHomologacao?: string;
   @IsOptional() @IsString() @MaxLength(300) spedyProducao?: string;
+  /** NFS-e nacional pelo emissor próprio (precisa do certificado A1 guardado) */
+  @IsOptional() @IsBoolean() nfseProprio?: boolean;
   @IsOptional() @IsIn(['nacional', 'municipal']) nfsePadrao?: 'nacional' | 'municipal';
   @IsOptional() @ValidateNested() @Type(() => DadosEmissorDto) dados?: DadosEmissorDto;
   @IsOptional() @IsInt() @Min(1) @Max(49999) dpsSerie?: number;
   @IsOptional() @IsInt() @Min(1) @Max(999_999_999) dpsProximoProducao?: number;
+}
+
+/** certificado A1 para o emissor próprio: arquivo .pfx em base64 e a senha (guardados cifrados) */
+export class CertificadoA1Dto {
+  @IsString() @MinLength(100) @MaxLength(60_000) pfx!: string;
+  @IsString() @MinLength(1) @MaxLength(100) senha!: string;
 }
 
 export class EmitirContaDto {
