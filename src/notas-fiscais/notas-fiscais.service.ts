@@ -86,6 +86,8 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger('NotasFiscais');
   private timer: NodeJS.Timeout | null = null;
   private rodando = false;
+  /** contas com a emissão em andamento (conta|parte) */
+  private readonly emitindo = new Set<string>();
 
   constructor(private readonly ds: DataSource) {}
 
@@ -410,8 +412,23 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** emite as notas de uma conta fechada: consumo na NFC-e e hospedagem na NFS-e */
+  /**
+   * Emite as notas de uma conta fechada: consumo na NFC-e e hospedagem na NFS-e.
+   * Dois cliques (ou dois computadores) ao mesmo tempo na mesma conta: o segundo é recusado
+   * enquanto o primeiro fala com a Focus/Spedy, para não sair a mesma nota duas vezes.
+   */
   async emitirConta(u: UsuarioToken, estadiaId: string, dto: EmitirContaDto) {
+    const chave = `${estadiaId}|${dto.parteId ?? ''}`;
+    if (this.emitindo.has(chave)) throw new BadRequestException('As notas desta conta já estão sendo emitidas. Aguarde um instante e atualize a tela.');
+    this.emitindo.add(chave);
+    try {
+      return await this.emitirContaAgora(u, estadiaId, dto);
+    } finally {
+      this.emitindo.delete(chave);
+    }
+  }
+
+  private async emitirContaAgora(u: UsuarioToken, estadiaId: string, dto: EmitirContaDto) {
     const emp = await this.exigirModulo(u);
     const [e] = await this.ds.query(`SELECT * FROM estadias WHERE id = $1 AND empresa_id = $2`, [estadiaId, u.empresaId]);
     if (!e) throw new NotFoundException('Conta não encontrada.');
