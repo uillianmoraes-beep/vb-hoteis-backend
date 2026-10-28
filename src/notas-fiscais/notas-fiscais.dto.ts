@@ -12,6 +12,7 @@ class DadosEmissorDto {
   @IsOptional() @IsInt() @Min(0) @Max(9) regimeEspecial?: number;
   @IsOptional() @IsString() @MaxLength(60) naturezaNfe?: string;
   @IsOptional() @IsString() @MaxLength(500) infoAdicional?: string;
+  @IsOptional() @IsNumber() @Min(0) @Max(100) aliquotaIss?: number;
 }
 
 /** emissor de um CNPJ na Focus (os tokens só são trocados quando vierem preenchidos) */

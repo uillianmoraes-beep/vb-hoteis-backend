@@ -36,6 +36,7 @@ export interface DadosEmissor {
   regimeEspecial?: number; // NFS-e: 0 nenhum, 3 microempresa municipal…
   naturezaNfe?: string;
   infoAdicional?: string;
+  aliquotaIss?: number; // ISS da hospedagem, quando o Padrão NFS-e não tiver
 }
 
 interface LinhaItem { descricao: string; quantidade: number; valorUnitario: number; total: number; produto: ProdutoFiscal | null; ressarcimento: boolean; servico: boolean }
@@ -475,7 +476,8 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     a: { valor: number; descricao: string; doc: string | null; nome: string | null; estadiaId: string | null; parteId: string | null }) {
     const d = em.e.dados;
     if (!d.codigoMunicipio) throw new BadRequestException('Falta o código IBGE do município no emissor de notas (Configuração fiscal › Emissor de notas).');
-    if (!f.codigoServico) throw new BadRequestException('Falta o item da lista de serviço da hospedagem (Configuração fiscal › aba NFS-e › Padrão NFS-e; hospedagem costuma ser 09.01).');
+    // hospedagem é o item 09.01 da LC 116; a alíquota do ISS pode vir do Padrão NFS-e ou do emissor
+    f = { ...f, codigoServico: f.codigoServico || '09.01', ...(f.aliquotaIss === undefined && d.aliquotaIss !== undefined ? { aliquotaIss: d.aliquotaIss } : {}) };
     const tomadorDoc = a.doc;
     if (em.e.nfse_padrao === 'nacional') {
       const item = so(f.codigoServico);
