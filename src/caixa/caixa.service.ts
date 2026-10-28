@@ -311,6 +311,9 @@ export class CaixaService {
     const retirado = c(contado.dinheiro) - fundo;
     const amb = await this.ambienteNome(t.ambienteId);
     await this.ds.transaction(async (m) => {
+      // dois cliques (ou dois computadores) ao mesmo tempo: o segundo espera e é recusado
+      const [aberto] = await m.query(`SELECT id FROM caixa_turnos WHERE id = $1 AND status = 'aberto' FOR UPDATE`, [t.id]);
+      if (!aberto) throw new BadRequestException('Este caixa já foi fechado.');
       await m.update(CaixaTurno, { id: t.id }, {
         status: 'fechado', fechadoPorId: u.sub, fechadoPor: u.nome, fechadoEm: new Date(),
         esperado: res.esperado, contado, diferenca: diferenca.toFixed(2), observacao: dto.observacao?.trim() || null,
