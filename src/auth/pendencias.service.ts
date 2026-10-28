@@ -253,6 +253,17 @@ export class PendenciasService {
         await contar(`SELECT count(*) AS n, ${lista(`COALESCE(nome, telefone)`)} AS nomes FROM whatsapp_conversas WHERE empresa_id = $1 AND status = 'aberta' AND nao_lidas > 0`, [u.empresaId]));
     }
 
+    if (pode('empresa.editar')) {
+      // revenda (só a Virtual Barra): chamados de clientes sem resposta e clientes com mensalidade atrasada
+      const [pl] = await this.ds.query(`SELECT plataforma FROM empresas WHERE id = $1`, [u.empresaId]).catch(() => [null]);
+      if (pl?.plataforma) {
+        add({ chave: 'revenda-suporte', nivel: 'alerta', titulo: 'Chamados de clientes esperando resposta', link: '/revenda' },
+          await contar(`SELECT count(*) AS n, ${lista('e.nome')} AS nomes FROM suporte_chamados c JOIN empresas e ON e.id = c.empresa_id WHERE c.situacao = 'aberto' AND $1::uuid IS NOT NULL`, [u.empresaId]));
+        add({ chave: 'revenda-atraso', nivel: 'aviso', titulo: 'Clientes com mensalidade atrasada ou bloqueados', link: '/revenda' },
+          await contar(`SELECT count(*) AS n, ${lista('nome')} AS nomes FROM empresas WHERE situacao IN ('atrasada','bloqueada') AND NOT plataforma AND $1::uuid IS NOT NULL`, [u.empresaId]));
+      }
+    }
+
     if (pode('estadias.operar')) {
       const p: unknown[] = [u.empresaId];
       add({ chave: 'pedidos', nivel: 'alerta', titulo: 'Pedidos da comanda esperando', link: '/comanda' },

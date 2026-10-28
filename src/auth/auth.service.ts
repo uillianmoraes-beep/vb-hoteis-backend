@@ -7,6 +7,7 @@ import { UsuarioEntity } from '../usuarios/usuario.entity';
 import { Empresa } from '../empresas/empresa.entity';
 import { UsuarioToken } from '../common/permissoes';
 import { CaixaService } from '../caixa/caixa.service';
+import { RevendaService } from '../revenda/revenda.service';
 
 @Injectable()
 export class AuthService {
@@ -15,6 +16,7 @@ export class AuthService {
     @InjectRepository(Empresa) private readonly empresas: Repository<Empresa>,
     private readonly jwt: JwtService,
     private readonly caixa: CaixaService,
+    private readonly revenda: RevendaService,
   ) {}
 
   private buscarComSenha(where: string, valor: string) {
@@ -104,6 +106,7 @@ export class AuthService {
       },
       empresa: { id: empresa.id, nome: empresa.nome, vocabulario: empresa.vocabulario, aparencia: empresa.aparencia, modulos: empresa.modulos ?? {} },
       caixasAbertos,
+      assinatura: await this.revenda.infoSessao(empresa.id).catch(() => null),
     };
   }
 
@@ -121,6 +124,7 @@ export class AuthService {
         ambientesIds: usuario.ambientesIds,
       },
       empresa: empresa ? { id: empresa.id, nome: empresa.nome, vocabulario: empresa.vocabulario, aparencia: empresa.aparencia, modulos: empresa.modulos ?? {} } : null,
+      assinatura: empresa ? await this.revenda.infoSessao(empresa.id).catch(() => null) : null,
     };
   }
 

@@ -1,5 +1,7 @@
 import 'reflect-metadata';
-import { NestFactory } from '@nestjs/core';
+import { HttpAdapterHost, NestFactory } from '@nestjs/core';
+import { RegistraErrosFilter } from './revenda/erros.filter';
+import { RevendaService } from './revenda/revenda.service';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 
@@ -14,6 +16,8 @@ async function bootstrap() {
   exp.useBodyParser('raw', { type: 'application/octet-stream', limit: '300mb' });
 
   app.setGlobalPrefix('api');
+  // erro inesperado (500) fica guardado para a Virtual Barra ver no painel da revenda
+  app.useGlobalFilters(new RegistraErrosFilter(app.get(HttpAdapterHost).httpAdapter).usar(app.get(RevendaService)));
 
   const origens = (process.env.CORS_ORIGENS || '')
     .split(',')

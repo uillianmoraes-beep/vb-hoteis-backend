@@ -3,6 +3,8 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
 import { APP_GUARD } from '@nestjs/core';
+import { RevendaModule } from './revenda/revenda.module';
+import { AssinaturaGuard } from './revenda/assinatura.guard';
 import { opcoesBanco } from './database/typeorm.config';
 import { AuthGuard } from './common/guards/auth.guard';
 import { PermissoesGuard } from './common/guards/permissoes.guard';
@@ -64,6 +66,7 @@ import { NotasFiscaisModule } from './notas-fiscais/notas-fiscais.module';
 
 @Module({
   imports: [
+    RevendaModule,
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRootAsync({ useFactory: () => opcoesBanco() }),
     JwtModule.registerAsync({
@@ -138,6 +141,7 @@ import { NotasFiscaisModule } from './notas-fiscais/notas-fiscais.module';
   providers: [
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: PermissoesGuard },
+    { provide: APP_GUARD, useClass: AssinaturaGuard },
   ],
 })
 export class AppModule {}

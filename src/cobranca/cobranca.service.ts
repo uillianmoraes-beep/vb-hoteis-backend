@@ -331,6 +331,18 @@ export class CobrancaService {
 
     const pagoEm = (pag.clientPaymentDate || pag.paymentDate || hojeSP()).slice(0, 10);
     const sistema = { sub: null as unknown as string, empresaId, perfilId: null as unknown as string, nome: 'Asaas (automático)', permissoes: [], ambientesIds: [] } as unknown as UsuarioToken;
+    if (cob.tipo === 'mensalidade') {
+      // mensalidade do sistema (revenda): baixa e libera o cliente se estava atrasado ou bloqueado
+      const [pagas] = await this.ds.query(
+        `UPDATE mensalidades SET situacao = 'paga', pago_em = now(), forma_pagamento = $2 WHERE id = $1 AND situacao = 'pendente' RETURNING empresa_id`,
+        [cob.referencia_id, pag.billingType === 'PIX' ? 'pix' : 'boleto']);
+      const cliente = (pagas as { empresa_id: string }[] | undefined)?.[0]?.empresa_id;
+      if (cliente) {
+        const [aberta] = await this.ds.query(`SELECT 1 FROM mensalidades WHERE empresa_id = $1 AND situacao = 'pendente' AND vencimento < CURRENT_DATE LIMIT 1`, [cliente]);
+        if (!aberta) await this.ds.query(`UPDATE empresas SET situacao = 'ativa' WHERE id = $1 AND situacao IN ('atrasada','bloqueada') AND plano_id IS NOT NULL`, [cliente]);
+      }
+      return { ok: true };
+    }
     if (cob.tipo === 'fatura') {
       await this.faturamento.baixarFatura(sistema, cob.referencia_id, { forma: cob.forma === 'PIX' || pag.billingType === 'PIX' ? 'pix' : 'boleto', pagoEm })
         .catch((e) => this.log.warn(`Fatura ${cob.referencia_id} não baixada: ${e instanceof Error ? e.message : e}`));
