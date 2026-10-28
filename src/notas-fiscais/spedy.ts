@@ -120,6 +120,9 @@ export function paraSpedyServico(c: J, ref: string, nacional: boolean) {
   return limpar({
     integrationId: integracao(ref),
     effectiveDate: c.data_emissao,
+    // padrão nacional: a série e o número da DPS vão do sistema (a DPS sem série é recusada)
+    rpsSeries: nacional && c.serie_dps != null ? String(c.serie_dps) : undefined,
+    rpsNumber: nacional ? num(c.numero_dps) : undefined,
     description: nacional ? c.descricao_servico : s.discriminacao,
     federalServiceCode: item,
     nationalTaxationCode: tribNac || undefined,
@@ -199,7 +202,18 @@ export class Spedy {
   private async achar(modelo: string, ref: string): Promise<J | null> {
     const r = await this.chamar('GET', `/${modelo}?integrationId=${encodeURIComponent(integracao(ref))}&pageSize=1`);
     const l = (r.json.items ?? r.json.data ?? []) as J[];
-    return l[0] ?? null;
+    if (!l[0]?.id) return null;
+    // a nota completa traz o motivo da recusa (processingDetail), que a lista pode não trazer
+    const d = await this.chamar('GET', `/${modelo}/${l[0].id}`);
+    const n = d.status === 200 && d.json?.id ? d.json : l[0];
+    // recusada sem motivo na nota: o motivo fica nos eventos (o último com mensagem)
+    if (['rejected', 'denied'].includes(String(n.status)) && !n.processingDetail?.message) {
+      const ev = await this.chamar('GET', `/${modelo}/${n.id}/events`).catch(() => null);
+      const lista = (Array.isArray(ev?.json) ? ev!.json : (ev?.json?.items ?? [])) as J[];
+      const motivo = [...lista].sort((a, b) => String(b.date).localeCompare(String(a.date))).find((x) => x.message)?.message;
+      if (motivo) n.processingDetail = { ...(n.processingDetail ?? {}), message: motivo };
+    }
+    return n;
   }
 
   /** confere a chave: a lista de notas responde 200 (chave boa) ou 401/403 (chave errada) */
