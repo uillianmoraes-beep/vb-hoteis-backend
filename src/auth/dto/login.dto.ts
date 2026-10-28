@@ -1,4 +1,4 @@
-import { IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class LoginDto {
   @IsString() @MinLength(3) @MaxLength(120) login!: string;
@@ -34,4 +34,6 @@ export class SegurancaDto {
   @IsInt() @Min(1) @Max(1440) bloqueioMin!: number;
   /** minutos parado até a tela travar (0 = não trava) */
   @IsInt() @Min(0) @Max(720) inatividadeMin!: number;
+  /** um computador por vez (padrão: ligado) */
+  @IsOptional() @IsBoolean() sessaoUnica?: boolean;
 }

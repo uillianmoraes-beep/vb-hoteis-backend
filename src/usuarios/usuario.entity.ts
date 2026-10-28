@@ -18,6 +18,8 @@ export class UsuarioEntity {
   @Column({ name: 'recebe_gorjeta', default: false }) recebeGorjeta!: boolean;
   /** pode entrar pelo celular/tablet */
   @Column({ name: 'acesso_celular', default: true }) acessoCelular!: boolean;
+  /** pode ficar aberto em vários computadores ao mesmo tempo (exceção à regra de um computador por vez) */
+  @Column({ name: 'varias_sessoes', default: false }) variasSessoes!: boolean;
   @Column({ default: true }) ativo!: boolean;
   /** muitas senhas erradas: bloqueado até esta hora */
   @Column({ name: 'bloqueado_ate', type: 'timestamptz', nullable: true }) bloqueadoAte!: Date | null;

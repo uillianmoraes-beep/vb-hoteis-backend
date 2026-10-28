@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { JwtService } from '@nestjs/jwt';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
+import { randomUUID } from 'crypto';
+import { guardarSessao } from '../common/sessoes';
 import { UsuarioEntity } from '../usuarios/usuario.entity';
 import { Empresa } from '../empresas/empresa.entity';
 import { UsuarioToken } from '../common/permissoes';
@@ -31,11 +33,11 @@ export class AuthService {
   /** regras de segurança da empresa (padrão: 5 tentativas, 15 min de bloqueio, tela trava com 30 min parado) */
   async seguranca(empresaId: string) {
     const [e] = await this.usuarios.query(`SELECT config_seguranca FROM empresas WHERE id = $1`, [empresaId]);
-    const c = (e?.config_seguranca ?? {}) as { tentativas?: number; bloqueioMin?: number; inatividadeMin?: number };
-    return { tentativas: c.tentativas ?? 5, bloqueioMin: c.bloqueioMin ?? 15, inatividadeMin: c.inatividadeMin ?? 30 };
+    const c = (e?.config_seguranca ?? {}) as { tentativas?: number; bloqueioMin?: number; inatividadeMin?: number; sessaoUnica?: boolean };
+    return { tentativas: c.tentativas ?? 5, bloqueioMin: c.bloqueioMin ?? 15, inatividadeMin: c.inatividadeMin ?? 30, sessaoUnica: c.sessaoUnica ?? true };
   }
 
-  async salvarSeguranca(u: UsuarioToken, dto: { tentativas: number; bloqueioMin: number; inatividadeMin: number }) {
+  async salvarSeguranca(u: UsuarioToken, dto: { tentativas: number; bloqueioMin: number; inatividadeMin: number; sessaoUnica?: boolean }) {
     await this.usuarios.query(`UPDATE empresas SET config_seguranca = $2::jsonb WHERE id = $1`, [u.empresaId, JSON.stringify(dto)]);
     return this.seguranca(u.empresaId);
   }
@@ -90,6 +92,13 @@ export class AuthService {
       permissoes: usuario.perfil?.permissoes ?? [],
       ambientesIds: usuario.ambientesIds,
     };
+    // um computador por vez: este login vira a sessão válida e o outro computador sai
+    const [vs] = await this.usuarios.query(`SELECT varias_sessoes FROM usuarios WHERE id = $1`, [usuario.id]);
+    if ((await this.seguranca(usuario.empresaId)).sessaoUnica && !vs?.varias_sessoes) {
+      payload.sid = randomUUID();
+      await this.usuarios.query(`UPDATE usuarios SET sessao_id = $2 WHERE id = $1`, [usuario.id, payload.sid]);
+      guardarSessao(usuario.id, payload.sid);
+    }
     await this.usuarios.update({ id: usuario.id }, { ultimoAcesso: new Date() });
     // troca de turno: abre o caixa no nome de quem entrou, com o fundo deixado pelo anterior
     const caixasAbertos = await this.caixa.abrirNoLogin(payload).catch(() => []);

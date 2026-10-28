@@ -4,6 +4,7 @@ import { RegistraErrosFilter } from './revenda/erros.filter';
 import { RevendaService } from './revenda/revenda.service';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
+import { protecao } from './common/protecao';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });
@@ -15,6 +16,9 @@ async function bootstrap() {
   // restaurar backup: o arquivo vai inteiro no corpo (application/octet-stream)
   exp.useBodyParser('raw', { type: 'application/octet-stream', limit: '300mb' });
 
+  // cabeçalhos de segurança e limite de tentativas por endereço
+  exp.disable?.('x-powered-by');
+  exp.use(protecao);
   app.setGlobalPrefix('api');
   // erro inesperado (500) fica guardado para a Virtual Barra ver no painel da revenda
   app.useGlobalFilters(new RegistraErrosFilter(app.get(HttpAdapterHost).httpAdapter).usar(app.get(RevendaService)));

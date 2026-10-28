@@ -120,6 +120,8 @@ export interface UsuarioToken {
   nome: string;
   permissoes: string[];
   ambientesIds: string[] | null;
+  /** sessão do login (um computador por vez); sem ela o usuário pode usar vários computadores */
+  sid?: string;
 }
 
 export function temPermissao(usuario: UsuarioToken, permissao: string): boolean {
