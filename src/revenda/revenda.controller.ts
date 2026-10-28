@@ -12,10 +12,42 @@ class TesteDto {
   @IsEmail({}, { message: 'E-mail inválido.' }) @MaxLength(120) email!: string;
   @IsString() @MinLength(10, { message: 'Telefone com DDD.' }) @MaxLength(20) telefone!: string;
   @IsString() @MinLength(6, { message: 'A senha precisa ter pelo menos 6 caracteres.' }) @MaxLength(60) senha!: string;
-  @IsIn(['motel', 'hotel', 'pousada', 'outro']) tipo!: string;
+  @IsIn(['motel', 'hotel', 'pousada', 'restaurante', 'outro']) tipo!: string;
   @IsOptional() @IsString() @MaxLength(80) cidade?: string;
   @IsOptional() @IsIn(Object.keys(IDIOMAS)) idioma?: string;
+  @IsOptional() @IsString() @MaxLength(20) parceiro?: string;
   @IsBoolean() aceite!: boolean;
+}
+class SejaParceiroDto {
+  @IsIn(['indicacao', 'revenda', 'marca']) tipo!: string;
+  @IsString() @MinLength(2) @MaxLength(150) nome!: string;
+  @IsString() @MinLength(2) @MaxLength(120) responsavel!: string;
+  @IsEmail({}, { message: 'E-mail inválido.' }) @MaxLength(120) email!: string;
+  @IsString() @MinLength(10, { message: 'Telefone com DDD.' }) @MaxLength(20) telefone!: string;
+  @IsOptional() @IsString() @MaxLength(80) cidade?: string;
+  @IsOptional() @IsString() @MaxLength(20) documento?: string;
+  @IsOptional() @IsString() @MaxLength(1000) mensagem?: string;
+}
+class ParceiroDto {
+  @IsIn(['indicacao', 'revenda', 'marca']) tipo!: string;
+  @IsString() @MinLength(2) @MaxLength(150) nome!: string;
+  @IsOptional() @IsString() @MaxLength(120) responsavel?: string | null;
+  @IsOptional() @IsString() @MaxLength(20) documento?: string | null;
+  @IsOptional() @IsString() @MaxLength(120) email?: string | null;
+  @IsOptional() @IsString() @MaxLength(20) telefone?: string | null;
+  @IsOptional() @IsString() @MaxLength(80) cidade?: string | null;
+  @IsOptional() @IsString() @MaxLength(20) codigo?: string | null;
+  @IsNumber() @Min(0) @Max(100) comissao!: number;
+  @IsNumber() @Min(0) @Max(100) desconto!: number;
+  @IsIn(['pendente', 'ativo', 'inativo']) situacao!: string;
+  @IsOptional() @IsObject() marca?: Record<string, string>;
+  @IsOptional() @IsString() @MaxLength(120) pix?: string | null;
+  @IsOptional() @IsString() @MaxLength(2000) observacao?: string | null;
+}
+class RepasseDto {
+  @Matches(/^\d{4}-\d{2}$/) competencia!: string;
+  @IsNumber() @Min(0) valor!: number;
+  @IsOptional() @IsString() @MaxLength(200) observacao?: string;
 }
 class ContratarDto {
   @IsUUID() planoId!: string;
@@ -55,6 +87,7 @@ class ClienteDto {
   @IsOptional() @IsString() @MaxLength(2000) observacao?: string | null;
   @IsOptional() @IsObject() modulos?: Record<string, boolean>;
   @IsOptional() @IsBoolean() aplicarModulosDoPlano?: boolean;
+  @IsOptional() @IsUUID() parceiroId?: string | null;
 }
 class NovoClienteDto {
   @IsString() @MinLength(2) @MaxLength(150) empresa!: string;
@@ -83,6 +116,10 @@ class PlanoDto {
   @IsBoolean() destaque!: boolean;
   @IsBoolean() ativo!: boolean;
   @IsOptional() @IsInt() ordem?: number;
+  @IsOptional() @IsIn(['hospedagem', 'restaurante']) segmento?: string;
+  @IsOptional() @IsIn(['pequeno', 'medio', 'grande', 'rede']) porte?: string;
+  @IsOptional() @IsBoolean() sobConsulta?: boolean;
+  @IsOptional() @IsString() @MaxLength(200) publico?: string | null;
 }
 class MensalidadeDto {
   @IsUUID() empresaId!: string;
@@ -141,6 +178,14 @@ export class RevendaPublicoController {
   }
 
   @Publico() @Get('downloads') downloads() { return this.s.downloadsPublicos(); }
+
+  @Publico() @Get('parceiro/:codigo') parceiro(@Param('codigo') codigo: string) { return this.s.parceiroPublico(codigo); }
+
+  @Publico() @Post('parceiro') @HttpCode(200)
+  sejaParceiro(@Body() dto: SejaParceiroDto, @Ip() ip: string, @Req() req: { headers: Record<string, string | undefined> }) {
+    const real = (req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() || ip;
+    return this.s.cadastrarParceiro(dto, real);
+  }
 
   @Publico() @Get('downloads/:id/baixar')
   async baixar(@Param('id', ParseUUIDPipe) id: string, @Res({ passthrough: true }) res: Resposta) {
@@ -219,6 +264,12 @@ export class RevendaController {
   arquivo(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Query('nome') nome: string, @Req() req: { body: Buffer }) {
     return this.s.enviarArquivo(u, id, String(nome ?? 'arquivo'), req.body);
   }
+
+  @Get('parceiros') parceiros(@Usuario() u: UsuarioToken, @Query('mes') mes?: string) { return this.s.parceiros(u, mes); }
+  @Post('parceiros') novoParceiro(@Usuario() u: UsuarioToken, @Body() dto: ParceiroDto) { return this.s.salvarParceiro(u, null, dto); }
+  @Put('parceiros/:id') salvarParceiro(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: ParceiroDto) { return this.s.salvarParceiro(u, id, dto); }
+  @Get('parceiros/:id/extrato') extrato(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Query('mes') mes?: string) { return this.s.extratoParceiro(u, id, mes); }
+  @Post('parceiros/:id/repasse') @HttpCode(200) repasse(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: RepasseDto) { return this.s.registrarRepasse(u, id, dto); }
 
   @Get('config') config(@Usuario() u: UsuarioToken) { return this.s.config(u); }
   @Put('config') salvarConfig(@Usuario() u: UsuarioToken, @Body() dto: ConfigDto) { return this.s.salvarConfig(u, dto); }

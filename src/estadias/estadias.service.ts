@@ -124,6 +124,14 @@ export class EstadiasService {
       consumo,
     });
     const tabela = motor.tabelas.find((t) => t.id === e.tabelaId);
+    // mesa de restaurante/bar: não tem tempo nem diária, a conta é só o que foi consumido
+    if (e.modalidade === 'mesa') {
+      return {
+        periodoNome: 'Mesa', valorHospedagem: 0, horasAdicionais: 0, valorPessoas: 0, pessoasExtras: 0, consumo, total: consumo,
+        proximaViradaMin: null, proximoNome: null, trechoInicio: 0, trechoFim: null, semPreco: false,
+        minutosUso, tabelaNome: 'Mesa', parado: e.status === 'conta_entregue', pacote: null,
+      };
+    }
     if (e.totalCombinado !== null && e.totalCombinado !== undefined && e.saidaPrevista) {
       return { ...this.contaCombinada(e, fim, consumo), minutosUso, tabelaNome: 'Reserva', parado: e.status === 'conta_entregue', pacote: null };
     }
@@ -373,11 +381,13 @@ export class EstadiasService {
     const tabela = this.tarifas.escolherTabela(motor, agora);
     // hotel/pousada: cobra por diária da categoria (Tarifas › Diárias do hotel)
     const amb = await this.ds.query(`SELECT tipo FROM ambientes WHERE id = $1`, [unidade.ambienteId]);
-    const ehHotel = amb[0]?.tipo && amb[0].tipo !== 'motel';
+    // restaurante e bar: a "unidade" é uma mesa, abre sem tarifa (a conta é só o consumo)
+    const ehMesa = ['restaurante', 'bar'].includes(amb[0]?.tipo);
+    const ehHotel = amb[0]?.tipo && amb[0].tipo !== 'motel' && !ehMesa;
     const noites = dto.noites ?? 1;
     const pessoasEntrada = dto.pessoas ?? Math.min(2, unidade.capacidade || 2);
     const hotel = ehHotel ? await this.tarifas.precoHotel(u.empresaId, unidade.ambienteId, unidade.categoriaId, agora, noites, pessoasEntrada) : null;
-    if (!hotel && (!tabela || motor.periodos.length === 0)) {
+    if (!ehMesa && !hotel && (!tabela || motor.periodos.length === 0)) {
       throw new BadRequestException(ehHotel
         ? 'Esta categoria ainda não tem diária. Configure em Tarifas › Diárias do hotel.'
         : 'Este ambiente ainda não tem tabela de preços. Configure em Tarifas.');
@@ -386,7 +396,7 @@ export class EstadiasService {
     const saidaPrevista = hotel
       ? new Intl.DateTimeFormat('sv-SE', { timeZone: FUSO }).format(new Date(agora.getTime() + noites * 86_400_000))
       : null;
-    const modalidade = dto.modalidade ?? 'periodo';
+    const modalidade = ehMesa ? 'mesa' : dto.modalidade ?? 'periodo';
     if (modalidade === 'pernoite' && !this.tarifas.pernoiteDisponivel(motor, agora)) {
       throw new BadRequestException('Fora do horário de entrada do pernoite.');
     }
@@ -423,7 +433,7 @@ export class EstadiasService {
       if (dto.adiantamento?.length) await this.gravarAdiantamento(m, u, e.id, dto.adiantamento, 'entrada', unidade.ambienteId);
       await this.registrar(m, u, e.id, 'entrada',
         `Uso nº ${e.numero ?? '—'} · entrada na ${unidade.codigo}${e.placa ? `, placa ${e.placa}` : ''}, ${e.pessoas} pessoa(s), `
-        + (hotel ? `${noites} noite(s) · diária ${brl(Math.round(hotel.diaria * 100))} · total ${brl(Math.round(hotel.total * 100))} · saída prevista ${saidaPrevista!.split('-').reverse().join('/')}` : `tabela ${tabela!.nome}`)
+        + (ehMesa ? 'mesa aberta' : hotel ? `${noites} noite(s) · diária ${brl(Math.round(hotel.diaria * 100))} · total ${brl(Math.round(hotel.total * 100))} · saída prevista ${saidaPrevista!.split('-').reverse().join('/')}` : `tabela ${tabela!.nome}`)
         + (modalidade === 'pernoite' ? ', pernoite' : minimo ? `, pacote ${minimo.nome}` : ''));
       return e;
     });

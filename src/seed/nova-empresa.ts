@@ -22,6 +22,8 @@ export interface NovaEmpresa {
   exemplos: boolean;
   /** além dos exemplos, preços e produtos (demonstração / teste grátis) */
   precosExemplo?: boolean;
+  /** restaurante/bar: em vez de motel e hotel, cria o salão com mesas e um cardápio de exemplo */
+  restaurante?: boolean;
   /** colunas extras da empresa (situação da revenda, responsável…) */
   extra?: Partial<Empresa> & Record<string, unknown>;
 }
@@ -78,6 +80,25 @@ export async function criarEmpresa(m: EntityManager, o: NovaEmpresa): Promise<{ 
     }),
   );
 
+  if (o.exemplos && o.restaurante) {
+    const salao = await m.save(m.create(Ambiente, { empresaId, nome: 'Restaurante', tipo: 'restaurante', cor: '#EA580C', ordem: 1 }));
+    const [mesas, varanda] = await m.save([
+      m.create(Categoria, { empresaId, ambienteId: salao.id, nome: 'Salão', tipoUnidade: 'mesa', ordem: 1 }),
+      m.create(Categoria, { empresaId, ambienteId: salao.id, nome: 'Varanda', tipoUnidade: 'mesa', ordem: 2 }),
+    ]);
+    await m.save(Array.from({ length: 12 }, (_, i) => {
+      const n = i + 1;
+      return m.create(Unidade, {
+        empresaId, ambienteId: salao.id, ambientePadraoId: salao.id, categoriaId: n <= 8 ? mesas.id : varanda.id,
+        codigo: `MESA ${String(n).padStart(2, '0')}`, tipo: 'mesa', ordem: n, status: 'livre', capacidade: 4,
+      });
+    }));
+    await m.save([
+      ['Água mineral', 'Bebidas', 6], ['Refrigerante lata', 'Bebidas', 8], ['Suco natural', 'Bebidas', 12], ['Cerveja long neck', 'Bebidas', 14], ['Caipirinha', 'Drinks', 24],
+      ['Porção de batata frita', 'Porções', 38], ['Isca de peixe', 'Porções', 56], ['Prato executivo', 'Pratos', 42], ['Filé à parmegiana', 'Pratos', 69], ['Pudim', 'Sobremesas', 16],
+    ].map(([nome, grupo, preco]) => m.create(Produto, { empresaId, nome: String(nome), grupo: String(grupo), preco: Number(preco).toFixed(2) })));
+    return { empresaId, usuarioId: usuario.id };
+  }
   if (o.exemplos) {
     const [motel, hotel] = await m.save([
       m.create(Ambiente, {

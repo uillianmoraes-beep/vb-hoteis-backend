@@ -23,6 +23,13 @@ export const CATEGORIAS_DOWNLOAD: Record<string, string> = {
   programas: 'Programas do dia a dia', manuais: 'Manuais e vídeos', app: 'Aplicativos',
 };
 export const IDIOMAS: Record<string, string> = { 'pt-BR': 'Português', es: 'Español', en: 'English' };
+export const SEGMENTOS: Record<string, string> = { hospedagem: 'Hotéis, pousadas e motéis', restaurante: 'Restaurantes, bares e lanchonetes' };
+export const PORTES: Record<string, string> = { pequeno: 'Pequena empresa', medio: 'Média empresa', grande: 'Grande empresa', rede: 'Rede / várias unidades' };
+export const TIPOS_PARCEIRO: Record<string, { nome: string; explica: string }> = {
+  indicacao: { nome: 'VB Indica', explica: 'Indica clientes pelo seu link e ganha comissão todo mês enquanto o cliente pagar.' },
+  revenda: { nome: 'VB Revenda', explica: 'Vende o sistema, faz o primeiro atendimento e pode dar desconto ao cliente; comissão maior.' },
+  marca: { nome: 'VB Sua Marca', explica: 'Vende com o nome e as cores da sua empresa (white-label), com condições em contrato.' },
+};
 
 const hojeSP = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
 const somaDias = (d: string, n: number) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
@@ -113,15 +120,18 @@ export class RevendaService implements OnApplicationBootstrap, OnModuleDestroy {
 
   async planosPublicos() {
     const cfg = await this.cfg();
-    const planos = await this.ds.query(`SELECT id, nome, descricao, preco, itens, limite_unidades, destaque, modulos FROM planos WHERE ativo ORDER BY ordem, preco`);
+    const planos = await this.ds.query(`SELECT id, nome, descricao, preco, itens, limite_unidades, destaque, modulos, segmento, porte, sob_consulta, publico FROM planos WHERE ativo ORDER BY segmento, ordem, preco`);
     return {
-      planos: planos.map((p: Record<string, unknown>) => ({ id: p.id, nome: p.nome, descricao: p.descricao, preco: Number(p.preco), itens: p.itens, limiteUnidades: p.limite_unidades, destaque: p.destaque, modulos: p.modulos })),
+      planos: planos.map((p: Record<string, unknown>) => ({
+        id: p.id, nome: p.nome, descricao: p.descricao, preco: Number(p.preco), itens: p.itens, limiteUnidades: p.limite_unidades, destaque: p.destaque, modulos: p.modulos,
+        segmento: p.segmento, porte: p.porte, sobConsulta: p.sob_consulta, publico: p.publico,
+      })),
       testeDias: cfg.teste_dias, whatsapp: cfg.whatsapp, email: cfg.email, textos: cfg.textos ?? {}, modulos: MODULOS,
     };
   }
 
   /** teste grátis pelo site: cria a empresa com suítes, preços e produtos de exemplo */
-  async criarTeste(dto: { empresa: string; nome: string; email: string; telefone: string; senha: string; tipo: string; cidade?: string; idioma?: string }, ip: string) {
+  async criarTeste(dto: { empresa: string; nome: string; email: string; telefone: string; senha: string; tipo: string; cidade?: string; idioma?: string; parceiro?: string }, ip: string) {
     const agora = Date.now();
     const lista = (this.tentativas.get(ip) ?? []).filter((t) => agora - t < 3_600_000);
     const total = [...this.tentativas.values()].flat().filter((t) => agora - t < 3_600_000).length;
@@ -134,11 +144,15 @@ export class RevendaService implements OnApplicationBootstrap, OnModuleDestroy {
     const fim = somaDias(hojeSP(), cfg.teste_dias);
     const todos = Object.fromEntries(Object.keys(MODULOS).map((k) => [k, true]));
     const { empresaId } = await this.ds.transaction((m) => criarEmpresa(m, {
-      nome: dto.empresa.trim(), adminNome: dto.nome.trim(), login: email, senha: dto.senha, exemplos: true, precosExemplo: true, extra: { modulos: todos },
+      nome: dto.empresa.trim(), adminNome: dto.nome.trim(), login: email, senha: dto.senha, exemplos: true, precosExemplo: true, restaurante: dto.tipo === 'restaurante', extra: { modulos: todos },
     }));
     await this.ds.query(
       `UPDATE empresas SET situacao = 'teste', teste_ate = $2, origem = 'site', idioma = $3, responsavel = $4::jsonb WHERE id = $1`,
       [empresaId, fim, IDIOMAS[dto.idioma ?? ''] ? dto.idioma : 'pt-BR', JSON.stringify({ nome: dto.nome.trim(), email, telefone: soDigitos(dto.telefone), cidade: dto.cidade?.trim() || null, tipo: dto.tipo })]);
+    if (dto.parceiro) {
+      // veio pelo link de um parceiro: o cliente fica ligado a ele (comissão)
+      await this.ds.query(`UPDATE empresas SET parceiro_id = (SELECT id FROM parceiros WHERE upper(codigo) = upper($2) AND situacao = 'ativo') WHERE id = $1`, [empresaId, dto.parceiro.trim().slice(0, 20)]);
+    }
     this.log.log(`Teste grátis criado: ${dto.empresa} (${email}) até ${fim}`);
     return { ok: true, login: email, testeAte: fim };
   }
@@ -200,9 +214,12 @@ export class RevendaService implements OnApplicationBootstrap, OnModuleDestroy {
     this.exigirAdmin(u);
     const [p] = await this.ds.query(`SELECT * FROM planos WHERE id = $1 AND ativo`, [dto.planoId]);
     if (!p) throw new NotFoundException('Plano não encontrado.');
+    if (p.sob_consulta) throw new BadRequestException(`O plano ${p.nome} é sob consulta: fale com a Virtual Barra pelo WhatsApp que montamos a proposta.`);
     const doc = soDigitos(dto.documento);
     if (doc.length !== 11 && doc.length !== 14) throw new BadRequestException('Informe o CPF ou o CNPJ de quem vai pagar.');
-    const [e] = await this.ds.query(`SELECT situacao, teste_ate, plano_id, responsavel, plataforma FROM empresas WHERE id = $1`, [u.empresaId]);
+    const [e] = await this.ds.query(
+      `SELECT e.situacao, e.teste_ate, e.plano_id, e.responsavel, e.plataforma, e.mensalidade_valor, pa.desconto_pct
+         FROM empresas e LEFT JOIN parceiros pa ON pa.id = e.parceiro_id AND pa.situacao = 'ativo' WHERE e.id = $1`, [u.empresaId]);
     if (e?.plataforma) throw new BadRequestException('A empresa da plataforma não contrata plano.');
     if (p.limite_unidades) {
       const [n] = await this.ds.query(`SELECT count(*)::int AS n FROM unidades WHERE empresa_id = $1 AND ativo`, [u.empresaId]).catch(() => [{ n: 0 }]);
@@ -219,7 +236,12 @@ export class RevendaService implements OnApplicationBootstrap, OnModuleDestroy {
     // a primeira mensalidade: vence no fim do teste (ou em 3 dias)
     const venc = e?.teste_ate && dia(e.teste_ate) > somaDias(hojeSP(), 3) ? dia(e.teste_ate) : somaDias(hojeSP(), 3);
     const [jaTem] = await this.ds.query(`SELECT 1 FROM mensalidades WHERE empresa_id = $1 AND situacao IN ('pendente','paga') LIMIT 1`, [u.empresaId]);
-    if (!jaTem) await this.criarMensalidade(u.empresaId, venc.slice(0, 7), venc, Number(p.preco), `Plano ${p.nome}`);
+    // cliente de revendedor com desconto combinado: a mensalidade já sai com o desconto
+    const desconto = Number(e?.desconto_pct ?? 0);
+    const proprio = e?.mensalidade_valor !== null && e?.mensalidade_valor !== undefined;
+    const valor = proprio ? Number(e.mensalidade_valor) : Math.round(Number(p.preco) * (1 - desconto / 100) * 100) / 100;
+    if (desconto > 0 && !proprio) await this.ds.query(`UPDATE empresas SET mensalidade_valor = $2 WHERE id = $1`, [u.empresaId, valor.toFixed(2)]);
+    if (!jaTem) await this.criarMensalidade(u.empresaId, venc.slice(0, 7), venc, valor, `Plano ${p.nome}`);
     return this.area(u);
   }
 
@@ -471,8 +493,9 @@ Answer ONLY with a JSON array of strings, same order and same length as the inpu
               (SELECT max(ultimo_acesso) FROM usuarios x WHERE x.empresa_id = e.id) AS ultimo_acesso,
               (SELECT count(*)::int FROM mensalidades m WHERE m.empresa_id = e.id AND m.situacao = 'pendente') AS em_aberto,
               (SELECT min(vencimento) FROM mensalidades m WHERE m.empresa_id = e.id AND m.situacao = 'pendente') AS venc_aberto,
-              (SELECT count(*)::int FROM suporte_chamados c WHERE c.empresa_id = e.id AND c.situacao <> 'fechado') AS chamados
-         FROM empresas e LEFT JOIN planos p ON p.id = e.plano_id ORDER BY e.plataforma DESC, e.criado_em DESC`);
+              (SELECT count(*)::int FROM suporte_chamados c WHERE c.empresa_id = e.id AND c.situacao <> 'fechado') AS chamados,
+              e.parceiro_id, pa.nome AS parceiro, p.segmento
+         FROM empresas e LEFT JOIN planos p ON p.id = e.plano_id LEFT JOIN parceiros pa ON pa.id = e.parceiro_id ORDER BY e.plataforma DESC, e.criado_em DESC`);
     const hoje = hojeSP();
     const lista = l.map((e: Record<string, unknown>) => ({
       id: e.id, nome: e.nome, cnpj: e.cnpj, situacao: e.plataforma ? 'plataforma' : e.situacao, testeAte: e.teste_ate ? dia(e.teste_ate) : null,
@@ -480,6 +503,7 @@ Answer ONLY with a JSON array of strings, same order and same length as the inpu
       valorProprio: e.mensalidade_valor === null ? null : Number(e.mensalidade_valor), diaVencimento: e.dia_vencimento, responsavel: e.responsavel ?? {},
       origem: e.origem, criadoEm: e.criado_em, ativo: e.ativo, plataforma: e.plataforma, modulos: e.modulos ?? {}, observacao: e.observacao_revenda, idioma: e.idioma,
       unidades: e.unidades, usuarios: e.usuarios, ultimoAcesso: e.ultimo_acesso, emAberto: e.em_aberto, vencAberto: e.venc_aberto ? dia(e.venc_aberto) : null, chamados: e.chamados,
+      parceiroId: e.parceiro_id, parceiro: e.parceiro, segmento: e.segmento,
     }));
     const pagantes = lista.filter((c: { situacao: unknown; planoId: unknown }) => ['ativa', 'atrasada'].includes(String(c.situacao)) && c.planoId);
     return {
@@ -495,7 +519,7 @@ Answer ONLY with a JSON array of strings, same order and same length as the inpu
     };
   }
 
-  async atualizarCliente(u: UsuarioToken, id: string, dto: { planoId?: string | null; situacao?: Situacao; testeAte?: string | null; diaVencimento?: number; valor?: number | null; observacao?: string | null; modulos?: Record<string, boolean>; aplicarModulosDoPlano?: boolean }) {
+  async atualizarCliente(u: UsuarioToken, id: string, dto: { planoId?: string | null; situacao?: Situacao; testeAte?: string | null; diaVencimento?: number; valor?: number | null; observacao?: string | null; modulos?: Record<string, boolean>; aplicarModulosDoPlano?: boolean; parceiroId?: string | null }) {
     await this.exigirPlataforma(u);
     const [e] = await this.ds.query(`SELECT plataforma FROM empresas WHERE id = $1`, [id]);
     if (!e) throw new NotFoundException('Cliente não encontrado.');
@@ -513,6 +537,7 @@ Answer ONLY with a JSON array of strings, same order and same length as the inpu
     if (dto.diaVencimento !== undefined) set('dia_vencimento', Math.min(28, Math.max(1, dto.diaVencimento)));
     if (dto.valor !== undefined) set('mensalidade_valor', dto.valor === null ? null : dto.valor.toFixed(2), '::numeric');
     if (dto.observacao !== undefined) set('observacao_revenda', dto.observacao);
+    if (dto.parceiroId !== undefined) set('parceiro_id', dto.parceiroId, '::uuid');
     if (dto.modulos) {
       const m: Record<string, boolean> = {};
       for (const k of Object.keys(MODULOS)) m[k] = !!dto.modulos[k];
@@ -564,19 +589,20 @@ Answer ONLY with a JSON array of strings, same order and same length as the inpu
   // ---- planos
   async planos(u: UsuarioToken) {
     await this.exigirPlataforma(u);
-    const l = await this.ds.query(`SELECT p.*, (SELECT count(*)::int FROM empresas e WHERE e.plano_id = p.id) AS clientes FROM planos p ORDER BY ordem, preco`);
-    return { planos: l.map((p: Record<string, unknown>) => ({ ...p, preco: Number(p.preco) })), modulos: MODULOS };
+    const l = await this.ds.query(`SELECT p.*, (SELECT count(*)::int FROM empresas e WHERE e.plano_id = p.id) AS clientes FROM planos p ORDER BY segmento, ordem, preco`);
+    return { planos: l.map((p: Record<string, unknown>) => ({ ...p, preco: Number(p.preco) })), modulos: MODULOS, segmentos: SEGMENTOS, portes: PORTES };
   }
-  async salvarPlano(u: UsuarioToken, id: string | null, dto: { nome: string; descricao?: string | null; preco: number; modulos: Record<string, boolean>; limiteUnidades?: number | null; itens: string[]; destaque: boolean; ativo: boolean; ordem?: number }) {
+  async salvarPlano(u: UsuarioToken, id: string | null, dto: { nome: string; descricao?: string | null; preco: number; modulos: Record<string, boolean>; limiteUnidades?: number | null; itens: string[]; destaque: boolean; ativo: boolean; ordem?: number; segmento?: string; porte?: string; sobConsulta?: boolean; publico?: string | null }) {
     await this.exigirPlataforma(u);
     const m: Record<string, boolean> = {};
     for (const k of Object.keys(MODULOS)) if (dto.modulos?.[k]) m[k] = true;
-    const v = [dto.nome.trim(), dto.descricao?.trim() || null, dto.preco.toFixed(2), JSON.stringify(m), dto.limiteUnidades ?? null, JSON.stringify(dto.itens.map((i) => i.trim()).filter(Boolean)), dto.destaque, dto.ativo, dto.ordem ?? 0];
+    const v = [dto.nome.trim(), dto.descricao?.trim() || null, dto.preco.toFixed(2), JSON.stringify(m), dto.limiteUnidades ?? null, JSON.stringify(dto.itens.map((i) => i.trim()).filter(Boolean)), dto.destaque, dto.ativo, dto.ordem ?? 0,
+      SEGMENTOS[dto.segmento ?? ''] ? dto.segmento : 'hospedagem', PORTES[dto.porte ?? ''] ? dto.porte : 'pequeno', !!dto.sobConsulta, dto.publico?.trim() || null];
     if (id) {
-      const [linhas] = await this.ds.query(`UPDATE planos SET nome=$2, descricao=$3, preco=$4, modulos=$5::jsonb, limite_unidades=$6, itens=$7::jsonb, destaque=$8, ativo=$9, ordem=$10 WHERE id = $1 RETURNING id`, [id, ...v]);
+      const [linhas] = await this.ds.query(`UPDATE planos SET nome=$2, descricao=$3, preco=$4, modulos=$5::jsonb, limite_unidades=$6, itens=$7::jsonb, destaque=$8, ativo=$9, ordem=$10, segmento=$11, porte=$12, sob_consulta=$13, publico=$14 WHERE id = $1 RETURNING id`, [id, ...v]);
       if (!linhas?.length) throw new NotFoundException('Plano não encontrado.');
     } else {
-      await this.ds.query(`INSERT INTO planos (nome, descricao, preco, modulos, limite_unidades, itens, destaque, ativo, ordem) VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8,$9)`, v);
+      await this.ds.query(`INSERT INTO planos (nome, descricao, preco, modulos, limite_unidades, itens, destaque, ativo, ordem, segmento, porte, sob_consulta, publico) VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13)`, v);
     }
     return this.planos(u);
   }
@@ -695,6 +721,119 @@ Answer ONLY with a JSON array of strings, same order and same length as the inpu
     await this.ds.query(`UPDATE revenda_config SET teste_dias = $1, dias_aviso = $2, dias_bloqueio = $3, whatsapp = $4, email = $5, textos = $6::jsonb WHERE id = 1`,
       [dto.testeDias, dto.diasAviso, dto.diasBloqueio, soDigitos(dto.whatsapp) || null, dto.email?.trim() || null, JSON.stringify(dto.textos ?? {})]);
     return this.config(u);
+  }
+
+  /* ============================================================ parceiros (VB Indica, VB Revenda, VB Sua Marca) */
+
+  /** página do parceiro no site (link com ?p=CODIGO): nome e marca, para o "Sua Marca" */
+  async parceiroPublico(codigo: string) {
+    const [p] = await this.ds.query(`SELECT nome, tipo, marca, desconto_pct FROM parceiros WHERE upper(codigo) = upper($1) AND situacao = 'ativo'`, [codigo.trim().slice(0, 20)]);
+    if (!p) throw new NotFoundException('Parceiro não encontrado.');
+    return { nome: p.nome, tipo: p.tipo, marca: p.marca ?? {}, desconto: Number(p.desconto_pct) };
+  }
+
+  /** "Seja parceiro" no site: entra como pendente para a Virtual Barra aprovar */
+  async cadastrarParceiro(dto: { tipo: string; nome: string; responsavel: string; email: string; telefone: string; cidade?: string; documento?: string; mensagem?: string }, ip: string) {
+    const agora = Date.now();
+    const lista = (this.tentativas.get(`p:${ip}`) ?? []).filter((t) => agora - t < 3_600_000);
+    if (lista.length >= 3) throw new BadRequestException('Muitos cadastros em pouco tempo. Tente mais tarde ou fale com a gente pelo WhatsApp.');
+    this.tentativas.set(`p:${ip}`, [...lista, agora]);
+    if (!TIPOS_PARCEIRO[dto.tipo]) throw new BadRequestException('Escolha o tipo de parceria.');
+    const codigo = await this.novoCodigo(dto.nome);
+    const comissao = dto.tipo === 'indicacao' ? 20 : dto.tipo === 'revenda' ? 30 : 35;
+    await this.ds.query(
+      `INSERT INTO parceiros (tipo, nome, responsavel, email, telefone, cidade, documento, mensagem, codigo, comissao_pct) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [dto.tipo, dto.nome.trim(), dto.responsavel.trim(), dto.email.trim().toLowerCase(), soDigitos(dto.telefone), dto.cidade?.trim() || null, soDigitos(dto.documento) || null, dto.mensagem?.trim() || null, codigo, comissao]);
+    return { ok: true };
+  }
+
+  private async novoCodigo(nome: string) {
+    const base = nome.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'VB';
+    for (let i = 0; i < 20; i++) {
+      const c = i === 0 ? base : `${base.slice(0, 6)}${Math.floor(10 + Math.random() * 89)}`;
+      const [ja] = await this.ds.query(`SELECT 1 FROM parceiros WHERE upper(codigo) = $1`, [c]);
+      if (!ja) return c;
+    }
+    return `VB${Date.now().toString(36).toUpperCase()}`;
+  }
+
+  /** comissão de cada parceiro no mês: % sobre as mensalidades pagas dos clientes dele */
+  async parceiros(u: UsuarioToken, mesQ?: string) {
+    await this.exigirPlataforma(u);
+    const mes = mesQ && /^\d{4}-\d{2}$/.test(mesQ) ? mesQ : hojeSP().slice(0, 7);
+    const l = await this.ds.query(
+      `SELECT p.*,
+              (SELECT count(*)::int FROM empresas e WHERE e.parceiro_id = p.id) AS clientes,
+              (SELECT count(*)::int FROM empresas e WHERE e.parceiro_id = p.id AND e.situacao IN ('ativa','atrasada')) AS pagantes,
+              (SELECT COALESCE(sum(m.valor), 0) FROM mensalidades m JOIN empresas e ON e.id = m.empresa_id
+                WHERE e.parceiro_id = p.id AND m.situacao = 'paga' AND to_char(m.pago_em AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = $1) AS recebido_mes,
+              (SELECT r.valor FROM parceiro_repasses r WHERE r.parceiro_id = p.id AND r.competencia = $1) AS repassado
+         FROM parceiros p ORDER BY (p.situacao = 'pendente') DESC, p.nome`, [mes]);
+    const lista = l.map((p: Record<string, unknown>) => {
+      const recebido = Number(p.recebido_mes ?? 0);
+      return {
+        id: p.id, tipo: p.tipo, tipoNome: TIPOS_PARCEIRO[String(p.tipo)]?.nome ?? p.tipo, nome: p.nome, responsavel: p.responsavel, documento: p.documento, email: p.email,
+        telefone: p.telefone, cidade: p.cidade, codigo: p.codigo, comissao: Number(p.comissao_pct), desconto: Number(p.desconto_pct), situacao: p.situacao,
+        marca: p.marca ?? {}, pix: p.pix, observacao: p.observacao, mensagem: p.mensagem, criadoEm: p.criado_em,
+        clientes: p.clientes, pagantes: p.pagantes, recebidoMes: recebido, comissaoMes: Math.round(recebido * Number(p.comissao_pct)) / 100,
+        repassado: p.repassado === null ? null : Number(p.repassado),
+      };
+    });
+    return { mes, parceiros: lista, tipos: TIPOS_PARCEIRO };
+  }
+
+  async salvarParceiro(u: UsuarioToken, id: string | null, dto: { tipo: string; nome: string; responsavel?: string | null; documento?: string | null; email?: string | null; telefone?: string | null; cidade?: string | null; codigo?: string | null; comissao: number; desconto: number; situacao: string; marca?: Record<string, string>; pix?: string | null; observacao?: string | null }) {
+    await this.exigirPlataforma(u);
+    if (!TIPOS_PARCEIRO[dto.tipo]) throw new BadRequestException('Tipo de parceria inválido.');
+    let codigo = (dto.codigo ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20);
+    if (!codigo) codigo = await this.novoCodigo(dto.nome);
+    const [dono] = await this.ds.query(`SELECT id FROM parceiros WHERE upper(codigo) = $1`, [codigo]);
+    if (dono && dono.id !== id) throw new BadRequestException(`O código ${codigo} já é de outro parceiro.`);
+    const marca = { nome: dto.marca?.nome?.trim() || '', cor: /^#[0-9a-f]{6}$/i.test(dto.marca?.cor ?? '') ? dto.marca!.cor : '', logo: /^https:\/\//.test(dto.marca?.logo ?? '') ? dto.marca!.logo : '' };
+    const v = [dto.tipo, dto.nome.trim(), dto.responsavel?.trim() || null, soDigitos(dto.documento) || null, dto.email?.trim().toLowerCase() || null, soDigitos(dto.telefone) || null,
+      dto.cidade?.trim() || null, codigo, Math.min(100, Math.max(0, dto.comissao)).toFixed(2), Math.min(100, Math.max(0, dto.desconto)).toFixed(2),
+      ['pendente', 'ativo', 'inativo'].includes(dto.situacao) ? dto.situacao : 'pendente', JSON.stringify(marca), dto.pix?.trim() || null, dto.observacao?.trim() || null];
+    if (id) {
+      const [linhas] = await this.ds.query(
+        `UPDATE parceiros SET tipo=$2, nome=$3, responsavel=$4, documento=$5, email=$6, telefone=$7, cidade=$8, codigo=$9, comissao_pct=$10, desconto_pct=$11, situacao=$12, marca=$13::jsonb, pix=$14, observacao=$15
+          WHERE id = $1 RETURNING id`, [id, ...v]);
+      if (!linhas?.length) throw new NotFoundException('Parceiro não encontrado.');
+    } else {
+      await this.ds.query(
+        `INSERT INTO parceiros (tipo, nome, responsavel, documento, email, telefone, cidade, codigo, comissao_pct, desconto_pct, situacao, marca, pix, observacao)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14)`, v);
+    }
+    return this.parceiros(u);
+  }
+
+  /** extrato do parceiro no mês: clientes, mensalidades pagas e a comissão de cada uma */
+  async extratoParceiro(u: UsuarioToken, id: string, mesQ?: string) {
+    await this.exigirPlataforma(u);
+    const mes = mesQ && /^\d{4}-\d{2}$/.test(mesQ) ? mesQ : hojeSP().slice(0, 7);
+    const [p] = await this.ds.query(`SELECT nome, comissao_pct FROM parceiros WHERE id = $1`, [id]);
+    if (!p) throw new NotFoundException('Parceiro não encontrado.');
+    const clientes = await this.ds.query(
+      `SELECT e.id, e.nome, e.situacao, pl.nome AS plano, e.criado_em FROM empresas e LEFT JOIN planos pl ON pl.id = e.plano_id WHERE e.parceiro_id = $1 ORDER BY e.nome`, [id]);
+    const pagas = await this.ds.query(
+      `SELECT e.nome AS empresa, m.competencia, m.valor, m.pago_em FROM mensalidades m JOIN empresas e ON e.id = m.empresa_id
+        WHERE e.parceiro_id = $1 AND m.situacao = 'paga' AND to_char(m.pago_em AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') = $2 ORDER BY m.pago_em`, [id, mes]);
+    const pct = Number(p.comissao_pct);
+    const linhas = pagas.map((m: Record<string, unknown>) => ({ empresa: m.empresa, competencia: m.competencia, valor: Number(m.valor), pagoEm: m.pago_em, comissao: Math.round(Number(m.valor) * pct) / 100 }));
+    const [rep] = await this.ds.query(`SELECT valor, pago_em, pago_por FROM parceiro_repasses WHERE parceiro_id = $1 AND competencia = $2`, [id, mes]);
+    return {
+      mes, parceiro: p.nome, comissaoPct: pct, clientes, pagas: linhas,
+      total: Math.round(linhas.reduce((s: number, x: { comissao: number }) => s + x.comissao * 100, 0)) / 100,
+      repasse: rep ? { valor: Number(rep.valor), pagoEm: rep.pago_em, pagoPor: rep.pago_por } : null,
+    };
+  }
+
+  async registrarRepasse(u: UsuarioToken, id: string, dto: { competencia: string; valor: number; observacao?: string }) {
+    await this.exigirPlataforma(u);
+    await this.ds.query(
+      `INSERT INTO parceiro_repasses (parceiro_id, competencia, valor, pago_por, observacao) VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (parceiro_id, competencia) DO UPDATE SET valor = EXCLUDED.valor, pago_em = now(), pago_por = EXCLUDED.pago_por, observacao = EXCLUDED.observacao`,
+      [id, dto.competencia, dto.valor.toFixed(2), u.nome, dto.observacao?.trim() || null]);
+    return this.extratoParceiro(u, id, dto.competencia);
   }
 
   /* ============================================================ rotina */

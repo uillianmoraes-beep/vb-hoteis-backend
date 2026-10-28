@@ -12,7 +12,7 @@ export class Estadia {
   @Column({ name: 'unidade_id', type: 'uuid' }) unidadeId!: string;
   @Column({ name: 'categoria_id', type: 'uuid', nullable: true }) categoriaId!: string | null;
   @Column({ name: 'tabela_id', type: 'uuid', nullable: true }) tabelaId!: string | null;
-  @Column({ type: 'varchar', length: 10, default: 'periodo' }) modalidade!: 'periodo' | 'pernoite';
+  @Column({ type: 'varchar', length: 10, default: 'periodo' }) modalidade!: 'periodo' | 'pernoite' | 'mesa';
   @Column({ type: 'varchar', length: 10, nullable: true }) placa!: string | null;
   @Column({ type: 'int', default: 2 }) pessoas!: number;
   @Column({ type: 'text', nullable: true }) observacao!: string | null;
