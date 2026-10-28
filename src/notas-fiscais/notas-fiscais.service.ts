@@ -169,6 +169,13 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     return { numero: Number(r.numero), serie: Number(r.serie) };
   }
 
+  /** tributação da hospedagem: o "Padrão NFS-e" da Configuração fiscal, com o que estiver preenchido na empresa por cima */
+  private async dadosHospedagem(empresaId: string, daEmpresa?: DadosFiscais): Promise<DadosFiscais> {
+    const [r] = await this.ds.query(`SELECT dados FROM regras_fiscais WHERE empresa_id = $1 AND documento = 'nfs' AND cfop IS NULL AND ativo LIMIT 1`, [empresaId]);
+    const preenchidos = Object.fromEntries(Object.entries(daEmpresa ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== ''));
+    return { ...((r?.dados ?? {}) as DadosFiscais), ...preenchidos } as DadosFiscais;
+  }
+
   private async regras(empresaId: string) {
     return (await this.ds.query(`SELECT documento, cfop, dados, ativo FROM regras_fiscais WHERE empresa_id = $1`, [empresaId])) as
       { documento: string; cfop: string | null; dados: DadosFiscais; ativo: boolean }[];
@@ -456,7 +463,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (querHosp) {
-      const hosp = emp.fiscal?.hospedagem ?? {};
+      const hosp = await this.dadosHospedagem(u.empresaId, emp.fiscal?.hospedagem);
       const descr = `Hospedagem${un?.codigo ? ` - suíte ${un.codigo}` : ''} - entrada ${new Date(e.entrada_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}${e.saida_em ? `, saída ${new Date(e.saida_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}` : ''}`;
       notas.push(await this.emitirServico(u, em, regime, hosp, { valor: alvoHosp, descricao: descr, doc, nome, estadiaId, parteId: dto.parteId ?? null }));
     }
@@ -468,7 +475,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     a: { valor: number; descricao: string; doc: string | null; nome: string | null; estadiaId: string | null; parteId: string | null }) {
     const d = em.e.dados;
     if (!d.codigoMunicipio) throw new BadRequestException('Falta o código IBGE do município no emissor de notas (Configuração fiscal › Emissor de notas).');
-    if (!f.codigoServico) throw new BadRequestException('Falta o item da lista de serviço da hospedagem (Notas fiscais › Tributação da hospedagem; hospedagem costuma ser 09.01).');
+    if (!f.codigoServico) throw new BadRequestException('Falta o item da lista de serviço da hospedagem (Configuração fiscal › aba NFS-e › Padrão NFS-e; hospedagem costuma ser 09.01).');
     const tomadorDoc = a.doc;
     if (em.e.nfse_padrao === 'nacional') {
       const item = so(f.codigoServico);
