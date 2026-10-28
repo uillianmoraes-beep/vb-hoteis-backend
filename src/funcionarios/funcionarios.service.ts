@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { Funcionario, FuncionarioLancamento, Revisao } from './funcionario.entity';
 import { ConfigRevisaoDto, FuncionarioDto, LancamentoFuncDto, RevisaoDto } from './funcionarios.dto';
-import { UsuarioToken } from '../common/permissoes';
+import { UsuarioToken, temPermissao } from '../common/permissoes';
 
 const c = (v: number | string | null | undefined) => Math.round(Number(v ?? 0) * 100);
 const r = (x: number) => Math.round(x) / 100;
@@ -26,7 +26,10 @@ export class FuncionariosService {
   async listar(u: UsuarioToken, filtro: { funcao?: string; ambienteId?: string; todos?: boolean }) {
     const lista = await this.repo.find({ where: filtro.todos ? { empresaId: u.empresaId } : { empresaId: u.empresaId, ativo: true }, order: { nome: 'ASC' } });
     const funcoes = filtro.funcao ? filtro.funcao.split(',') : null;
-    return lista.filter((f) => (!funcoes || funcoes.includes(f.funcao)) && (!filtro.ambienteId || !f.ambienteIds.length || f.ambienteIds.includes(filtro.ambienteId)));
+    const filtrada = lista.filter((f) => (!funcoes || funcoes.includes(f.funcao)) && (!filtro.ambienteId || !f.ambienteIds.length || f.ambienteIds.includes(filtro.ambienteId)));
+    // recepção, governança, manutenção…: só o necessário para escolher a pessoa (CPF, telefone, Pix e nascimento ficam com o RH)
+    if (['funcionarios.gerenciar', 'funcionarios.financeiro', 'contador.acessar'].some((p) => temPermissao(u, p))) return filtrada;
+    return filtrada.map(({ id, matricula, nome, funcao, ambienteIds, usuarioId, recebeGorjeta, ativo }) => ({ id, matricula, nome, funcao, ambienteIds, usuarioId, recebeGorjeta, ativo }));
   }
 
   private async buscar(u: UsuarioToken, id: string) {
