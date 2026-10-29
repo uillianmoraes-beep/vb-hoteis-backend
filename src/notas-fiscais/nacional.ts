@@ -257,6 +257,23 @@ export class Nacional {
     return true;
   }
 
+  /**
+   * o que o município tem no sistema nacional: convênio e, para cada código de hospedagem (09.01.01 a 09.01.04),
+   * se está cadastrado e com qual alíquota (ajuda a entender a recusa E0312)
+   */
+  async diagnostico(codigoMunicipio: string) {
+    const cMun = so(codigoMunicipio);
+    const resumo = (j: J) => JSON.stringify(j).slice(0, 400);
+    const linhas: string[] = [];
+    const conv = await this.chamar('GET', `/parametros_municipais/${cMun}/convenio`).catch((e) => ({ status: 0, json: { erro: (e as Error).message } as J }));
+    linhas.push(`Convênio do município ${cMun}: ${conv.status === 200 ? 'ok' : `não encontrado (${conv.status})`} ${conv.status === 200 ? resumo(conv.json) : mensagemNacional(conv.json)}`);
+    for (const cod of ['090101', '090102', '090103', '090104']) {
+      const r = await this.chamar('GET', `/parametros_municipais/${cMun}/${cod}`).catch((e) => ({ status: 0, json: { erro: (e as Error).message } as J }));
+      linhas.push(`${cod.slice(0, 2)}.${cod.slice(2, 4)}.${cod.slice(4)}: ${r.status === 200 ? `cadastrado ${resumo(r.json)}` : `não cadastrado (${r.status}) ${mensagemNacional(r.json)}`}`);
+    }
+    return linhas;
+  }
+
   async emitir(tipo: CaminhoFocus, _ref: string, corpo: unknown): Promise<{ status: number; json: RespostaFocus }> {
     if (tipo !== 'nfsen') throw new ErroFocus('O emissor próprio faz só a NFS-e padrão nacional por enquanto.');
     let { id, xml } = montarDps(corpo as J, this.tpAmb, LEIAUTE_NOVO[this.ambiente]);

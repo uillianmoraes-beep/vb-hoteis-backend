@@ -351,6 +351,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     if (e.nfse_proprio) {
       const nac = focus instanceof Nacional ? focus : this.nacional(u.empresaId, e, e.ambiente);
       if (!(focus instanceof Nacional)) await nac.testar(e.dados?.codigoMunicipio);
+      if (e.dados?.codigoMunicipio) partes.push(`Cadastro no sistema nacional · ${(await nac.diagnostico(e.dados.codigoMunicipio).catch(() => [] as string[])).join(' · ')}.`);
       partes.push(`Emissor próprio da NFS-e: certificado de ${e.cert_titular ?? 'titular'} (vale até ${e.cert_validade ? new Date(e.cert_validade).toLocaleDateString('pt-BR') : '—'}) e conexão com o sistema nacional ${e.ambiente === 'producao' ? 'de produção' : 'de testes (produção restrita)'} ok.`);
     }
     return { ok: true, ambiente: e.ambiente, mensagem: partes.join(' ') };
