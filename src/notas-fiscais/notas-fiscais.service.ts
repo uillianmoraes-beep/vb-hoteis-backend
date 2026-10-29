@@ -2,16 +2,21 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { DataSource } from 'typeorm';
 import { cifrar, decifrar } from '../common/cripto';
 import { DadosFiscais, tributacaoEfetiva } from '../common/fiscal';
-import { moduloAtivo } from '../common/modulos';
+import { fiscalLiberado, moduloAtivo } from '../common/modulos';
 import { UsuarioToken } from '../common/permissoes';
 import { conferirItem } from '../fiscal/conferencia';
 import { liberarPermissao } from '../common/liberacao';
 import { AmbienteFocus, CaminhoFocus, ErroFocus, Focus, RespostaFocus, mensagemFocus } from './focus';
 import { Spedy, assinarArquivo } from './spedy';
+import { Nacional, danfseHtml, lerCertificado, type Certificado } from './nacional';
+import { createHash } from 'crypto';
+import JSZip from 'jszip';
 
 /** empresa que leva a nota à SEFAZ/prefeitura (as duas falam o mesmo "idioma" para o resto do sistema) */
-type Provedor = Focus | Spedy;
-const NOME_PROVEDOR = { focus: 'Focus NFe', spedy: 'Spedy' } as const;
+type Provedor = Focus | Spedy | Nacional;
+const NOME_PROVEDOR = { focus: 'Focus NFe', spedy: 'Spedy', proprio: 'emissor próprio (sistema nacional)' } as const;
+/** certificados já abertos (abrir o .pfx é lento): chave = resumo do arquivo cifrado */
+const CERTS = new Map<string, Certificado>();
 import type { CancelarNotaDto, CartaCorrecaoDto, DestinatarioDto, EmissorDto, EmitirContaDto, EmitirDevolucaoDto, EmitirNfeDto, ItemNotaDto } from './notas-fiscais.dto';
 
 /**
@@ -29,6 +34,12 @@ interface Emissor {
   provedor: 'focus' | 'spedy';
   spedy_chave_homologacao: string | null;
   spedy_chave_producao: string | null;
+  /** NFS-e nacional pelo emissor próprio (direto no sistema nacional, com o A1 da empresa) */
+  nfse_proprio: boolean;
+  cert_pfx: string | null;
+  cert_senha: string | null;
+  cert_validade: Date | null;
+  cert_titular: string | null;
   token_homologacao: string | null;
   token_producao: string | null;
   nfse_padrao: 'nacional' | 'municipal';
@@ -109,6 +120,11 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
       for (const n of l) {
         try { await this.atualizarNota(n.empresa_id, n.id, 'Sistema'); } catch (e) { this.log.warn(`nota ${n.id}: ${(e as Error).message}`); }
       }
+      // guarda por 5 anos o XML das notas autorizadas que ainda não foram guardadas
+      const sem: { id: string; empresa_id: string }[] = await this.ds.query(
+        `SELECT id, empresa_id FROM notas_fiscais WHERE xml_autorizado IS NULL AND status IN ('autorizado','cancelado') AND xml_tentativas < 20
+          ORDER BY criado_em DESC LIMIT 20`);
+      for (const n of sem) await this.guardarXml(n.empresa_id, n.id).catch(() => undefined);
     } catch { /* tabela ainda não criada */ } finally { this.rodando = false; }
   }
 
@@ -155,28 +171,65 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
   private async emissor(empresaId: string, cnpj: string): Promise<{ e: Emissor; focus: Provedor }> {
     const [e] = await this.ds.query(`SELECT * FROM focus_emissores WHERE empresa_id = $1 AND cnpj = $2`, [empresaId, cnpj]);
     if (!e) throw new BadRequestException(`O CNPJ ${cnpj} ainda não está ligado a um emissor de notas. Configure em Configuração fiscal › Emissor de notas.`);
-    return { e: e as Emissor, focus: this.provedor(empresaId, e as Emissor, e.ambiente, e.provedor) };
+    try {
+      return { e: e as Emissor, focus: this.provedor(empresaId, e as Emissor, e.ambiente, e.provedor) };
+    } catch (err) {
+      if (e.nfse_proprio && e.cert_pfx) return { e: { ...(e as Emissor), provedor: 'proprio' as never }, focus: this.provedor(empresaId, e as Emissor, e.ambiente, 'proprio') };
+      throw err;
+    }
   }
 
   /** cliente da Focus ou da Spedy com a chave do ambiente pedido */
-  private provedor(empresaId: string, e: Emissor, ambiente: AmbienteFocus, qual: 'focus' | 'spedy'): Provedor {
+  private provedor(empresaId: string, e: Emissor, ambiente: AmbienteFocus, qual: 'focus' | 'spedy' | 'proprio'): Provedor {
     const prod = ambiente === 'producao';
+    if (qual === 'proprio') return this.nacional(empresaId, e, ambiente);
     const nome = NOME_PROVEDOR[qual] ?? 'emissor';
     const cripto = qual === 'spedy' ? (prod ? e.spedy_chave_producao : e.spedy_chave_homologacao) : (prod ? e.token_producao : e.token_homologacao);
     if (!cripto) throw new BadRequestException(`Falta a chave de ${prod ? 'produção' : 'testes'} da ${nome} para o CNPJ ${e.cnpj}.`);
     let chave: string;
     try { chave = decifrar(cripto, qual === 'spedy' ? 'vb-spedy' : 'vb-focus'); } catch { throw new BadRequestException(`Não consegui ler a chave guardada da ${nome}. Salve a chave de novo.`); }
     if (qual !== 'spedy') return new Focus(chave, ambiente);
-    return new Spedy(chave, ambiente, (caminho) => {
-      const d = `${empresaId}|${e.cnpj}|${ambiente}|${caminho}`;
-      return `/publico/notas-arquivo?e=${empresaId}&c=${e.cnpj}&a=${ambiente}&p=${encodeURIComponent(caminho)}&s=${assinarArquivo(d)}`;
-    });
+    return new Spedy(chave, ambiente, (caminho) => this.enderecoArquivo(empresaId, e.cnpj, ambiente, caminho));
   }
 
-  /** PDF/XML de uma nota da Spedy (o endereço vem assinado pelo próprio sistema) */
+  /** endereço próprio (assinado) para o PDF/XML que o emissor não entrega direto ao navegador */
+  private enderecoArquivo(empresaId: string, cnpj: string, ambiente: AmbienteFocus, caminho: string) {
+    const d = `${empresaId}|${cnpj}|${ambiente}|${caminho}`;
+    return `/publico/notas-arquivo?e=${empresaId}&c=${cnpj}&a=${ambiente}&p=${encodeURIComponent(caminho)}&s=${assinarArquivo(d)}`;
+  }
+
+  /** emissor próprio da NFS-e nacional com o certificado A1 guardado */
+  private nacional(empresaId: string, e: Emissor, ambiente: AmbienteFocus): Nacional {
+    if (!e.cert_pfx || !e.cert_senha) throw new BadRequestException(`Falta o certificado A1 do CNPJ ${e.cnpj} para o emissor próprio (Configuração fiscal › Emissor de notas).`);
+    const h = createHash('sha256').update(e.cert_pfx).digest('hex');
+    let cert = CERTS.get(h);
+    if (!cert) {
+      try { cert = lerCertificado(decifrar(e.cert_pfx, 'vb-cert'), decifrar(e.cert_senha, 'vb-cert')); }
+      catch (err) { throw new BadRequestException(`Não consegui abrir o certificado guardado: ${(err as Error).message} Envie o certificado de novo.`); }
+      if (CERTS.size > 200) CERTS.clear();
+      CERTS.set(h, cert);
+    }
+    return new Nacional(cert, ambiente, e.cnpj, (caminho) => this.enderecoArquivo(empresaId, e.cnpj, ambiente, caminho),
+      async (ref) => {
+        const [n] = await this.ds.query(`SELECT resposta, envio FROM notas_fiscais WHERE empresa_id = $1 AND ref = $2`, [empresaId, ref]);
+        return n ?? null;
+      });
+  }
+
+  /** PDF/XML de uma nota da Spedy ou do emissor próprio (o endereço vem assinado pelo próprio sistema) */
   async arquivoSpedy(q: { e?: string; c?: string; a?: string; p?: string; s?: string }) {
     const d = `${q.e}|${q.c}|${q.a}|${q.p}`;
     if (!q.e || !q.c || !q.p || !q.s || !['producao', 'homologacao'].includes(q.a ?? '') || assinarArquivo(d) !== q.s) throw new NotFoundException('Arquivo não encontrado.');
+    // emissor próprio: o XML da NFS-e fica guardado com a nota; o "PDF" é a DANFSe para imprimir
+    const nac = q.p.match(/^nacional:([0-9A-Z]{50})\/(xml|pdf)$/);
+    if (nac) {
+      const [n] = await this.ds.query(`SELECT resposta FROM notas_fiscais WHERE empresa_id = $1 AND cnpj_emitente = $2 AND chave = $3 LIMIT 1`, [q.e, q.c, nac[1]]);
+      const xml = n?.resposta?.nfse_xml as string | undefined;
+      if (!xml) throw new NotFoundException('Arquivo não encontrado.');
+      return nac[2] === 'xml'
+        ? { tipo: 'application/xml', dados: Buffer.from(xml, 'utf8') }
+        : { tipo: 'text/html; charset=utf-8', dados: Buffer.from(danfseHtml(xml), 'utf8') };
+    }
     const [e] = await this.ds.query(`SELECT * FROM focus_emissores WHERE empresa_id = $1 AND cnpj = $2`, [q.e, q.c]);
     if (!e) throw new NotFoundException('Arquivo não encontrado.');
     const sp = this.provedor(q.e, e as Emissor, q.a as AmbienteFocus, 'spedy') as Spedy;
@@ -235,6 +288,8 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
         tokenProducao: fim(s?.token_producao ?? null),
         spedyHomologacao: fimSpedy(s?.spedy_chave_homologacao ?? null),
         spedyProducao: fimSpedy(s?.spedy_chave_producao ?? null),
+        nfseProprio: !!s?.nfse_proprio,
+        certificado: s?.cert_pfx ? { titular: s.cert_titular, validade: s.cert_validade } : null,
         dps: s ? { serie: s.dps_serie, proximoHomologacao: s.dps_proximo_homologacao, proximoProducao: s.dps_proximo_producao } : null,
         atualizadoEm: s?.atualizado_em ?? null,
         atualizadoPor: s?.atualizado_por ?? null,
@@ -246,8 +301,9 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     const e = await this.empresa(u.empresaId);
     if (!moduloAtivo(e.modulos, 'notas')) return { ligado: false, ambiente: null };
     const [r] = await this.ds.query(
-      `SELECT ambiente FROM focus_emissores WHERE empresa_id = $1 AND (CASE WHEN provedor = 'spedy' THEN (CASE WHEN ambiente = 'producao' THEN spedy_chave_producao ELSE spedy_chave_homologacao END)
-         ELSE (CASE WHEN ambiente = 'producao' THEN token_producao ELSE token_homologacao END) END) IS NOT NULL LIMIT 1`, [u.empresaId]);
+      `SELECT ambiente FROM focus_emissores WHERE empresa_id = $1 AND ((CASE WHEN provedor = 'spedy' THEN (CASE WHEN ambiente = 'producao' THEN spedy_chave_producao ELSE spedy_chave_homologacao END)
+         ELSE (CASE WHEN ambiente = 'producao' THEN token_producao ELSE token_homologacao END) END) IS NOT NULL
+         OR (nfse_proprio AND cert_pfx IS NOT NULL)) LIMIT 1`, [u.empresaId]);
     return { ligado: !!r, ambiente: r?.ambiente ?? null };
   }
 
@@ -271,8 +327,9 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     const sh = dto.spedyHomologacao?.trim() ? cifrar(dto.spedyHomologacao.trim(), 'vb-spedy') : null;
     const sp = dto.spedyProducao?.trim() ? cifrar(dto.spedyProducao.trim(), 'vb-spedy') : null;
     if (dto.ambiente === 'producao' && !(provedor === 'spedy' ? sp : tp)) {
-      const [s] = await this.ds.query(`SELECT token_producao, spedy_chave_producao FROM focus_emissores WHERE empresa_id = $1 AND cnpj = $2`, [u.empresaId, c]);
-      if (!(provedor === 'spedy' ? s?.spedy_chave_producao : s?.token_producao)) throw new BadRequestException(`Para usar produção, informe a chave de produção da ${NOME_PROVEDOR[provedor]}.`);
+      const [s] = await this.ds.query(`SELECT token_producao, spedy_chave_producao, cert_pfx FROM focus_emissores WHERE empresa_id = $1 AND cnpj = $2`, [u.empresaId, c]);
+      const soProprio = dto.nfseProprio && !!s?.cert_pfx;
+      if (!soProprio && !(provedor === 'spedy' ? s?.spedy_chave_producao : s?.token_producao)) throw new BadRequestException(`Para usar produção, informe a chave de produção da ${NOME_PROVEDOR[provedor]}.`);
     }
     await this.ds.query(
       `INSERT INTO focus_emissores (empresa_id, cnpj, ambiente, token_homologacao, token_producao, nfse_padrao, dados, dps_serie, atualizado_por, provedor, spedy_chave_homologacao, spedy_chave_producao)
@@ -281,17 +338,53 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
          spedy_chave_homologacao = COALESCE($12, focus_emissores.spedy_chave_homologacao), spedy_chave_producao = COALESCE($13, focus_emissores.spedy_chave_producao),
          token_homologacao = COALESCE($4, focus_emissores.token_homologacao), token_producao = COALESCE($5, focus_emissores.token_producao),
          nfse_padrao = EXCLUDED.nfse_padrao, dados = EXCLUDED.dados, dps_serie = COALESCE($8, focus_emissores.dps_serie),
-         dps_proximo_producao = COALESCE($10, focus_emissores.dps_proximo_producao), atualizado_em = now(), atualizado_por = $9`,
-      [u.empresaId, c, dto.ambiente, th, tp, dto.nfsePadrao ?? 'nacional', JSON.stringify(dados), dto.dpsSerie ?? null, u.nome, dto.dpsProximoProducao ?? null, provedor, sh, sp]);
+         dps_proximo_producao = COALESCE($10, focus_emissores.dps_proximo_producao), atualizado_em = now(), atualizado_por = $9,
+         nfse_proprio = COALESCE($14, focus_emissores.nfse_proprio)`,
+      [u.empresaId, c, dto.ambiente, th, tp, dto.nfsePadrao ?? 'nacional', JSON.stringify(dados), dto.dpsSerie ?? null, u.nome, dto.dpsProximoProducao ?? null, provedor, sh, sp,
+        dto.nfseProprio ?? null]);
     return (await this.emissores(u)).find((x) => x.cnpj === c);
   }
 
   async testarEmissor(u: UsuarioToken, cnpj: string) {
     await this.exigirModulo(u);
     const { focus, e } = await this.emissor(u.empresaId, so(cnpj));
-    await focus.testar();
-    const nome = NOME_PROVEDOR[e.provedor ?? 'focus'];
-    return { ok: true, ambiente: e.ambiente, mensagem: `Chave aceita pela ${nome} (${e.ambiente === 'producao' ? 'produção' : `${e.provedor === 'spedy' ? 'sandbox' : 'homologação'} — notas de teste, sem valor fiscal`}).` };
+    const partes: string[] = [];
+    if (focus instanceof Nacional) {
+      await focus.testar(e.dados?.codigoMunicipio);
+    } else {
+      await focus.testar();
+      const nome = NOME_PROVEDOR[e.provedor ?? 'focus'];
+      partes.push(`Chave aceita pela ${nome} (${e.ambiente === 'producao' ? 'produção' : `${e.provedor === 'spedy' ? 'sandbox' : 'homologação'} — notas de teste, sem valor fiscal`}).`);
+    }
+    if (e.nfse_proprio) {
+      const nac = focus instanceof Nacional ? focus : this.nacional(u.empresaId, e, e.ambiente);
+      if (!(focus instanceof Nacional)) await nac.testar(e.dados?.codigoMunicipio);
+      // a cidade do emissor precisa ser a do CNPJ (o sistema nacional recusa com E0312): confere no cadastro público
+      const cad = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${e.cnpj}`, { signal: AbortSignal.timeout(8000) }).then((x) => (x.ok ? x.json() : null)).catch(() => null) as { municipio?: string; codigo_municipio_ibge?: number } | null;
+      if (cad?.codigo_municipio_ibge && e.dados?.codigoMunicipio && String(cad.codigo_municipio_ibge) !== String(e.dados.codigoMunicipio)) {
+        throw new BadRequestException(`O código da cidade no emissor (${e.dados.codigoMunicipio}) não é o da cidade do CNPJ: ${cad.municipio} = ${cad.codigo_municipio_ibge}. Corrija em Alterar › Código IBGE da cidade.`);
+      }
+      if (e.dados?.codigoMunicipio) partes.push(`Cadastro no sistema nacional · ${(await nac.diagnostico(e.dados.codigoMunicipio).catch(() => [] as string[])).join(' · ')}.`);
+      partes.push(`Emissor próprio da NFS-e: certificado de ${e.cert_titular ?? 'titular'} (vale até ${e.cert_validade ? new Date(e.cert_validade).toLocaleDateString('pt-BR') : '—'}) e conexão com o sistema nacional ${e.ambiente === 'producao' ? 'de produção' : 'de testes (produção restrita)'} ok.`);
+    }
+    return { ok: true, ambiente: e.ambiente, mensagem: partes.join(' ') };
+  }
+
+  /** guarda o certificado A1 (arquivo .pfx e senha, cifrados) para o emissor próprio */
+  async salvarCertificado(u: UsuarioToken, cnpj: string, dto: { pfx: string; senha: string }) {
+    await this.exigirModulo(u);
+    const c = so(cnpj);
+    if (!(await this.cnpjs(u.empresaId)).some((x) => x.cnpj === c)) throw new BadRequestException('Este CNPJ não é da empresa nem de um ambiente.');
+    const pfx = dto.pfx.replace(/^data:[^,]*,/, '').trim();
+    const cert = lerCertificado(pfx, dto.senha);
+    if (cert.cnpj && cert.cnpj.slice(0, 8) !== c.slice(0, 8)) throw new BadRequestException(`Este certificado é do CNPJ ${cert.cnpj}, não do ${c}.`);
+    if (cert.validade.getTime() < Date.now()) throw new BadRequestException(`Este certificado venceu em ${cert.validade.toLocaleDateString('pt-BR')}.`);
+    await this.ds.query(
+      `INSERT INTO focus_emissores (empresa_id, cnpj, ambiente, nfse_padrao, dados, atualizado_por, cert_pfx, cert_senha, cert_validade, cert_titular)
+       VALUES ($1,$2,'homologacao','nacional','{}'::jsonb,$3,$4,$5,$6,$7)
+       ON CONFLICT (empresa_id, cnpj) DO UPDATE SET cert_pfx = $4, cert_senha = $5, cert_validade = $6, cert_titular = $7, atualizado_em = now(), atualizado_por = $3`,
+      [u.empresaId, c, u.nome, cifrar(pfx, 'vb-cert'), cifrar(dto.senha, 'vb-cert'), cert.validade, cert.titular.slice(0, 200)]);
+    return (await this.emissores(u)).find((x) => x.cnpj === c);
   }
 
   /* ------------------------------------------------------------- consultas */
@@ -381,6 +474,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
         mensagem, focus.arquivo(j.caminho_xml_nota_fiscal), focus.arquivo(j.caminho_danfe ?? j.url_danfse ?? null), j.url_consulta_nf ?? j.url ?? null, JSON.stringify(j)]);
     const [n] = await this.ds.query(`SELECT estadia_id, parte_id FROM notas_fiscais WHERE id = $1`, [id]);
     if (n?.estadia_id) await this.sincronizarConta(empresaId, n.estadia_id, n.parte_id, quem);
+    if (status === 'autorizado') void this.guardarXml(empresaId, id).catch(() => undefined);
   }
 
   /**
@@ -487,8 +581,14 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     if (doc && doc.length !== 11 && doc.length !== 14) doc = null;
 
     const quais = dto.quais ?? 'tudo';
-    const querCons = (quais === 'tudo' || quais === 'nfce') && alvoCons > 0.004 && produtos.length > 0 && !jaTem('nfce');
-    const querHosp = (quais === 'tudo' || quais === 'nfse') && alvoHosp > 0.004 && !jaTem('nfse');
+    // módulos fiscais contratados à parte: o que não está contratado não sai (e avisa)
+    const podeNfce = fiscalLiberado(emp.modulos, 'nfce');
+    const podeNfse = fiscalLiberado(emp.modulos, 'nfse');
+    const querCons = (quais === 'tudo' || quais === 'nfce') && alvoCons > 0.004 && produtos.length > 0 && !jaTem('nfce') && podeNfce;
+    const querHosp = (quais === 'tudo' || quais === 'nfse') && alvoHosp > 0.004 && !jaTem('nfse') && podeNfse;
+    if (!podeNfce && quais === 'nfce') throw new BadRequestException('O módulo NFC-e não está contratado. Contrate em Área do cliente › Módulos fiscais.');
+    if (!podeNfse && quais === 'nfse') throw new BadRequestException('O módulo NFS-e não está contratado. Contrate em Área do cliente › Módulos fiscais.');
+    if (!podeNfce && !podeNfse) throw new BadRequestException('Nenhum módulo de nota (NFC-e ou NFS-e) está contratado. Contrate em Área do cliente › Módulos fiscais.');
     if (!querCons && !querHosp) {
       throw new BadRequestException(feitas.length ? 'As notas desta conta já foram emitidas (ou estão em processamento).' : 'Esta conta não tem valor para nota.');
     }
@@ -522,14 +622,15 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     if (querHosp) {
       const hosp = await this.dadosHospedagem(u.empresaId, emp.fiscal?.hospedagem);
       const descr = `Hospedagem${un?.codigo ? ` - suíte ${un.codigo}` : ''} - entrada ${new Date(e.entrada_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}${e.saida_em ? `, saída ${new Date(e.saida_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}` : ''}`;
-      notas.push(await this.emitirServico(u, em, regime, hosp, { valor: alvoHosp, descricao: descr, doc, nome, estadiaId, parteId: dto.parteId ?? null }));
+      const [amb] = await this.ds.query(`SELECT tipo FROM ambientes WHERE id = $1`, [e.ambiente_id]);
+      notas.push(await this.emitirServico(u, em, regime, hosp, { valor: alvoHosp, descricao: descr, doc, nome, estadiaId, parteId: dto.parteId ?? null, tipoAmbiente: amb?.tipo ?? null }));
     }
     return { notas, avisos };
   }
 
   /** NFS-e da hospedagem (ou de um serviço): padrão nacional (DPS) ou o da prefeitura */
   private async emitirServico(u: UsuarioToken, em: { e: Emissor; focus: Provedor }, regime: 'simples' | 'mei' | 'normal', f: DadosFiscais,
-    a: { valor: number; descricao: string; doc: string | null; nome: string | null; estadiaId: string | null; parteId: string | null }) {
+    a: { valor: number; descricao: string; doc: string | null; nome: string | null; estadiaId: string | null; parteId: string | null; tipoAmbiente?: string | null }) {
     const d = em.e.dados;
     if (!d.codigoMunicipio) throw new BadRequestException('Falta o código IBGE do município no emissor de notas (Configuração fiscal › Emissor de notas).');
     // hospedagem é o item 09.01 da LC 116; a alíquota do ISS pode vir do Padrão NFS-e ou do emissor
@@ -537,7 +638,11 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     const tomadorDoc = a.doc;
     if (em.e.nfse_padrao === 'nacional') {
       const item = so(f.codigoServico);
-      const cTribNac = item.length >= 6 ? item.slice(0, 6) : item.padStart(4, '0') + '01';
+      // código nacional de 6 números: o do Padrão NFS-e (ex.: 09.01.03) ou, só com o item 09.01, pelo tipo do ambiente
+      // (hotel 09.01.01, pousada 09.01.02, motel 09.01.03), como na lista de serviços nacional
+      const SUBITEM_HOSPEDAGEM: Record<string, string> = { motel: '03', pousada: '02', hotel: '01' };
+      const cTribNac = item.length >= 6 ? item.slice(0, 6)
+        : item.padStart(4, '0') === '0901' ? `0901${SUBITEM_HOSPEDAGEM[a.tipoAmbiente ?? ''] ?? '01'}` : item.padStart(4, '0') + '01';
       const dps = await this.proximoDps(u.empresaId, em.e);
       const corpo: Record<string, unknown> = {
         data_emissao: agoraSP(), data_competencia: hojeSP(), serie_dps: dps.serie, numero_dps: dps.numero, emitente_dps: 1,
@@ -559,7 +664,9 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
       if (tomadorDoc && a.nome) corpo.razao_social_tomador = a.nome.slice(0, 150);
       if (f.cstIbsCbs && f.cClassTrib) Object.assign(corpo, { finalidade_emissao: 0, consumidor_final: 1, indicador_destinatario: 0, ibs_cbs_situacao_tributaria: f.cstIbsCbs, ibs_cbs_classificacao_tributaria: f.cClassTrib });
       if (d.infoAdicional) corpo.informacoes_complementares = d.infoAdicional.slice(0, 2000);
-      return this.enviar(u.empresaId, u.nome, { tipo: 'nfsen', cnpj: em.e.cnpj, emissor: em, corpo, valor: a.valor, destinatario: { nome: a.nome, documento: tomadorDoc }, origem: a.estadiaId ? 'conta' : 'manual', estadiaId: a.estadiaId, parteId: a.parteId });
+      // emissor próprio: a NFS-e vai direto ao sistema nacional (a NFC-e continua pela Focus/Spedy)
+      const viaNfse = em.e.nfse_proprio ? { e: { ...em.e, provedor: 'proprio' as never }, focus: this.nacional(u.empresaId, em.e, em.e.ambiente) } : em;
+      return this.enviar(u.empresaId, u.nome, { tipo: 'nfsen', cnpj: em.e.cnpj, emissor: viaNfse, corpo, valor: a.valor, destinatario: { nome: a.nome, documento: tomadorDoc }, origem: a.estadiaId ? 'conta' : 'manual', estadiaId: a.estadiaId, parteId: a.parteId });
     }
     if (!d.inscricaoMunicipal) throw new BadRequestException('Falta a inscrição municipal no emissor de notas (a NFS-e da prefeitura pede).');
     const servico: Record<string, unknown> = {
@@ -697,6 +804,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
   /** NF-e de venda (empresa, entrega, outro estado) */
   async emitirNfe(u: UsuarioToken, dto: EmitirNfeDto) {
     const emp = await this.exigirModulo(u);
+    if (!fiscalLiberado(emp.modulos, 'nfe')) throw new BadRequestException('O módulo NF-e não está contratado. Contrate em Área do cliente › Módulos fiscais.');
     const { cnpj, chave } = dto.cnpj ? { cnpj: so(dto.cnpj), chave: so(dto.cnpj) === so(emp.cnpj) ? 'principal' : so(dto.cnpj) } : await this.cnpjDoAmbiente(u.empresaId, dto.ambienteId ?? null);
     const em = await this.emissor(u.empresaId, cnpj);
     const regime = em.e.dados.regime ?? regimeDe(emp.regime_tributario);
@@ -722,6 +830,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
   /** NF-e de devolução: ao fornecedor (saída) ou do cliente (entrada), sempre ligada à nota original pela chave */
   async emitirDevolucao(u: UsuarioToken, dto: EmitirDevolucaoDto) {
     const emp = await this.exigirModulo(u);
+    if (!fiscalLiberado(emp.modulos, 'nfe')) throw new BadRequestException('A nota de devolução faz parte do módulo NF-e, que não está contratado. Contrate em Área do cliente › Módulos fiscais.');
     let chaveRef = so(dto.chaveReferenciada);
     let notaRefId: string | null = null;
     let cnpjEmit = dto.cnpj ? so(dto.cnpj) : '';
@@ -765,6 +874,118 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /* ----------------------------------------------- guarda dos XMLs (5 anos) */
+
+  /** baixa o XML da nota autorizada do emissor e guarda no sistema (a lei pede 5 anos) */
+  async guardarXml(empresaId: string, id: string) {
+    const [n] = await this.ds.query(`SELECT * FROM notas_fiscais WHERE id = $1 AND empresa_id = $2`, [id, empresaId]);
+    if (!n) return;
+    if (n.status === 'cancelado' && !n.xml_cancelamento) await this.guardarEvento(empresaId, id, 'cancelamento').catch(() => undefined);
+    if (n.xml_autorizado) return;
+    let xml: string | null = null;
+    try {
+      if (n.provedor === 'proprio') xml = (n.resposta?.nfse_xml as string) ?? null;
+      else if (typeof n.url_xml === 'string' && n.url_xml.startsWith('/publico/notas-arquivo')) {
+        const q = Object.fromEntries(new URL(`http://x${n.url_xml}`).searchParams) as Record<string, string>;
+        const a = await this.arquivoSpedy(q);
+        xml = a.dados.toString('utf8');
+      } else if (typeof n.url_xml === 'string' && /^https?:\/\//.test(n.url_xml)) {
+        const r = await fetch(n.url_xml, { signal: AbortSignal.timeout(30_000) });
+        if (r.ok) xml = await r.text();
+      }
+    } catch { /* tenta de novo na próxima rodada */ }
+    if (xml && /<\w/.test(xml)) {
+      await this.ds.query(`UPDATE notas_fiscais SET xml_autorizado = $2, xml_guardado_em = now() WHERE id = $1`, [id, xml]);
+    } else {
+      await this.ds.query(`UPDATE notas_fiscais SET xml_tentativas = xml_tentativas + 1 WHERE id = $1`, [id]);
+    }
+  }
+
+  /** XML do cancelamento ou da carta de correção, do emissor que fez a nota (Focus, Spedy ou próprio) */
+  async guardarEvento(empresaId: string, id: string, qual: 'cancelamento' | 'correcao', resposta?: Record<string, unknown>) {
+    const [n] = await this.ds.query(`SELECT * FROM notas_fiscais WHERE id = $1 AND empresa_id = $2`, [id, empresaId]);
+    if (!n) return;
+    let xml: string | null = null;
+    try {
+      const j = (resposta ?? n.resposta ?? {}) as Record<string, unknown>;
+      if (n.provedor === 'proprio') xml = qual === 'cancelamento' ? ((j.evento_cancelamento as string) ?? null) : null;
+      else {
+        const prov = await this.focusDa(empresaId, n);
+        if (prov instanceof Spedy) xml = await prov.xmlEvento(TIPO_CAMINHO[n.tipo as TipoNota], n.ref, qual);
+        else if (prov instanceof Focus) {
+          const caminho = (qual === 'cancelamento' ? j.caminho_xml_cancelamento : j.caminho_xml_carta_correcao) as string | undefined;
+          const url = prov.arquivo(caminho);
+          if (url) { const r = await fetch(url, { signal: AbortSignal.timeout(30_000) }); if (r.ok) xml = await r.text(); }
+        }
+      }
+    } catch { /* tenta de novo depois */ }
+    if (xml && /<\w/.test(xml)) await this.ds.query(`UPDATE notas_fiscais SET ${qual === 'cancelamento' ? 'xml_cancelamento' : 'xml_correcao'} = $2 WHERE id = $1`, [id, xml]);
+  }
+
+  /** guarda o XML de uma nota de compra (entrada) que a empresa importou: estoque ou contas a pagar */
+  async guardarEntrada(u: UsuarioToken, xml: string) {
+    const chave = (xml.match(/Id="NFe(\d{44})"/) ?? xml.match(/<chNFe>(\d{44})<\/chNFe>/))?.[1];
+    if (!chave) throw new BadRequestException('Não achei a chave de acesso neste XML (é uma NF-e?).');
+    const tagDe = (bloco: string, nome: string) => bloco.match(new RegExp(`<${nome}>([^<]*)</${nome}>`))?.[1] ?? null;
+    const emit = xml.match(/<emit>([\s\S]*?)<\/emit>/)?.[1] ?? '';
+    const ide = xml.match(/<ide>([\s\S]*?)<\/ide>/)?.[1] ?? '';
+    const total = xml.match(/<ICMSTot>([\s\S]*?)<\/ICMSTot>/)?.[1] ?? '';
+    await this.ds.query(
+      `INSERT INTO notas_entrada (empresa_id, chave, numero, emitente_cnpj, emitente_nome, valor, emitida_em, xml, criado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (empresa_id, chave) DO NOTHING`,
+      [u.empresaId, chave, tagDe(ide, 'nNF'), tagDe(emit, 'CNPJ'), (tagDe(emit, 'xNome') ?? '').slice(0, 150) || null,
+        tagDe(total, 'vNF') ? Number(tagDe(total, 'vNF')) : null, tagDe(ide, 'dhEmi') ?? tagDe(ide, 'dEmi'), xml, u.nome]);
+    return { ok: true, chave };
+  }
+
+  /** pacote (ZIP) com os XMLs das notas do mês, separados por modelo, para o contador */
+  async pacoteXml(u: UsuarioToken, mes: string) {
+    await this.exigirModulo(u);
+    if (!/^\d{4}-\d{2}$/.test(mes)) throw new BadRequestException('Informe o mês (AAAA-MM).');
+    const [a, m] = mes.split('-').map(Number);
+    const ini = `${mes}-01T00:00:00-03:00`;
+    const fim = new Date(Date.UTC(m === 12 ? a + 1 : a, m === 12 ? 0 : m, 1, 3)).toISOString();
+    const l: { id: string; tipo: string; status: string; numero: string | null; chave: string | null; xml_autorizado: string | null; criado_em: Date }[] = await this.ds.query(
+      `SELECT id, tipo, status, numero, chave, xml_autorizado, criado_em FROM notas_fiscais
+        WHERE empresa_id = $1 AND status IN ('autorizado','cancelado') AND criado_em >= $2 AND criado_em < $3 ORDER BY criado_em`, [u.empresaId, ini, fim]);
+    // as que ainda não foram guardadas: tenta agora
+    for (const n of l.filter((x) => !x.xml_autorizado).slice(0, 200)) {
+      await this.guardarXml(u.empresaId, n.id).catch(() => undefined);
+      const [x] = await this.ds.query(`SELECT xml_autorizado FROM notas_fiscais WHERE id = $1`, [n.id]);
+      n.xml_autorizado = x?.xml_autorizado ?? null;
+    }
+    const zip = new JSZip();
+    const pasta: Record<string, string> = { nfce: 'NFC-e', nfe: 'NF-e', devolucao: 'NF-e devolucao', nfse: 'NFS-e', nfsen: 'NFS-e' };
+    const eventos: { id: string; xml_cancelamento: string | null; xml_correcao: string | null }[] = l.length
+      ? await this.ds.query(`SELECT id, xml_cancelamento, xml_correcao FROM notas_fiscais WHERE id = ANY($1::uuid[])`, [l.map((n) => n.id)]) : [];
+    const faltam: string[] = [];
+    let saidas = 0, canceladas = 0, correcoes = 0;
+    for (const n of l) {
+      const nome = `${n.chave || n.numero || n.id}.xml`;
+      const ev = eventos.find((x) => x.id === n.id);
+      if (!n.xml_autorizado) { faltam.push(`${NOME_TIPO[n.tipo as TipoNota] ?? n.tipo} ${n.numero ?? ''} (${n.chave ?? n.id})`); continue; }
+      if (n.status === 'cancelado') {
+        canceladas++;
+        zip.file(`3 - Canceladas/${pasta[n.tipo] ?? n.tipo}/${nome}`, n.xml_autorizado);
+        if (ev?.xml_cancelamento) zip.file(`3 - Canceladas/${pasta[n.tipo] ?? n.tipo}/${nome.replace('.xml', '-evento-cancelamento.xml')}`, ev.xml_cancelamento);
+      } else { saidas++; zip.file(`2 - Saidas/${pasta[n.tipo] ?? n.tipo}/${nome}`, n.xml_autorizado); }
+      if (ev?.xml_correcao) { correcoes++; zip.file(`4 - Cartas de correcao/${nome.replace('.xml', '-carta-correcao.xml')}`, ev.xml_correcao); }
+    }
+    // notas de compra (entrada) importadas no mês
+    const entradas: { chave: string; xml: string }[] = await this.ds.query(
+      `SELECT chave, xml FROM notas_entrada WHERE empresa_id = $1 AND COALESCE(emitida_em, criado_em) >= $2 AND COALESCE(emitida_em, criado_em) < $3`, [u.empresaId, ini, fim]);
+    for (const e of entradas) zip.file(`1 - Entradas/${e.chave}.xml`, e.xml);
+    zip.file('LEIA-ME.txt', [
+      `Notas fiscais de ${mes}`,
+      `1 - Entradas (notas de compra importadas): ${entradas.length}`,
+      `2 - Saídas autorizadas: ${saidas}`,
+      `3 - Canceladas: ${canceladas}`,
+      `4 - Cartas de correção: ${correcoes}`,
+      faltam.length ? `Sem XML no emissor ainda (${faltam.length}):\n${faltam.join('\n')}` : 'Todas as notas de saída com XML.',
+    ].join('\n'));
+    return { nome: `notas-${mes}.zip`, dados: await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }) };
+  }
+
   /* ------------------------------------------------- acompanhar e cancelar */
 
   private async linha(empresaId: string, id: string) {
@@ -777,7 +998,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
   private async focusDa(empresaId: string, n: { cnpj_emitente: string | null; ambiente: AmbienteFocus; provedor?: string | null }): Promise<Provedor> {
     const [e] = await this.ds.query(`SELECT * FROM focus_emissores WHERE empresa_id = $1 AND cnpj = $2`, [empresaId, n.cnpj_emitente]);
     if (!e) throw new BadRequestException('O emissor deste CNPJ não está mais configurado.');
-    return this.provedor(empresaId, e as Emissor, n.ambiente, n.provedor === 'spedy' ? 'spedy' : 'focus');
+    return this.provedor(empresaId, e as Emissor, n.ambiente, n.provedor === 'spedy' ? 'spedy' : n.provedor === 'proprio' ? 'proprio' : 'focus');
   }
 
   private async atualizarNota(empresaId: string, id: string, quem: string) {
@@ -815,6 +1036,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     if (st === 'cancelado') {
       await this.ds.query(`UPDATE notas_fiscais SET status = 'cancelado', justificativa_cancelamento = $2, cancelada_em = now(), cancelada_por = $3, mensagem = $4, atualizado_em = now() WHERE id = $1`,
         [id, j, liberou ? `${u.nome} (liberado por ${liberou})` : u.nome, r.json.mensagem_sefaz ?? 'Cancelada.']);
+      void this.guardarEvento(u.empresaId, id, 'cancelamento', r.json as Record<string, unknown>).catch(() => undefined);
       if (n.estadia_id) await this.sincronizarConta(u.empresaId, n.estadia_id, n.parte_id, u.nome);
       if (n.estadia_id) await this.ds.query(`INSERT INTO estadia_eventos (empresa_id, estadia_id, tipo, descricao, usuario_nome) VALUES ($1,$2,'nota',$3,$4)`,
         [u.empresaId, n.estadia_id, `${NOME_TIPO[n.tipo]} ${n.numero ?? ''} cancelada · ${j}`, u.nome]);
@@ -835,6 +1057,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     if (r.json.status !== 'autorizado') throw new BadRequestException(`Carta de correção recusada: ${mensagemFocus(r.json)}`);
     const pdf = focus.arquivo(r.json.caminho_pdf_carta_correcao);
     await this.ds.query(`UPDATE notas_fiscais SET mensagem = $2, atualizado_em = now() WHERE id = $1`, [id, `Carta de correção nº ${r.json.numero_carta_correcao ?? ''} autorizada.`]);
+    void this.guardarEvento(u.empresaId, id, 'correcao', r.json as Record<string, unknown>).catch(() => undefined);
     return { ok: true, numero: r.json.numero_carta_correcao ?? null, urlPdf: pdf };
   }
 }

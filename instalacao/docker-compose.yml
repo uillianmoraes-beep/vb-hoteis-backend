@@ -54,6 +54,21 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
 
+  # cópia do banco inteiro a cada hora na pasta dos backups (HD externo/NAS), guardando 7 dias.
+  # Junto com o backup do sistema (Backup › Rotina automática) e a cópia na nuvem, são 3 lugares.
+  copia-banco:
+    image: postgres:16-alpine
+    restart: always
+    depends_on:
+      banco:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${SENHA_BANCO}
+      TZ: America/Sao_Paulo
+    volumes:
+      - ${PASTA_BACKUP:-./backups}:/backups
+    entrypoint: ["/bin/sh", "-c", "mkdir -p /backups/banco; while true; do pg_dump -h banco -U vbhoteis -d vbhoteis -Fc -f /backups/banco/vbhoteis-$$(date +%Y%m%d-%H%M).dump && find /backups/banco -name 'vbhoteis-*.dump' -mtime +7 -delete; sleep 3600; done"]
+
   # atualiza a API e as telas sozinho de madrugada (quando há internet)
   atualizador:
     image: containrrr/watchtower
