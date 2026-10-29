@@ -175,6 +175,10 @@ export class CaixaService {
         empresaId: u.empresaId, ambienteId: dto.ambienteId, numero: Number(linha?.ultimo_turno ?? 1), status: 'aberto',
         trocoInicial: dto.trocoInicial.toFixed(2), abertoPorId: u.sub, abertoPor: u.nome, abertoEm: new Date(),
       }));
+    }).catch((e: { code?: string }) => {
+      // outro computador abriu o caixa no mesmo instante (o banco só deixa um aberto por ambiente)
+      if (e?.code === '23505') throw new BadRequestException(`Já existe um caixa aberto no ${amb.nome}. Atualize a tela.`);
+      throw e;
     });
     return this.atual(u, salvo.ambienteId);
   }
