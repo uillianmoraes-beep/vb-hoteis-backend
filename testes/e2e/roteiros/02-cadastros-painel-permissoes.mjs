@@ -9,7 +9,7 @@ export default async function (ctx) {
   const eu = await adm.get('/auth/eu');
   d.empresaId = eu.json.empresa.id;
   status('licença sem a chave mestra: 403', await api('PUT', `/licenca/${d.empresaId}`, { caixa: true }, undefined, { headers: { 'x-chave-mestra': 'errada-errada-errada-errada-errada' } }), 403);
-  const lic = await api('PUT', `/licenca/${d.empresaId}`, { notas: true, caixa: true, estoque: true, hotel: true, restaurante: true, satisfacao: true }, undefined, { headers: { 'x-chave-mestra': ctx.chaveMestra } });
+  const lic = await api('PUT', `/licenca/${d.empresaId}`, { notas: true, nfce: true, nfse: true, nfe: true, caixa: true, estoque: true, hotel: true, restaurante: true, satisfacao: true }, undefined, { headers: { 'x-chave-mestra': ctx.chaveMestra } });
   status('liga os módulos pela licença', lic, 200);
 
   // ambientes e unidades do exemplo

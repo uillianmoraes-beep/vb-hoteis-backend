@@ -445,6 +445,10 @@ export class EstadiasService {
         + (ehMesa ? 'mesa aberta' : hotel ? `${noites} noite(s) · diária ${brl(Math.round(hotel.diaria * 100))} · total ${brl(Math.round(hotel.total * 100))} · saída prevista ${saidaPrevista!.split('-').reverse().join('/')}` : `tabela ${tabela!.nome}`)
         + (modalidade === 'pernoite' ? ', pernoite' : minimo ? `, pacote ${minimo.nome}` : ''));
       return e;
+    }).catch((err: { code?: string }) => {
+      // outro computador deu entrada nesta unidade no mesmo instante (o banco só deixa uma conta aberta)
+      if (err?.code === '23505') throw new BadRequestException(`A unidade ${unidade.codigo} acabou de receber uma entrada em outro computador. Atualize a tela.`);
+      throw err;
     });
     // promoção com brinde (Tarifas inteligentes): entra na conta com preço zero
     try {

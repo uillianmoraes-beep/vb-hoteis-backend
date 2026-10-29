@@ -16,7 +16,7 @@ export default async function (ctx) {
   await sql(`UPDATE unidades SET status = 'livre' WHERE id = ANY($1) AND NOT EXISTS (SELECT 1 FROM estadias e WHERE e.unidade_id = unidades.id AND e.status IN ('aberta','conta_entregue'))`, [[s9.id, d.suites[9].id]]);
 
   const entradas = await Promise.all([rec.post('/estadias', { unidadeId: s9.id }), ger.post('/estadias', { unidadeId: s9.id }), rec.post('/estadias', { unidadeId: s9.id })]);
-  verifica('3 entradas ao mesmo tempo na suíte 09: só 1 vale', entradas.filter(ok).length === 1, entradas.map((r) => r.status));
+  verifica('3 entradas ao mesmo tempo na suíte 09: só 1 vale e as outras recebem aviso (sem erro 500)', entradas.filter(ok).length === 1 && !entradas.some((r) => r.status >= 500), entradas.map((r) => r.status));
   const [{ n }] = await sql(`SELECT count(*)::int n FROM estadias WHERE unidade_id = $1 AND status IN ('aberta','conta_entregue')`, [s9.id]);
   verifica('no banco, só 1 conta aberta na suíte 09', n === 1, n);
   const conta = entradas.find(ok);
