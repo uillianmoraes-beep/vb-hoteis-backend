@@ -9,6 +9,9 @@ export default async function (ctx) {
   const rec = await entrar(d.logins.recepcao, d.logins.senha);
   const ger = await entrar(d.logins.gerente, d.logins.senha);
   const s9 = d.suites[8];
+  // o caixa do motel precisa estar aberto para receber
+  const cx = await ctx.admin.get(`/caixa/atual?ambienteId=${d.motelId}`);
+  if (!cx.json?.turno) await ctx.admin.post('/caixa/turnos', { ambienteId: d.motelId, trocoInicial: 0 });
   // rodando de novo no mesmo banco: as suítes do teste voltam a ficar livres
   await sql(`UPDATE unidades SET status = 'livre' WHERE id = ANY($1) AND NOT EXISTS (SELECT 1 FROM estadias e WHERE e.unidade_id = unidades.id AND e.status IN ('aberta','conta_entregue'))`, [[s9.id, d.suites[9].id]]);
 
@@ -42,7 +45,7 @@ export default async function (ctx) {
   if (atual.json?.turno?.id) await ctx.admin.post(`/caixa/turnos/${atual.json.turno.id}/fechar`, { contado: atual.json.resumo?.esperado ?? {} });
   const caixas = await Promise.all([ctx.admin.post('/caixa/turnos', { ambienteId: amb, trocoInicial: 0 }), ger.post('/caixa/turnos', { ambienteId: amb, trocoInicial: 0 })]);
   const [{ abertos }] = await sql(`SELECT count(*)::int abertos FROM caixa_turnos WHERE ambiente_id = $1 AND status = 'aberto'`, [amb]);
-  verifica('2 aberturas de caixa ao mesmo tempo: só 1 caixa aberto', abertos === 1, { respostas: caixas.map((r) => r.status), abertos });
+  verifica('2 aberturas de caixa ao mesmo tempo: só 1 caixa aberto e o outro recebe aviso (400)', abertos === 1 && caixas.some((r) => r.status === 400) && !caixas.some((r) => r.status >= 500), { respostas: caixas.map((r) => r.status), abertos });
 
   // fechar o mesmo caixa duas vezes ao mesmo tempo (manda o dinheiro para o caixa ADM duas vezes?)
   const [turno] = await sql(`SELECT id FROM caixa_turnos WHERE ambiente_id = $1 AND status = 'aberto'`, [amb]);
