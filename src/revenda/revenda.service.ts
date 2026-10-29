@@ -5,7 +5,7 @@ import { promises as fs } from 'fs';
 import { dirname, join, normalize, sep } from 'path';
 import Anthropic from '@anthropic-ai/sdk';
 import { UsuarioToken, temPermissao } from '../common/permissoes';
-import { MODULOS } from '../common/modulos';
+import { MODULOS, MODULOS_FISCAIS } from '../common/modulos';
 import { decifrar } from '../common/cripto';
 import { Asaas, ErroAsaas } from '../cobranca/asaas';
 import { criarEmpresa } from '../seed/nova-empresa';
@@ -120,13 +120,13 @@ export class RevendaService implements OnApplicationBootstrap, OnModuleDestroy {
 
   async planosPublicos() {
     const cfg = await this.cfg();
-    const planos = await this.ds.query(`SELECT id, nome, descricao, preco, itens, limite_unidades, destaque, modulos, segmento, porte, sob_consulta, publico FROM planos WHERE ativo ORDER BY segmento, ordem, preco`);
+    const planos = await this.ds.query(`SELECT id, nome, descricao, preco, itens, limite_unidades, limite_produtos, destaque, modulos, segmento, porte, sob_consulta, publico FROM planos WHERE ativo ORDER BY segmento, ordem, preco`);
     return {
       planos: planos.map((p: Record<string, unknown>) => ({
-        id: p.id, nome: p.nome, descricao: p.descricao, preco: Number(p.preco), itens: p.itens, limiteUnidades: p.limite_unidades, destaque: p.destaque, modulos: p.modulos,
+        id: p.id, nome: p.nome, descricao: p.descricao, preco: Number(p.preco), itens: p.itens, limiteUnidades: p.limite_unidades, limiteProdutos: p.limite_produtos ?? null, destaque: p.destaque, modulos: p.modulos,
         segmento: p.segmento, porte: p.porte, sobConsulta: p.sob_consulta, publico: p.publico,
       })),
-      testeDias: cfg.teste_dias, whatsapp: cfg.whatsapp, email: cfg.email, textos: cfg.textos ?? {}, modulos: MODULOS,
+      testeDias: cfg.teste_dias, whatsapp: cfg.whatsapp, email: cfg.email, textos: cfg.textos ?? {}, modulos: MODULOS, modulosAvulsos: await this.modulosAvulsos(),
     };
   }
 
@@ -183,7 +183,7 @@ export class RevendaService implements OnApplicationBootstrap, OnModuleDestroy {
   async area(u: UsuarioToken) {
     const [e] = await this.ds.query(
       `SELECT e.id, e.nome, e.cnpj, e.situacao, e.teste_ate, e.plano_id, e.dia_vencimento, e.mensalidade_valor, e.responsavel, e.plataforma, e.idioma,
-              p.nome AS plano_nome, p.preco AS plano_preco
+              e.adicionais, p.nome AS plano_nome, p.preco AS plano_preco, p.limite_unidades, p.limite_produtos
          FROM empresas e LEFT JOIN planos p ON p.id = e.plano_id WHERE e.id = $1`, [u.empresaId]);
     if (!e) throw new NotFoundException();
     const cfg = await this.cfg();
@@ -196,11 +196,14 @@ export class RevendaService implements OnApplicationBootstrap, OnModuleDestroy {
       empresa: {
         nome: e.nome, cnpj: e.cnpj, situacao: e.plataforma ? 'ativa' : e.situacao, testeAte: e.teste_ate ? dia(e.teste_ate) : null,
         diasTeste: e.teste_ate ? diasEntre(hoje, dia(e.teste_ate)) : null, plataforma: e.plataforma, idioma: e.idioma,
-        plano: e.plano_id ? { id: e.plano_id, nome: e.plano_nome, valor: Number(e.mensalidade_valor ?? e.plano_preco) } : null,
+        plano: e.plano_id ? { id: e.plano_id, nome: e.plano_nome, valor: Number(e.mensalidade_valor ?? e.plano_preco), limiteUnidades: e.limite_unidades, limiteProdutos: e.limite_produtos } : null,
+        adicionais: e.adicionais ?? {},
+        valorMensal: e.plano_id ? await this.valorMensal(e.id) : null,
         diaVencimento: e.dia_vencimento, responsavel: e.responsavel ?? {},
       },
       admin,
       planos: (await this.planosPublicos()).planos,
+      modulosAvulsos: await this.modulosAvulsos(),
       mensalidades,
       implantacao: await this.implantacao(u.empresaId),
       downloads: await this.listaDownloads(false),
@@ -241,7 +244,54 @@ export class RevendaService implements OnApplicationBootstrap, OnModuleDestroy {
     const proprio = e?.mensalidade_valor !== null && e?.mensalidade_valor !== undefined;
     const valor = proprio ? Number(e.mensalidade_valor) : Math.round(Number(p.preco) * (1 - desconto / 100) * 100) / 100;
     if (desconto > 0 && !proprio) await this.ds.query(`UPDATE empresas SET mensalidade_valor = $2 WHERE id = $1`, [u.empresaId, valor.toFixed(2)]);
-    if (!jaTem) await this.criarMensalidade(u.empresaId, venc.slice(0, 7), venc, valor, `Plano ${p.nome}`);
+    if (!jaTem) await this.criarMensalidade(u.empresaId, venc.slice(0, 7), venc, valor + (await this.somaAdicionais(u.empresaId)), `Plano ${p.nome}${await this.textoAdicionais(u.empresaId)}`);
+    // os módulos avulsos já contratados continuam liberados com o plano novo
+    // os fiscais ficam só os contratados à parte (sem isso, o "Notas fiscais" do plano liberaria todos)
+    await this.ds.query(`UPDATE empresas SET modulos = modulos || '{"nfce":false,"nfse":false,"nfe":false}'::jsonb || adicionais WHERE id = $1`, [u.empresaId]);
+    return this.area(u);
+  }
+
+  /* ============================================================ módulos avulsos (NFC-e, NFS-e, NF-e) */
+
+  /** módulos vendidos à parte, com o preço de cada um (Revenda › Ajustes) */
+  async modulosAvulsos() {
+    const cfg = await this.cfg() as Cfg & { precos_modulos?: Record<string, number> };
+    const precos = cfg.precos_modulos ?? { nfce: 70, nfse: 70, nfe: 70 };
+    return MODULOS_FISCAIS.map((m) => ({ id: m, nome: MODULOS[m], preco: Number(precos[m] ?? 70) }));
+  }
+
+  /** soma dos módulos avulsos contratados pela empresa */
+  private async somaAdicionais(empresaId: string) {
+    const [e] = await this.ds.query(`SELECT adicionais FROM empresas WHERE id = $1`, [empresaId]);
+    const ad = (e?.adicionais ?? {}) as Record<string, boolean>;
+    return (await this.modulosAvulsos()).filter((m) => ad[m.id]).reduce((s, m) => s + m.preco, 0);
+  }
+  private async textoAdicionais(empresaId: string) {
+    const [e] = await this.ds.query(`SELECT adicionais FROM empresas WHERE id = $1`, [empresaId]);
+    const ad = (e?.adicionais ?? {}) as Record<string, boolean>;
+    const l = (await this.modulosAvulsos()).filter((m) => ad[m.id]).map((m) => m.nome.split(' (')[0]);
+    return l.length ? ` + ${l.join(', ')}` : '';
+  }
+
+  /** mensalidade cheia: plano (com o desconto/valor combinado) + módulos avulsos */
+  async valorMensal(empresaId: string) {
+    const [e] = await this.ds.query(`SELECT COALESCE(e.mensalidade_valor, p.preco) AS base FROM empresas e LEFT JOIN planos p ON p.id = e.plano_id WHERE e.id = $1`, [empresaId]);
+    return Math.round((Number(e?.base ?? 0) + (await this.somaAdicionais(empresaId))) * 100) / 100;
+  }
+
+  /** o cliente liga ou desliga um módulo avulso (vale na próxima mensalidade) */
+  async alterarAdicional(u: UsuarioToken, dto: { modulo: string; ativo: boolean }) {
+    this.exigirAdmin(u);
+    if (!(MODULOS_FISCAIS as readonly string[]).includes(dto.modulo)) throw new BadRequestException('Módulo desconhecido.');
+    const [e] = await this.ds.query(`SELECT plano_id, plataforma FROM empresas WHERE id = $1`, [u.empresaId]);
+    if (e?.plataforma) throw new BadRequestException('A empresa da plataforma já tem tudo.');
+    if (!e?.plano_id) throw new BadRequestException('Escolha um plano primeiro; os módulos fiscais são somados a ele.');
+    const v = JSON.stringify({ [dto.modulo]: dto.ativo });
+    // liga também o módulo "Notas fiscais" (relatórios), que os fiscais usam
+    await this.ds.query(
+      `UPDATE empresas SET adicionais = adicionais || $2::jsonb,
+         modulos = modulos || $2::jsonb || CASE WHEN $3 THEN '{"notas":true}'::jsonb ELSE '{}'::jsonb END WHERE id = $1`, [u.empresaId, v, dto.ativo]);
+    this.esquecer(u.empresaId);
     return this.area(u);
   }
 
@@ -377,6 +427,112 @@ ${solucoes.map((s) => `- ${s.mensagem}: ${s.solucao}`).join('\n').slice(0, 4000)
       this.log.warn(`Sugestão do suporte: ${e instanceof Error ? e.message : e}`);
       throw new ServiceUnavailableException('O assistente não respondeu agora. Abra um chamado que a equipe responde.');
     }
+  }
+
+  /* ============================================================ atendente de vendas (IA no site) */
+
+  /** o atendente do site responde dúvidas de quem está conhecendo o sistema e pega o contato (lead) */
+  async conversarVendas(dto: { conversaId?: string; texto: string; parceiro?: string }, ip: string) {
+    const chave = process.env.ANTHROPIC_API_KEY;
+    const cfg = await this.cfg();
+    const zap = cfg.whatsapp ? `https://wa.me/55${cfg.whatsapp.replace(/^55/, '')}` : null;
+    let conversa: { id: string; mensagens: { de: 'cliente' | 'ia'; texto: string; em: string }[] } | null = null;
+    if (dto.conversaId) {
+      const [c] = await this.ds.query(`SELECT id, mensagens FROM vendas_conversas WHERE id = $1`, [dto.conversaId]);
+      if (c) conversa = c;
+    }
+    if (!conversa) {
+      const [c] = await this.ds.query(`INSERT INTO vendas_conversas (ip, parceiro) VALUES ($1,$2) RETURNING id, mensagens`, [ip.slice(0, 60), dto.parceiro?.slice(0, 20) ?? null]);
+      conversa = c;
+    }
+    const conv = conversa!;
+    if (conv.mensagens.length >= 60) return { conversaId: conv.id, texto: `Para continuarmos, fale com a nossa equipe${zap ? ` pelo WhatsApp: ${zap}` : ''}.`, whatsapp: zap };
+    const agora = new Date().toISOString();
+    conv.mensagens.push({ de: 'cliente', texto: dto.texto.trim().slice(0, 1500), em: agora });
+    if (!chave) {
+      const t = `Obrigado pelo interesse! Nossa equipe responde rapidinho${zap ? ` pelo WhatsApp: ${zap}` : ''}. Você também pode começar o teste grátis agora mesmo na seção "Teste grátis".`;
+      conv.mensagens.push({ de: 'ia', texto: t, em: agora });
+      await this.ds.query(`UPDATE vendas_conversas SET mensagens = $2::jsonb, atualizado_em = now(), lido = false WHERE id = $1`, [conv.id, JSON.stringify(conv.mensagens)]);
+      return { conversaId: conv.id, texto: t, whatsapp: zap };
+    }
+    const pub = await this.planosPublicos();
+    const planos = pub.planos.map((p: { nome: string; segmento?: string; preco: number; sobConsulta?: boolean; limiteUnidades?: number | null; limiteProdutos?: number | null; itens: string[]; publico?: string | null }) =>
+      `- ${p.segmento === 'restaurante' ? 'Restaurante/bar' : 'Hotel/pousada/motel'} · ${p.nome}: ${p.sobConsulta ? 'sob consulta' : `R$ ${p.preco.toFixed(2).replace('.', ',')}/mês`}${p.limiteUnidades ? ` · até ${p.limiteUnidades} suítes/quartos/mesas` : ''}${p.limiteProdutos ? ` · até ${p.limiteProdutos} produtos` : ''}${p.publico ? ` · ${p.publico}` : ''}${p.itens?.length ? ` · ${p.itens.join('; ')}` : ''}`).join('\n');
+    const avulsos = (await this.modulosAvulsos()).map((m) => `- ${m.nome}: + R$ ${m.preco.toFixed(2).replace('.', ',')}/mês`).join('\n');
+    const sistema = `Você é o atendente de vendas do VB Hotéis, da Virtual Barra – Soluções em Tecnologia (Barra do Piraí/RJ), no site do sistema.
+O VB Hotéis é um sistema de gestão para motéis, hotéis, pousadas e restaurantes: mapa das suítes/quartos/mesas em tempo real, entrada e saída, tarifas inteligentes,
+reservas, governança, caixa por turno, financeiro, conciliação bancária e de cartões, módulo do contador, estoque com importação de XML e conferência de tributação,
+precificação (preço, lucro e valor líquido), controle de garçom, crédito e débito para empresas (faturado), notas fiscais (NFC-e, NFS-e, NF-e), RH e ponto com foto,
+WhatsApp com IA, app de manutenção, funciona no computador, tablet e celular, e com servidor local para não parar sem internet.
+Hotel, motel e restaurante podem ficar no mesmo CNPJ e na mesma tela (empréstimo de suítes entre hotel e motel).
+Planos atuais:
+${planos}
+Módulos fiscais contratados à parte (somados à mensalidade):
+${avulsos}
+Teste grátis de ${cfg.teste_dias} dias, sem cartão, na seção "Teste grátis" do site. Implantação acompanhada pela equipe.
+Regras:
+- Responda em português do Brasil simples e curto (no máximo 6 linhas), simpático e direto, como um bom vendedor. Sem termos técnicos.
+- Use só as informações acima; se não souber (ex.: integração específica, preço especial, prazo), diga que a equipe confirma e ofereça o WhatsApp.
+- Ajude a escolher o plano pelo tamanho (número de suítes/quartos/mesas) e pelo que o cliente precisa.
+- Quando fizer sentido, convide para o teste grátis ou peça nome e telefone (WhatsApp) para a equipe ligar.
+- Quando o cliente informar nome, telefone, e-mail ou o tipo/nome do negócio, inclua no fim UMA linha exatamente assim (o cliente não vê):
+[CONTATO nome=...; telefone=...; email=...; negocio=...] (deixe vazio o que não souber).`;
+    try {
+      const ia = new Anthropic({ apiKey: chave, ...(process.env.ANTHROPIC_BASE_URL ? { baseURL: process.env.ANTHROPIC_BASE_URL } : {}) });
+      const hist = conv.mensagens.slice(-20).map((m) => ({ role: m.de === 'cliente' ? 'user' as const : 'assistant' as const, content: m.texto }));
+      while (hist.length && hist[0].role !== 'user') hist.shift();
+      const r = await ia.messages.create({ model: 'claude-sonnet-5-5', max_tokens: 700, system: sistema, messages: hist });
+      let texto = r.content.map((b) => (b.type === 'text' ? b.text : '')).join('').trim();
+      const ct = texto.match(/\[CONTATO ([^\]]*)\]/);
+      texto = texto.replace(/\[CONTATO [^\]]*\]/g, '').trim();
+      conv.mensagens.push({ de: 'ia', texto, em: new Date().toISOString() });
+      const campo = (k: string) => ct?.[1].match(new RegExp(`${k}=([^;]*)`))?.[1]?.trim() || null;
+      await this.ds.query(
+        `UPDATE vendas_conversas SET mensagens = $2::jsonb, atualizado_em = now(), lido = false,
+           nome = COALESCE($3, nome), telefone = COALESCE($4, telefone), email = COALESCE($5, email), negocio = COALESCE($6, negocio) WHERE id = $1`,
+        [conv.id, JSON.stringify(conv.mensagens), campo('nome')?.slice(0, 120) ?? null, (campo('telefone') ?? '').replace(/\D/g, '').slice(0, 20) || null,
+          campo('email')?.slice(0, 120) ?? null, campo('negocio')?.slice(0, 200) ?? null]);
+      return { conversaId: conv.id, texto, whatsapp: zap };
+    } catch (e) {
+      this.log.warn(`Atendente de vendas: ${e instanceof Error ? e.message : e}`);
+      const t = `Tive um probleminha para responder agora.${zap ? ` Fale com a equipe pelo WhatsApp: ${zap}` : ' Tente de novo em instantes.'}`;
+      return { conversaId: conv.id, texto: t, whatsapp: zap };
+    }
+  }
+
+  /** conversas do atendente do site (painel da revenda) */
+  async conversasVendas(u: UsuarioToken) {
+    await this.exigirPlataforma(u);
+    const l = await this.ds.query(`SELECT * FROM vendas_conversas WHERE jsonb_array_length(mensagens) > 0 ORDER BY atualizado_em DESC LIMIT 200`);
+    return l.map((c: Record<string, unknown>) => ({
+      id: c.id, nome: c.nome, telefone: c.telefone, email: c.email, negocio: c.negocio, parceiro: c.parceiro, lido: c.lido,
+      criadoEm: c.criado_em, atualizadoEm: c.atualizado_em, mensagens: c.mensagens,
+    }));
+  }
+  async marcarConversaLida(u: UsuarioToken, id: string) {
+    await this.exigirPlataforma(u);
+    await this.ds.query(`UPDATE vendas_conversas SET lido = true WHERE id = $1`, [id]);
+    return { ok: true };
+  }
+
+  /** relatório do suporte: chamados do período, por situação e categoria, e quanto a IA resolveu */
+  async relatorioSuporte(u: UsuarioToken, dias = 30) {
+    await this.exigirPlataforma(u);
+    const [r] = await this.ds.query(
+      `SELECT count(*)::int AS total,
+              count(*) FILTER (WHERE situacao = 'fechado')::int AS fechados,
+              count(*) FILTER (WHERE situacao <> 'fechado')::int AS abertos,
+              count(*) FILTER (WHERE EXISTS (SELECT 1 FROM suporte_mensagens m WHERE m.chamado_id = c.id AND m.autor = 'ia'))::int AS com_ia,
+              count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM suporte_mensagens m WHERE m.chamado_id = c.id AND m.autor = 'suporte'))::int AS sem_resposta_equipe
+         FROM suporte_chamados c WHERE c.criado_em > now() - ($1 || ' days')::interval`, [String(dias)]);
+    const cat = await this.ds.query(`SELECT categoria, count(*)::int AS n FROM suporte_chamados WHERE criado_em > now() - ($1 || ' days')::interval GROUP BY 1 ORDER BY 2 DESC`, [String(dias)]);
+    const emp = await this.ds.query(
+      `SELECT e.nome, count(*)::int AS n FROM suporte_chamados c JOIN empresas e ON e.id = c.empresa_id WHERE c.criado_em > now() - ($1 || ' days')::interval GROUP BY 1 ORDER BY 2 DESC LIMIT 10`, [String(dias)]);
+    const [v] = await this.ds.query(
+      `SELECT count(*)::int AS conversas, count(*) FILTER (WHERE telefone IS NOT NULL OR email IS NOT NULL)::int AS leads
+         FROM vendas_conversas WHERE criado_em > now() - ($1 || ' days')::interval AND jsonb_array_length(mensagens) > 0`, [String(dias)]);
+    const [er] = await this.ds.query(`SELECT count(*)::int AS n FROM erros_sistema WHERE NOT resolvido AND ultimo_em > now() - ($1 || ' days')::interval`, [String(dias)]);
+    return { dias, chamados: r, categorias: cat, empresas: emp, vendas: v, errosAbertos: er?.n ?? 0 };
   }
 
   /* ============================================================ erros do sistema */
@@ -592,17 +748,17 @@ Answer ONLY with a JSON array of strings, same order and same length as the inpu
     const l = await this.ds.query(`SELECT p.*, (SELECT count(*)::int FROM empresas e WHERE e.plano_id = p.id) AS clientes FROM planos p ORDER BY segmento, ordem, preco`);
     return { planos: l.map((p: Record<string, unknown>) => ({ ...p, preco: Number(p.preco) })), modulos: MODULOS, segmentos: SEGMENTOS, portes: PORTES };
   }
-  async salvarPlano(u: UsuarioToken, id: string | null, dto: { nome: string; descricao?: string | null; preco: number; modulos: Record<string, boolean>; limiteUnidades?: number | null; itens: string[]; destaque: boolean; ativo: boolean; ordem?: number; segmento?: string; porte?: string; sobConsulta?: boolean; publico?: string | null }) {
+  async salvarPlano(u: UsuarioToken, id: string | null, dto: { nome: string; descricao?: string | null; preco: number; modulos: Record<string, boolean>; limiteUnidades?: number | null; limiteProdutos?: number | null; itens: string[]; destaque: boolean; ativo: boolean; ordem?: number; segmento?: string; porte?: string; sobConsulta?: boolean; publico?: string | null }) {
     await this.exigirPlataforma(u);
     const m: Record<string, boolean> = {};
     for (const k of Object.keys(MODULOS)) if (dto.modulos?.[k]) m[k] = true;
     const v = [dto.nome.trim(), dto.descricao?.trim() || null, dto.preco.toFixed(2), JSON.stringify(m), dto.limiteUnidades ?? null, JSON.stringify(dto.itens.map((i) => i.trim()).filter(Boolean)), dto.destaque, dto.ativo, dto.ordem ?? 0,
-      SEGMENTOS[dto.segmento ?? ''] ? dto.segmento : 'hospedagem', PORTES[dto.porte ?? ''] ? dto.porte : 'pequeno', !!dto.sobConsulta, dto.publico?.trim() || null];
+      SEGMENTOS[dto.segmento ?? ''] ? dto.segmento : 'hospedagem', PORTES[dto.porte ?? ''] ? dto.porte : 'pequeno', !!dto.sobConsulta, dto.publico?.trim() || null, dto.limiteProdutos ?? null];
     if (id) {
-      const [linhas] = await this.ds.query(`UPDATE planos SET nome=$2, descricao=$3, preco=$4, modulos=$5::jsonb, limite_unidades=$6, itens=$7::jsonb, destaque=$8, ativo=$9, ordem=$10, segmento=$11, porte=$12, sob_consulta=$13, publico=$14 WHERE id = $1 RETURNING id`, [id, ...v]);
+      const [linhas] = await this.ds.query(`UPDATE planos SET nome=$2, descricao=$3, preco=$4, modulos=$5::jsonb, limite_unidades=$6, itens=$7::jsonb, destaque=$8, ativo=$9, ordem=$10, segmento=$11, porte=$12, sob_consulta=$13, publico=$14, limite_produtos=$15 WHERE id = $1 RETURNING id`, [id, ...v]);
       if (!linhas?.length) throw new NotFoundException('Plano não encontrado.');
     } else {
-      await this.ds.query(`INSERT INTO planos (nome, descricao, preco, modulos, limite_unidades, itens, destaque, ativo, ordem, segmento, porte, sob_consulta, publico) VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13)`, v);
+      await this.ds.query(`INSERT INTO planos (nome, descricao, preco, modulos, limite_unidades, itens, destaque, ativo, ordem, segmento, porte, sob_consulta, publico, limite_produtos) VALUES ($1,$2,$3,$4::jsonb,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13,$14)`, v);
     }
     return this.planos(u);
   }
@@ -716,8 +872,12 @@ Answer ONLY with a JSON array of strings, same order and same length as the inpu
     const [e] = await this.ds.query(`SELECT cobranca->>'ativo' AS ativo FROM empresas WHERE id = $1`, [plataforma]);
     return { ...c, asaasLigado: e?.ativo === 'true' };
   }
-  async salvarConfig(u: UsuarioToken, dto: { testeDias: number; diasAviso: number; diasBloqueio: number; whatsapp?: string | null; email?: string | null; textos?: Record<string, string> }) {
+  async salvarConfig(u: UsuarioToken, dto: { testeDias: number; diasAviso: number; diasBloqueio: number; whatsapp?: string | null; email?: string | null; textos?: Record<string, string>; precosModulos?: Record<string, number> }) {
     await this.exigirPlataforma(u);
+    if (dto.precosModulos) {
+      const p = Object.fromEntries(MODULOS_FISCAIS.map((m) => [m, Math.max(0, Math.round(Number(dto.precosModulos?.[m] ?? 70) * 100) / 100)]));
+      await this.ds.query(`UPDATE revenda_config SET precos_modulos = $1::jsonb WHERE id = 1`, [JSON.stringify(p)]);
+    }
     await this.ds.query(`UPDATE revenda_config SET teste_dias = $1, dias_aviso = $2, dias_bloqueio = $3, whatsapp = $4, email = $5, textos = $6::jsonb WHERE id = 1`,
       [dto.testeDias, dto.diasAviso, dto.diasBloqueio, soDigitos(dto.whatsapp) || null, dto.email?.trim() || null, JSON.stringify(dto.textos ?? {})]);
     return this.config(u);
@@ -876,7 +1036,7 @@ Answer ONLY with a JSON array of strings, same order and same length as the inpu
           const fimTeste = c.teste_ate ? dia(c.teste_ate) : null;
           if (fimTeste && venc <= fimTeste) continue;
           if (diasEntre(hoje, venc) > 10 || venc < hoje) continue;
-          await this.criarMensalidade(c.id, venc.slice(0, 7), venc, Number(c.valor), `Plano ${c.plano}`).catch(() => undefined);
+          await this.criarMensalidade(c.id, venc.slice(0, 7), venc, Number(c.valor) + (await this.somaAdicionais(c.id)), `Plano ${c.plano}${await this.textoAdicionais(c.id)}`).catch(() => undefined);
         }
       }
       await this.atualizarSituacao(c.id, cfg).catch(() => undefined);

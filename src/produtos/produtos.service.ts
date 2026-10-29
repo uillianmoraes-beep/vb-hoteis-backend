@@ -325,6 +325,13 @@ export class ProdutosService {
   }
 
   async criar(empresaId: string, dto: CriarProdutoDto) {
+    // limite de produtos do plano (Start, Plus…); a empresa da plataforma e quem está sem plano não têm limite
+    const [lim] = await this.repo.query(
+      `SELECT p.limite_produtos AS limite, (SELECT count(*)::int FROM produtos x WHERE x.empresa_id = e.id AND x.ativo) AS n, p.nome
+         FROM empresas e JOIN planos p ON p.id = e.plano_id WHERE e.id = $1 AND NOT e.plataforma`, [empresaId]).catch(() => []);
+    if (lim?.limite && Number(lim.n) >= Number(lim.limite)) {
+      throw new BadRequestException(`O plano ${lim.nome} vai até ${lim.limite} produtos. Desative os que não usa ou troque de plano na Área do cliente.`);
+    }
     await this.codigoLivre(empresaId, dto.codigo);
     await this.barrasLivre(empresaId, dto.codigoBarras);
     const salvo = await this.repo.save(

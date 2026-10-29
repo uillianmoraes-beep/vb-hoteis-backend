@@ -18,6 +18,11 @@ class TesteDto {
   @IsOptional() @IsString() @MaxLength(20) parceiro?: string;
   @IsBoolean() aceite!: boolean;
 }
+class AtendenteDto {
+  @IsOptional() @IsUUID() conversaId?: string;
+  @IsString() @MinLength(1) @MaxLength(1500) texto!: string;
+  @IsOptional() @IsString() @MaxLength(20) parceiro?: string;
+}
 class SejaParceiroDto {
   @IsIn(['indicacao', 'revenda', 'marca']) tipo!: string;
   @IsString() @MinLength(2) @MaxLength(150) nome!: string;
@@ -112,6 +117,7 @@ class PlanoDto {
   @IsNumber() @Min(0) preco!: number;
   @IsObject() modulos!: Record<string, boolean>;
   @IsOptional() @IsInt() @Min(1) limiteUnidades?: number | null;
+  @IsOptional() @IsInt() @Min(1) limiteProdutos?: number | null;
   @IsArray() @ArrayMaxSize(20) @IsString({ each: true }) itens!: string[];
   @IsBoolean() destaque!: boolean;
   @IsBoolean() ativo!: boolean;
@@ -158,6 +164,12 @@ class ConfigDto {
   @IsOptional() @IsString() @MaxLength(20) whatsapp?: string | null;
   @IsOptional() @IsString() @MaxLength(120) email?: string | null;
   @IsOptional() @IsObject() textos?: Record<string, string>;
+  /** preço de cada módulo fiscal avulso: { nfce, nfse, nfe } */
+  @IsOptional() @IsObject() precosModulos?: Record<string, number>;
+}
+class AdicionalDto {
+  @IsIn(['nfce', 'nfse', 'nfe']) modulo!: string;
+  @IsBoolean() ativo!: boolean;
 }
 
 type Resposta = { setHeader: (k: string, v: string) => void };
@@ -169,6 +181,13 @@ export class RevendaPublicoController {
   constructor(private readonly s: RevendaService) {}
 
   @Publico() @Get('planos') planos() { return this.s.planosPublicos(); }
+
+  /** atendente de vendas com IA (bolha "Tirar dúvidas" do site) */
+  @Publico() @Post('atendente') @HttpCode(200)
+  atendente(@Body() dto: AtendenteDto, @Ip() ip: string, @Req() req: { headers: Record<string, string | undefined> }) {
+    const real = (req.headers['x-forwarded-for'] ?? '').split(',')[0].trim() || ip;
+    return this.s.conversarVendas(dto, real);
+  }
 
   @Publico() @Post('teste') @HttpCode(200)
   teste(@Body() dto: TesteDto, @Ip() ip: string, @Req() req: { headers: Record<string, string | undefined> }) {
@@ -203,6 +222,7 @@ export class AreaClienteController {
   @Get() area(@Usuario() u: UsuarioToken) { return this.s.area(u); }
   @Get('sessao') sessao(@Usuario() u: UsuarioToken) { return this.s.infoSessao(u.empresaId); }
   @Post('contratar') @HttpCode(200) contratar(@Usuario() u: UsuarioToken, @Body() dto: ContratarDto) { return this.s.contratar(u, dto); }
+  @Post('adicionais') @HttpCode(200) adicional(@Usuario() u: UsuarioToken, @Body() dto: AdicionalDto) { return this.s.alterarAdicional(u, dto); }
   @Post('mensalidades/:id/pagar') @HttpCode(200) pagar(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.s.pagar(u, id); }
 
   @Get('suporte') chamados(@Usuario() u: UsuarioToken) { return this.s.chamados(u); }
@@ -250,6 +270,9 @@ export class RevendaController {
   @Post('rotina') @HttpCode(200) async rotina(@Usuario() u: UsuarioToken) { await this.s.exigirPlataforma(u); await this.s.rotina(); return { ok: true }; }
 
   @Get('suporte') chamados(@Usuario() u: UsuarioToken, @Query('situacao') situacao?: string) { return this.s.chamadosPlataforma(u, situacao); }
+  @Get('suporte-relatorio') relatorioSuporte(@Usuario() u: UsuarioToken, @Query('dias') dias?: string) { return this.s.relatorioSuporte(u, Math.min(365, Math.max(1, Number(dias) || 30))); }
+  @Get('conversas-site') conversas(@Usuario() u: UsuarioToken) { return this.s.conversasVendas(u); }
+  @Post('conversas-site/:id/lida') @HttpCode(200) conversaLida(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.s.marcarConversaLida(u, id); }
   @Get('suporte/:id') chamado(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string) { return this.s.verChamadoPlataforma(u, id); }
   @Post('suporte/:id') @HttpCode(200) responder(@Usuario() u: UsuarioToken, @Param('id', ParseUUIDPipe) id: string, @Body() dto: RespostaDto) { return this.s.responderSuporte(u, id, dto); }
 

@@ -5,7 +5,7 @@ import { Usuario } from '../common/decorators/usuario.decorator';
 import { Requer } from '../common/decorators/requer.decorator';
 import { UsuarioToken } from '../common/permissoes';
 import { NotasFiscaisService } from './notas-fiscais.service';
-import { CancelarNotaDto, CartaCorrecaoDto, CertificadoA1Dto, EmissorDto, EmitirContaDto, EmitirDevolucaoDto, EmitirNfeDto } from './notas-fiscais.dto';
+import { CancelarNotaDto, CartaCorrecaoDto, CertificadoA1Dto, XmlEntradaDto, EmissorDto, EmitirContaDto, EmitirDevolucaoDto, EmitirNfeDto } from './notas-fiscais.dto';
 
 /** Notas emitidas pelo sistema (Focus NFe ou Spedy): NFC-e, NF-e, NFS-e e devolução. */
 @Controller('notas-fiscais')
@@ -37,6 +37,23 @@ export class NotasFiscaisController {
   @Requer('notas.gerenciar')
   testar(@Usuario() u: UsuarioToken, @Param('cnpj') cnpj: string) {
     return this.service.testarEmissor(u, cnpj);
+  }
+
+  /** guarda o XML de uma nota de compra (entrada) importada no estoque ou nas contas a pagar */
+  @Post('entradas')
+  @HttpCode(200)
+  guardarEntrada(@Usuario() u: UsuarioToken, @Body() dto: XmlEntradaDto) {
+    return this.service.guardarEntrada(u, dto.xml);
+  }
+
+  /** ZIP com os XMLs das notas do mês (guardados 5 anos no sistema) — ?mes=AAAA-MM */
+  @Get('xmls')
+  @Requer('notas.gerenciar', 'contador.acessar')
+  async xmls(@Usuario() u: UsuarioToken, @Query('mes') mes: string, @Res() res: Response) {
+    const z = await this.service.pacoteXml(u, mes);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${z.nome}"`);
+    res.send(z.dados);
   }
 
   /** a recepção só precisa saber se já dá para emitir pelo sistema */

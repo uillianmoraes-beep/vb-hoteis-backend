@@ -12,6 +12,7 @@ const LIMITES: [RegExp, number, number][] = [
   [/^\/api\/auth\/login/, 30, 10],
   [/^\/api\/auth\/confirmar-senha/, 30, 10],
   [/^\/api\/publico\/revenda\/(teste|parceiro)/, 10, 60],
+  [/^\/api\/publico\/revenda\/atendente/, 40, 10],
   [/^\/api\/publico\//, 600, 10],
 ];
 

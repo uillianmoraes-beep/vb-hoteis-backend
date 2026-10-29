@@ -32,6 +32,11 @@ export class EmissorDto {
   @IsOptional() @IsInt() @Min(1) @Max(999_999_999) dpsProximoProducao?: number;
 }
 
+/** XML de nota de compra (entrada) para guardar 5 anos */
+export class XmlEntradaDto {
+  @IsString() @MinLength(200) @MaxLength(3_000_000) xml!: string;
+}
+
 /** certificado A1 para o emissor próprio: arquivo .pfx em base64 e a senha (guardados cifrados) */
 export class CertificadoA1Dto {
   @IsString() @MinLength(100) @MaxLength(60_000) pfx!: string;

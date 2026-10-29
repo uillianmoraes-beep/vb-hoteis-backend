@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { DataSource } from 'typeorm';
 import { cifrar, decifrar } from '../common/cripto';
 import { DadosFiscais, tributacaoEfetiva } from '../common/fiscal';
-import { moduloAtivo } from '../common/modulos';
+import { fiscalLiberado, moduloAtivo } from '../common/modulos';
 import { UsuarioToken } from '../common/permissoes';
 import { conferirItem } from '../fiscal/conferencia';
 import { liberarPermissao } from '../common/liberacao';
@@ -10,6 +10,7 @@ import { AmbienteFocus, CaminhoFocus, ErroFocus, Focus, RespostaFocus, mensagemF
 import { Spedy, assinarArquivo } from './spedy';
 import { Nacional, danfseHtml, lerCertificado, type Certificado } from './nacional';
 import { createHash } from 'crypto';
+import JSZip from 'jszip';
 
 /** empresa que leva a nota à SEFAZ/prefeitura (as duas falam o mesmo "idioma" para o resto do sistema) */
 type Provedor = Focus | Spedy | Nacional;
@@ -117,6 +118,11 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
       for (const n of l) {
         try { await this.atualizarNota(n.empresa_id, n.id, 'Sistema'); } catch (e) { this.log.warn(`nota ${n.id}: ${(e as Error).message}`); }
       }
+      // guarda por 5 anos o XML das notas autorizadas que ainda não foram guardadas
+      const sem: { id: string; empresa_id: string }[] = await this.ds.query(
+        `SELECT id, empresa_id FROM notas_fiscais WHERE xml_autorizado IS NULL AND status IN ('autorizado','cancelado') AND xml_tentativas < 20
+          ORDER BY criado_em DESC LIMIT 20`);
+      for (const n of sem) await this.guardarXml(n.empresa_id, n.id).catch(() => undefined);
     } catch { /* tabela ainda não criada */ } finally { this.rodando = false; }
   }
 
@@ -466,6 +472,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
         mensagem, focus.arquivo(j.caminho_xml_nota_fiscal), focus.arquivo(j.caminho_danfe ?? j.url_danfse ?? null), j.url_consulta_nf ?? j.url ?? null, JSON.stringify(j)]);
     const [n] = await this.ds.query(`SELECT estadia_id, parte_id FROM notas_fiscais WHERE id = $1`, [id]);
     if (n?.estadia_id) await this.sincronizarConta(empresaId, n.estadia_id, n.parte_id, quem);
+    if (status === 'autorizado') void this.guardarXml(empresaId, id).catch(() => undefined);
   }
 
   /**
@@ -557,8 +564,14 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     if (doc && doc.length !== 11 && doc.length !== 14) doc = null;
 
     const quais = dto.quais ?? 'tudo';
-    const querCons = (quais === 'tudo' || quais === 'nfce') && alvoCons > 0.004 && produtos.length > 0 && !jaTem('nfce');
-    const querHosp = (quais === 'tudo' || quais === 'nfse') && alvoHosp > 0.004 && !jaTem('nfse');
+    // módulos fiscais contratados à parte: o que não está contratado não sai (e avisa)
+    const podeNfce = fiscalLiberado(emp.modulos, 'nfce');
+    const podeNfse = fiscalLiberado(emp.modulos, 'nfse');
+    const querCons = (quais === 'tudo' || quais === 'nfce') && alvoCons > 0.004 && produtos.length > 0 && !jaTem('nfce') && podeNfce;
+    const querHosp = (quais === 'tudo' || quais === 'nfse') && alvoHosp > 0.004 && !jaTem('nfse') && podeNfse;
+    if (!podeNfce && quais === 'nfce') throw new BadRequestException('O módulo NFC-e não está contratado. Contrate em Área do cliente › Módulos fiscais.');
+    if (!podeNfse && quais === 'nfse') throw new BadRequestException('O módulo NFS-e não está contratado. Contrate em Área do cliente › Módulos fiscais.');
+    if (!podeNfce && !podeNfse) throw new BadRequestException('Nenhum módulo de nota (NFC-e ou NFS-e) está contratado. Contrate em Área do cliente › Módulos fiscais.');
     if (!querCons && !querHosp) {
       throw new BadRequestException(feitas.length ? 'As notas desta conta já foram emitidas (ou estão em processamento).' : 'Esta conta não tem valor para nota.');
     }
@@ -774,6 +787,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
   /** NF-e de venda (empresa, entrega, outro estado) */
   async emitirNfe(u: UsuarioToken, dto: EmitirNfeDto) {
     const emp = await this.exigirModulo(u);
+    if (!fiscalLiberado(emp.modulos, 'nfe')) throw new BadRequestException('O módulo NF-e não está contratado. Contrate em Área do cliente › Módulos fiscais.');
     const { cnpj, chave } = dto.cnpj ? { cnpj: so(dto.cnpj), chave: so(dto.cnpj) === so(emp.cnpj) ? 'principal' : so(dto.cnpj) } : await this.cnpjDoAmbiente(u.empresaId, dto.ambienteId ?? null);
     const em = await this.emissor(u.empresaId, cnpj);
     const regime = em.e.dados.regime ?? regimeDe(emp.regime_tributario);
@@ -799,6 +813,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
   /** NF-e de devolução: ao fornecedor (saída) ou do cliente (entrada), sempre ligada à nota original pela chave */
   async emitirDevolucao(u: UsuarioToken, dto: EmitirDevolucaoDto) {
     const emp = await this.exigirModulo(u);
+    if (!fiscalLiberado(emp.modulos, 'nfe')) throw new BadRequestException('A nota de devolução faz parte do módulo NF-e, que não está contratado. Contrate em Área do cliente › Módulos fiscais.');
     let chaveRef = so(dto.chaveReferenciada);
     let notaRefId: string | null = null;
     let cnpjEmit = dto.cnpj ? so(dto.cnpj) : '';
@@ -840,6 +855,118 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
       tipo: 'devolucao', cnpj: cnpjEmit, emissor: em, corpo, valor: total, destinatario: { nome: dto.destinatario.nome, documento: dest.doc },
       origem: 'devolucao', notaReferenciadaId: notaRefId, chaveReferenciada: chaveRef,
     });
+  }
+
+  /* ----------------------------------------------- guarda dos XMLs (5 anos) */
+
+  /** baixa o XML da nota autorizada do emissor e guarda no sistema (a lei pede 5 anos) */
+  async guardarXml(empresaId: string, id: string) {
+    const [n] = await this.ds.query(`SELECT * FROM notas_fiscais WHERE id = $1 AND empresa_id = $2`, [id, empresaId]);
+    if (!n) return;
+    if (n.status === 'cancelado' && !n.xml_cancelamento) await this.guardarEvento(empresaId, id, 'cancelamento').catch(() => undefined);
+    if (n.xml_autorizado) return;
+    let xml: string | null = null;
+    try {
+      if (n.provedor === 'proprio') xml = (n.resposta?.nfse_xml as string) ?? null;
+      else if (typeof n.url_xml === 'string' && n.url_xml.startsWith('/publico/notas-arquivo')) {
+        const q = Object.fromEntries(new URL(`http://x${n.url_xml}`).searchParams) as Record<string, string>;
+        const a = await this.arquivoSpedy(q);
+        xml = a.dados.toString('utf8');
+      } else if (typeof n.url_xml === 'string' && /^https?:\/\//.test(n.url_xml)) {
+        const r = await fetch(n.url_xml, { signal: AbortSignal.timeout(30_000) });
+        if (r.ok) xml = await r.text();
+      }
+    } catch { /* tenta de novo na próxima rodada */ }
+    if (xml && /<\w/.test(xml)) {
+      await this.ds.query(`UPDATE notas_fiscais SET xml_autorizado = $2, xml_guardado_em = now() WHERE id = $1`, [id, xml]);
+    } else {
+      await this.ds.query(`UPDATE notas_fiscais SET xml_tentativas = xml_tentativas + 1 WHERE id = $1`, [id]);
+    }
+  }
+
+  /** XML do cancelamento ou da carta de correção, do emissor que fez a nota (Focus, Spedy ou próprio) */
+  async guardarEvento(empresaId: string, id: string, qual: 'cancelamento' | 'correcao', resposta?: Record<string, unknown>) {
+    const [n] = await this.ds.query(`SELECT * FROM notas_fiscais WHERE id = $1 AND empresa_id = $2`, [id, empresaId]);
+    if (!n) return;
+    let xml: string | null = null;
+    try {
+      const j = (resposta ?? n.resposta ?? {}) as Record<string, unknown>;
+      if (n.provedor === 'proprio') xml = qual === 'cancelamento' ? ((j.evento_cancelamento as string) ?? null) : null;
+      else {
+        const prov = await this.focusDa(empresaId, n);
+        if (prov instanceof Spedy) xml = await prov.xmlEvento(TIPO_CAMINHO[n.tipo as TipoNota], n.ref, qual);
+        else if (prov instanceof Focus) {
+          const caminho = (qual === 'cancelamento' ? j.caminho_xml_cancelamento : j.caminho_xml_carta_correcao) as string | undefined;
+          const url = prov.arquivo(caminho);
+          if (url) { const r = await fetch(url, { signal: AbortSignal.timeout(30_000) }); if (r.ok) xml = await r.text(); }
+        }
+      }
+    } catch { /* tenta de novo depois */ }
+    if (xml && /<\w/.test(xml)) await this.ds.query(`UPDATE notas_fiscais SET ${qual === 'cancelamento' ? 'xml_cancelamento' : 'xml_correcao'} = $2 WHERE id = $1`, [id, xml]);
+  }
+
+  /** guarda o XML de uma nota de compra (entrada) que a empresa importou: estoque ou contas a pagar */
+  async guardarEntrada(u: UsuarioToken, xml: string) {
+    const chave = (xml.match(/Id="NFe(\d{44})"/) ?? xml.match(/<chNFe>(\d{44})<\/chNFe>/))?.[1];
+    if (!chave) throw new BadRequestException('Não achei a chave de acesso neste XML (é uma NF-e?).');
+    const tagDe = (bloco: string, nome: string) => bloco.match(new RegExp(`<${nome}>([^<]*)</${nome}>`))?.[1] ?? null;
+    const emit = xml.match(/<emit>([\s\S]*?)<\/emit>/)?.[1] ?? '';
+    const ide = xml.match(/<ide>([\s\S]*?)<\/ide>/)?.[1] ?? '';
+    const total = xml.match(/<ICMSTot>([\s\S]*?)<\/ICMSTot>/)?.[1] ?? '';
+    await this.ds.query(
+      `INSERT INTO notas_entrada (empresa_id, chave, numero, emitente_cnpj, emitente_nome, valor, emitida_em, xml, criado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (empresa_id, chave) DO NOTHING`,
+      [u.empresaId, chave, tagDe(ide, 'nNF'), tagDe(emit, 'CNPJ'), (tagDe(emit, 'xNome') ?? '').slice(0, 150) || null,
+        tagDe(total, 'vNF') ? Number(tagDe(total, 'vNF')) : null, tagDe(ide, 'dhEmi') ?? tagDe(ide, 'dEmi'), xml, u.nome]);
+    return { ok: true, chave };
+  }
+
+  /** pacote (ZIP) com os XMLs das notas do mês, separados por modelo, para o contador */
+  async pacoteXml(u: UsuarioToken, mes: string) {
+    await this.exigirModulo(u);
+    if (!/^\d{4}-\d{2}$/.test(mes)) throw new BadRequestException('Informe o mês (AAAA-MM).');
+    const [a, m] = mes.split('-').map(Number);
+    const ini = `${mes}-01T00:00:00-03:00`;
+    const fim = new Date(Date.UTC(m === 12 ? a + 1 : a, m === 12 ? 0 : m, 1, 3)).toISOString();
+    const l: { id: string; tipo: string; status: string; numero: string | null; chave: string | null; xml_autorizado: string | null; criado_em: Date }[] = await this.ds.query(
+      `SELECT id, tipo, status, numero, chave, xml_autorizado, criado_em FROM notas_fiscais
+        WHERE empresa_id = $1 AND status IN ('autorizado','cancelado') AND criado_em >= $2 AND criado_em < $3 ORDER BY criado_em`, [u.empresaId, ini, fim]);
+    // as que ainda não foram guardadas: tenta agora
+    for (const n of l.filter((x) => !x.xml_autorizado).slice(0, 200)) {
+      await this.guardarXml(u.empresaId, n.id).catch(() => undefined);
+      const [x] = await this.ds.query(`SELECT xml_autorizado FROM notas_fiscais WHERE id = $1`, [n.id]);
+      n.xml_autorizado = x?.xml_autorizado ?? null;
+    }
+    const zip = new JSZip();
+    const pasta: Record<string, string> = { nfce: 'NFC-e', nfe: 'NF-e', devolucao: 'NF-e devolucao', nfse: 'NFS-e', nfsen: 'NFS-e' };
+    const eventos: { id: string; xml_cancelamento: string | null; xml_correcao: string | null }[] = l.length
+      ? await this.ds.query(`SELECT id, xml_cancelamento, xml_correcao FROM notas_fiscais WHERE id = ANY($1::uuid[])`, [l.map((n) => n.id)]) : [];
+    const faltam: string[] = [];
+    let saidas = 0, canceladas = 0, correcoes = 0;
+    for (const n of l) {
+      const nome = `${n.chave || n.numero || n.id}.xml`;
+      const ev = eventos.find((x) => x.id === n.id);
+      if (!n.xml_autorizado) { faltam.push(`${NOME_TIPO[n.tipo as TipoNota] ?? n.tipo} ${n.numero ?? ''} (${n.chave ?? n.id})`); continue; }
+      if (n.status === 'cancelado') {
+        canceladas++;
+        zip.file(`3 - Canceladas/${pasta[n.tipo] ?? n.tipo}/${nome}`, n.xml_autorizado);
+        if (ev?.xml_cancelamento) zip.file(`3 - Canceladas/${pasta[n.tipo] ?? n.tipo}/${nome.replace('.xml', '-evento-cancelamento.xml')}`, ev.xml_cancelamento);
+      } else { saidas++; zip.file(`2 - Saidas/${pasta[n.tipo] ?? n.tipo}/${nome}`, n.xml_autorizado); }
+      if (ev?.xml_correcao) { correcoes++; zip.file(`4 - Cartas de correcao/${nome.replace('.xml', '-carta-correcao.xml')}`, ev.xml_correcao); }
+    }
+    // notas de compra (entrada) importadas no mês
+    const entradas: { chave: string; xml: string }[] = await this.ds.query(
+      `SELECT chave, xml FROM notas_entrada WHERE empresa_id = $1 AND COALESCE(emitida_em, criado_em) >= $2 AND COALESCE(emitida_em, criado_em) < $3`, [u.empresaId, ini, fim]);
+    for (const e of entradas) zip.file(`1 - Entradas/${e.chave}.xml`, e.xml);
+    zip.file('LEIA-ME.txt', [
+      `Notas fiscais de ${mes}`,
+      `1 - Entradas (notas de compra importadas): ${entradas.length}`,
+      `2 - Saídas autorizadas: ${saidas}`,
+      `3 - Canceladas: ${canceladas}`,
+      `4 - Cartas de correção: ${correcoes}`,
+      faltam.length ? `Sem XML no emissor ainda (${faltam.length}):\n${faltam.join('\n')}` : 'Todas as notas de saída com XML.',
+    ].join('\n'));
+    return { nome: `notas-${mes}.zip`, dados: await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }) };
   }
 
   /* ------------------------------------------------- acompanhar e cancelar */
@@ -892,6 +1019,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     if (st === 'cancelado') {
       await this.ds.query(`UPDATE notas_fiscais SET status = 'cancelado', justificativa_cancelamento = $2, cancelada_em = now(), cancelada_por = $3, mensagem = $4, atualizado_em = now() WHERE id = $1`,
         [id, j, liberou ? `${u.nome} (liberado por ${liberou})` : u.nome, r.json.mensagem_sefaz ?? 'Cancelada.']);
+      void this.guardarEvento(u.empresaId, id, 'cancelamento', r.json as Record<string, unknown>).catch(() => undefined);
       if (n.estadia_id) await this.sincronizarConta(u.empresaId, n.estadia_id, n.parte_id, u.nome);
       if (n.estadia_id) await this.ds.query(`INSERT INTO estadia_eventos (empresa_id, estadia_id, tipo, descricao, usuario_nome) VALUES ($1,$2,'nota',$3,$4)`,
         [u.empresaId, n.estadia_id, `${NOME_TIPO[n.tipo]} ${n.numero ?? ''} cancelada · ${j}`, u.nome]);
@@ -912,6 +1040,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     if (r.json.status !== 'autorizado') throw new BadRequestException(`Carta de correção recusada: ${mensagemFocus(r.json)}`);
     const pdf = focus.arquivo(r.json.caminho_pdf_carta_correcao);
     await this.ds.query(`UPDATE notas_fiscais SET mensagem = $2, atualizado_em = now() WHERE id = $1`, [id, `Carta de correção nº ${r.json.numero_carta_correcao ?? ''} autorizada.`]);
+    void this.guardarEvento(u.empresaId, id, 'correcao', r.json as Record<string, unknown>).catch(() => undefined);
     return { ok: true, numero: r.json.numero_carta_correcao ?? null, urlPdf: pdf };
   }
 }

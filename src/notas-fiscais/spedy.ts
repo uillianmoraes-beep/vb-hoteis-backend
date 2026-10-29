@@ -253,6 +253,19 @@ export class Spedy {
     return { status: 200, json: { status: 'autorizado', numero_carta_correcao: undefined, caminho_pdf_carta_correcao: undefined } };
   }
 
+  /** XML do último evento de cancelamento ou de carta de correção da nota (para guardar 5 anos) */
+  async xmlEvento(tipo: CaminhoFocus, ref: string, qual: 'cancelamento' | 'correcao'): Promise<string | null> {
+    const modelo = MODELO[tipo];
+    const n = await this.achar(modelo, ref);
+    if (!n?.id) return null;
+    const ev = await this.chamar('GET', `/${modelo}/${n.id}/events`);
+    const lista = (Array.isArray(ev.json) ? ev.json : (ev.json.items ?? [])) as J[];
+    const alvo = [...lista].reverse().find((e) => e.hasXml !== false && (qual === 'cancelamento' ? /cancel/i : /corre/i).test(JSON.stringify(e)));
+    if (!alvo?.id) return null;
+    const r = await fetch(`${this.base}/v1/${modelo}/${n.id}/events/${alvo.id}/xml`, { headers: { 'X-Api-Key': this.chave }, signal: AbortSignal.timeout(30_000) }).catch(() => null);
+    return r?.ok ? r.text() : null;
+  }
+
   /** os arquivos da Spedy pedem a chave: o sistema entrega por um endereço próprio, assinado */
   arquivo(caminho: string | undefined | null) {
     if (!caminho) return null;
