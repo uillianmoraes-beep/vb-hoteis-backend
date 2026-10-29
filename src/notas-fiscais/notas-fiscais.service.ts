@@ -586,14 +586,15 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     if (querHosp) {
       const hosp = await this.dadosHospedagem(u.empresaId, emp.fiscal?.hospedagem);
       const descr = `Hospedagem${un?.codigo ? ` - suíte ${un.codigo}` : ''} - entrada ${new Date(e.entrada_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}${e.saida_em ? `, saída ${new Date(e.saida_em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })}` : ''}`;
-      notas.push(await this.emitirServico(u, em, regime, hosp, { valor: alvoHosp, descricao: descr, doc, nome, estadiaId, parteId: dto.parteId ?? null }));
+      const [amb] = await this.ds.query(`SELECT tipo FROM ambientes WHERE id = $1`, [e.ambiente_id]);
+      notas.push(await this.emitirServico(u, em, regime, hosp, { valor: alvoHosp, descricao: descr, doc, nome, estadiaId, parteId: dto.parteId ?? null, tipoAmbiente: amb?.tipo ?? null }));
     }
     return { notas, avisos };
   }
 
   /** NFS-e da hospedagem (ou de um serviço): padrão nacional (DPS) ou o da prefeitura */
   private async emitirServico(u: UsuarioToken, em: { e: Emissor; focus: Provedor }, regime: 'simples' | 'mei' | 'normal', f: DadosFiscais,
-    a: { valor: number; descricao: string; doc: string | null; nome: string | null; estadiaId: string | null; parteId: string | null }) {
+    a: { valor: number; descricao: string; doc: string | null; nome: string | null; estadiaId: string | null; parteId: string | null; tipoAmbiente?: string | null }) {
     const d = em.e.dados;
     if (!d.codigoMunicipio) throw new BadRequestException('Falta o código IBGE do município no emissor de notas (Configuração fiscal › Emissor de notas).');
     // hospedagem é o item 09.01 da LC 116; a alíquota do ISS pode vir do Padrão NFS-e ou do emissor
@@ -601,7 +602,11 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     const tomadorDoc = a.doc;
     if (em.e.nfse_padrao === 'nacional') {
       const item = so(f.codigoServico);
-      const cTribNac = item.length >= 6 ? item.slice(0, 6) : item.padStart(4, '0') + '01';
+      // código nacional de 6 números: o do Padrão NFS-e (ex.: 09.01.03) ou, só com o item 09.01, pelo tipo do ambiente
+      // (hotel 09.01.01, pousada 09.01.02, motel 09.01.03), como na lista de serviços nacional
+      const SUBITEM_HOSPEDAGEM: Record<string, string> = { motel: '03', pousada: '02', hotel: '01' };
+      const cTribNac = item.length >= 6 ? item.slice(0, 6)
+        : item.padStart(4, '0') === '0901' ? `0901${SUBITEM_HOSPEDAGEM[a.tipoAmbiente ?? ''] ?? '01'}` : item.padStart(4, '0') + '01';
       const dps = await this.proximoDps(u.empresaId, em.e);
       const corpo: Record<string, unknown> = {
         data_emissao: agoraSP(), data_competencia: hojeSP(), serie_dps: dps.serie, numero_dps: dps.numero, emitente_dps: 1,
