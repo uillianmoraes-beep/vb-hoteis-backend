@@ -239,6 +239,15 @@ export class EstadiasService {
     return e;
   }
 
+  /**
+   * Dentro da transação: trava a conta e confere de novo que continua aberta. Dois cliques
+   * (ou dois computadores) ao mesmo tempo esperam um pelo outro e o segundo é recusado.
+   */
+  private async travarAberta(m: EntityManager, id: string) {
+    const linhas = await m.query(`SELECT id FROM estadias WHERE id = $1 AND status = ANY($2) FOR UPDATE`, [id, ABERTAS]);
+    if (!linhas.length) throw new BadRequestException('Esta conta já foi encerrada.');
+  }
+
   private async mudarUnidade(m: EntityManager, u: UsuarioToken, unidade: Unidade, novo: StatusUnidade, obs?: string) {
     await m.update(Unidade, { id: unidade.id }, { status: novo, statusDesde: new Date(), motivoBloqueioId: null, observacaoStatus: null });
     await m.insert(UnidadeEvento, {
@@ -436,6 +445,10 @@ export class EstadiasService {
         + (ehMesa ? 'mesa aberta' : hotel ? `${noites} noite(s) · diária ${brl(Math.round(hotel.diaria * 100))} · total ${brl(Math.round(hotel.total * 100))} · saída prevista ${saidaPrevista!.split('-').reverse().join('/')}` : `tabela ${tabela!.nome}`)
         + (modalidade === 'pernoite' ? ', pernoite' : minimo ? `, pacote ${minimo.nome}` : ''));
       return e;
+    }).catch((err: { code?: string }) => {
+      // outro computador deu entrada nesta unidade no mesmo instante (o banco só deixa uma conta aberta)
+      if (err?.code === '23505') throw new BadRequestException(`A unidade ${unidade.codigo} acabou de receber uma entrada em outro computador. Atualize a tela.`);
+      throw err;
     });
     // promoção com brinde (Tarifas inteligentes): entra na conta com preço zero
     try {
@@ -603,9 +616,11 @@ export class EstadiasService {
     const libE = await this.liberarAcao(u, 'estadias.estornar', 'estornar itens', dto.autorizacao, { ambienteId: e.ambienteId, estadiaId: e.id, detalhe: dto.motivo });
     if (libE) dto.motivo = `${dto.motivo.trim()} · liberado por ${libE}`;
     await this.ds.transaction(async (m) => {
-      await m.update(EstadiaItem, { id: item.id }, { status: 'estornado', motivoEstorno: dto.motivo.trim(), estornadoPor: u.nome, estornadoEm: new Date() });
+      // só estorna se ainda estiver ativo: dois cliques juntos não devolvem o produto duas vezes ao estoque
+      const r = await m.update(EstadiaItem, { id: item.id, status: 'ativo' }, { status: 'estornado', motivoEstorno: dto.motivo.trim(), estornadoPor: u.nome, estornadoEm: new Date() });
+      if (!r.affected) throw new BadRequestException('Este item já foi estornado.');
       await devolverConsumo(m, u.empresaId, `item:${item.id}`, u.nome);
-      await this.registrar(m, u, e.id, 'estorno', `Estorno: ${item.descricao} · ${brl(centavos(item.total))} · ${dto.motivo.trim()}`);
+      await this.registrar(m, u, e.id, 'estorno', `Estorno:${item.descricao} · ${brl(centavos(item.total))} · ${dto.motivo.trim()}`);
     });
     return this.detalhe(u, id);
   }
@@ -793,6 +808,7 @@ export class EstadiasService {
     const unidade = await this.unidades.findOneOrFail({ where: { id: e.unidadeId } });
     const turnoId = pags.length ? await this.caixa.turnoParaRecebimento(u.empresaId, e.ambienteId) : null;
     await this.ds.transaction(async (m) => {
+      await this.travarAberta(m, e.id);
       for (const p of pags) {
         const ins = await m.insert(EstadiaPagamento, {
           empresaId: u.empresaId, estadiaId: e.id, forma: p.forma, valor: reais(p.valor),
@@ -932,6 +948,7 @@ export class EstadiasService {
     const devolver = pagos.filter((p) => p.forma !== 'faturado' && p.forma !== 'penhora' && Number(p.valor) > 0);
     const turnoId = devolver.length ? await this.caixa.turnoParaRecebimento(u.empresaId, e.ambienteId) : null;
     await this.ds.transaction(async (m) => {
+      await this.travarAberta(m, e.id);
       for (const it of ativos) {
         await m.update(EstadiaItem, { id: it.id }, { status: 'estornado', motivoEstorno: `Entrada cancelada: ${dto.motivo.trim()}`, estornadoPor: u.nome, estornadoEm: new Date() });
         await devolverConsumo(m, u.empresaId, `item:${it.id}`, u.nome);
