@@ -351,6 +351,11 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     if (e.nfse_proprio) {
       const nac = focus instanceof Nacional ? focus : this.nacional(u.empresaId, e, e.ambiente);
       if (!(focus instanceof Nacional)) await nac.testar(e.dados?.codigoMunicipio);
+      // a cidade do emissor precisa ser a do CNPJ (o sistema nacional recusa com E0312): confere no cadastro público
+      const cad = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${e.cnpj}`, { signal: AbortSignal.timeout(8000) }).then((x) => (x.ok ? x.json() : null)).catch(() => null) as { municipio?: string; codigo_municipio_ibge?: number } | null;
+      if (cad?.codigo_municipio_ibge && e.dados?.codigoMunicipio && String(cad.codigo_municipio_ibge) !== String(e.dados.codigoMunicipio)) {
+        throw new BadRequestException(`O código da cidade no emissor (${e.dados.codigoMunicipio}) não é o da cidade do CNPJ: ${cad.municipio} = ${cad.codigo_municipio_ibge}. Corrija em Alterar › Código IBGE da cidade.`);
+      }
       if (e.dados?.codigoMunicipio) partes.push(`Cadastro no sistema nacional · ${(await nac.diagnostico(e.dados.codigoMunicipio).catch(() => [] as string[])).join(' · ')}.`);
       partes.push(`Emissor próprio da NFS-e: certificado de ${e.cert_titular ?? 'titular'} (vale até ${e.cert_validade ? new Date(e.cert_validade).toLocaleDateString('pt-BR') : '—'}) e conexão com o sistema nacional ${e.ambiente === 'producao' ? 'de produção' : 'de testes (produção restrita)'} ok.`);
     }
