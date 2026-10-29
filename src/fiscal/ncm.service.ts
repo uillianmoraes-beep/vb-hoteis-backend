@@ -53,9 +53,15 @@ export class NcmService {
   private async baixar() {
     const r = await fetch(URL_NCM, { redirect: 'follow' });
     if (!r.ok) throw new ServiceUnavailableException('Não consegui baixar a tabela de NCM do governo agora. Tente de novo em instantes.');
-    const j = (await r.json()) as { Data_Ultima_Atualizacao_NCM?: string; Nomenclaturas: { Codigo: string; Descricao: string }[] };
-    const porCodigo = new Map(j.Nomenclaturas.map((x) => [x.Codigo, limpa(x.Descricao)]));
-    const itens = j.Nomenclaturas.filter((x) => /^\d{4}\.\d{2}\.\d{2}$/.test(x.Codigo)).map((x) => {
+    // o site do governo às vezes devolve uma página de erro ou um formato diferente: vira aviso, não erro interno
+    const j = (await r.json().catch(() => null)) as { Data_Ultima_Atualizacao_NCM?: string; Nomenclaturas?: { Codigo: string; Descricao: string }[] } | null;
+    if (!Array.isArray(j?.Nomenclaturas) || !j!.Nomenclaturas.length) {
+      const aviso = (j as { message?: string } | null)?.message;
+      throw new ServiceUnavailableException(aviso ? `Site do governo (NCM): ${aviso}` : 'A tabela de NCM do governo veio incompleta agora. Tente de novo em instantes.');
+    }
+    const nomenclaturas = j!.Nomenclaturas;
+    const porCodigo = new Map(nomenclaturas.map((x) => [x.Codigo, limpa(x.Descricao)]));
+    const itens = nomenclaturas.filter((x) => /^\d{4}\.\d{2}\.\d{2}$/.test(x.Codigo)).map((x) => {
       const d = x.Codigo.replace(/\D/g, '');
       // caminho: capítulo › posição › subposições › item
       const chaves = [d.slice(0, 2), `${d.slice(0, 2)}.${d.slice(2, 4)}`, `${d.slice(0, 4)}.${d[4]}`, `${d.slice(0, 4)}.${d.slice(4, 6)}`, `${d.slice(0, 4)}.${d.slice(4, 6)}.${d[6]}`];
