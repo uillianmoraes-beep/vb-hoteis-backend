@@ -25,6 +25,13 @@ export class NotasFiscaisController {
     return this.service.salvarEmissor(u, cnpj, dto);
   }
 
+  /** dados públicos do CNPJ para preencher o emitente da NFC-e */
+  @Get('cnpj/:cnpj')
+  @Requer('notas.gerenciar')
+  dadosCnpj(@Usuario() u: UsuarioToken, @Param('cnpj') cnpj: string) {
+    return this.service.dadosCnpj(u, cnpj);
+  }
+
   /** certificado A1 do emissor próprio (a senha não volta nunca) */
   @Put('emissores/:cnpj/certificado')
   @Requer('notas.gerenciar')

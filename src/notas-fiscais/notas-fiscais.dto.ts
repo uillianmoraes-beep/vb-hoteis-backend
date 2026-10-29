@@ -15,6 +15,20 @@ class DadosEmissorDto {
   @IsOptional() @IsNumber() @Min(0) @Max(100) aliquotaIss?: number;
 }
 
+/** dados do estabelecimento que vão na NFC-e própria */
+class EmitenteDto {
+  @IsOptional() @IsString() @MaxLength(60) razao?: string;
+  @IsOptional() @IsString() @MaxLength(60) fantasia?: string;
+  @IsOptional() @IsString() @MaxLength(20) ie?: string;
+  @IsOptional() @IsString() @MaxLength(60) logradouro?: string;
+  @IsOptional() @IsString() @MaxLength(60) numero?: string;
+  @IsOptional() @IsString() @MaxLength(60) complemento?: string;
+  @IsOptional() @IsString() @MaxLength(60) bairro?: string;
+  @IsOptional() @IsString() @MaxLength(60) municipio?: string;
+  @IsOptional() @IsString() @MaxLength(10) cep?: string;
+  @IsOptional() @IsString() @MaxLength(20) fone?: string;
+}
+
 /** emissor de um CNPJ na Focus (os tokens só são trocados quando vierem preenchidos) */
 export class EmissorDto {
   @IsIn(['homologacao', 'producao']) ambiente!: 'homologacao' | 'producao';
@@ -26,6 +40,15 @@ export class EmissorDto {
   @IsOptional() @IsString() @MaxLength(300) spedyProducao?: string;
   /** NFS-e nacional pelo emissor próprio (precisa do certificado A1 guardado) */
   @IsOptional() @IsBoolean() nfseProprio?: boolean;
+  /** NFC-e pelo emissor próprio (direto na SEFAZ) */
+  @IsOptional() @IsBoolean() nfceProprio?: boolean;
+  @IsOptional() @ValidateNested() @Type(() => EmitenteDto) emitente?: EmitenteDto;
+  /** CSC da NFC-e: número do token (idCSC) e o código (fornecidos pela SEFAZ) */
+  @IsOptional() @IsString() @MaxLength(10) cscId?: string;
+  @IsOptional() @IsString() @MaxLength(60) cscToken?: string;
+  @IsOptional() @IsInt() @Min(1) @Max(999) nfceSerie?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(999_999_999) nfceProximoProducao?: number;
+  @IsOptional() @IsInt() @Min(1) @Max(999_999_999) nfceProximoHomologacao?: number;
   @IsOptional() @IsIn(['nacional', 'municipal']) nfsePadrao?: 'nacional' | 'municipal';
   @IsOptional() @ValidateNested() @Type(() => DadosEmissorDto) dados?: DadosEmissorDto;
   @IsOptional() @IsInt() @Min(1) @Max(49999) dpsSerie?: number;

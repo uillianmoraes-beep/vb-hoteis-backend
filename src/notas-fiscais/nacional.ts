@@ -138,7 +138,7 @@ export function montarCancelamento(chave: string, cnpjAutor: string, tpAmb: 1 | 
 }
 
 /** assinatura digital (XMLDSig, RSA-SHA1, C14N, envelopada) logo depois do grupo assinado */
-export function assinar(xml: string, grupo: 'infDPS' | 'infPedReg', cert: Certificado) {
+export function assinar(xml: string, grupo: 'infDPS' | 'infPedReg' | 'infNFe' | 'infEvento' | 'infInut', cert: Certificado) {
   const sig = new SignedXml({
     privateKey: cert.chavePem,
     publicCert: cert.certPem,

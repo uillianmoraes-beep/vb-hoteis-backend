@@ -9,11 +9,12 @@ import { liberarPermissao } from '../common/liberacao';
 import { AmbienteFocus, CaminhoFocus, ErroFocus, Focus, RespostaFocus, mensagemFocus } from './focus';
 import { Spedy, assinarArquivo } from './spedy';
 import { Nacional, danfseHtml, lerCertificado, type Certificado } from './nacional';
+import { SefazNfce, danfceHtml, type EmitenteNfce } from './nfce';
 import { createHash } from 'crypto';
 import JSZip from 'jszip';
 
 /** empresa que leva a nota à SEFAZ/prefeitura (as duas falam o mesmo "idioma" para o resto do sistema) */
-type Provedor = Focus | Spedy | Nacional;
+type Provedor = Focus | Spedy | Nacional | SefazNfce;
 const NOME_PROVEDOR = { focus: 'Focus NFe', spedy: 'Spedy', proprio: 'emissor próprio (sistema nacional)' } as const;
 /** certificados já abertos (abrir o .pfx é lento): chave = resumo do arquivo cifrado */
 const CERTS = new Map<string, Certificado>();
@@ -40,6 +41,12 @@ interface Emissor {
   cert_senha: string | null;
   cert_validade: Date | null;
   cert_titular: string | null;
+  /** NFC-e pelo emissor próprio (direto na SEFAZ) */
+  nfce_proprio: boolean;
+  emitente: Partial<EmitenteNfce> & { razao?: string };
+  csc_id: string | null;
+  csc_token: string | null;
+  nfce_serie: number;
   token_homologacao: string | null;
   token_producao: string | null;
   nfse_padrao: 'nacional' | 'municipal';
@@ -123,6 +130,10 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
         `SELECT id, empresa_id FROM notas_fiscais WHERE xml_autorizado IS NULL AND status IN ('autorizado','cancelado') AND xml_tentativas < 20
           ORDER BY criado_em DESC LIMIT 20`);
       for (const n of sem) await this.guardarXml(n.empresa_id, n.id).catch(() => undefined);
+      // NFC-e emitidas em contingência: transmite assim que a SEFAZ e a internet voltam
+      const cont: { id: string; empresa_id: string }[] = await this.ds.query(
+        `SELECT id, empresa_id FROM notas_fiscais WHERE provedor = 'proprio' AND tipo = 'nfce' AND resposta->>'contingencia_pendente' = 'true' ORDER BY criado_em LIMIT 20`);
+      for (const n of cont) await this.atualizarNota(n.empresa_id, n.id, 'Sistema').catch((e) => this.log.warn(`contingência ${n.id}: ${(e as Error).message}`));
     } catch { /* tabela ainda não criada */ } finally { this.rodando = false; }
   }
 
@@ -172,15 +183,16 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     try {
       return { e: e as Emissor, focus: this.provedor(empresaId, e as Emissor, e.ambiente, e.provedor) };
     } catch (err) {
-      if (e.nfse_proprio && e.cert_pfx) return { e: { ...(e as Emissor), provedor: 'proprio' as never }, focus: this.provedor(empresaId, e as Emissor, e.ambiente, 'proprio') };
+      if ((e.nfse_proprio || e.nfce_proprio) && e.cert_pfx) return { e: { ...(e as Emissor), provedor: 'proprio' as never }, focus: this.provedor(empresaId, e as Emissor, e.ambiente, 'proprio') };
       throw err;
     }
   }
 
   /** cliente da Focus ou da Spedy com a chave do ambiente pedido */
-  private provedor(empresaId: string, e: Emissor, ambiente: AmbienteFocus, qual: 'focus' | 'spedy' | 'proprio'): Provedor {
+  private provedor(empresaId: string, e: Emissor, ambiente: AmbienteFocus, qual: 'focus' | 'spedy' | 'proprio' | 'sefaz'): Provedor {
     const prod = ambiente === 'producao';
     if (qual === 'proprio') return this.nacional(empresaId, e, ambiente);
+    if (qual === 'sefaz') return this.sefaz(empresaId, e, ambiente);
     const nome = NOME_PROVEDOR[qual] ?? 'emissor';
     const cripto = qual === 'spedy' ? (prod ? e.spedy_chave_producao : e.spedy_chave_homologacao) : (prod ? e.token_producao : e.token_homologacao);
     if (!cripto) throw new BadRequestException(`Falta a chave de ${prod ? 'produção' : 'testes'} da ${nome} para o CNPJ ${e.cnpj}.`);
@@ -197,7 +209,8 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** emissor próprio da NFS-e nacional com o certificado A1 guardado */
-  private nacional(empresaId: string, e: Emissor, ambiente: AmbienteFocus): Nacional {
+  /** certificado A1 guardado do emissor (aberto uma vez e lembrado) */
+  private certificado(e: Emissor): Certificado {
     if (!e.cert_pfx || !e.cert_senha) throw new BadRequestException(`Falta o certificado A1 do CNPJ ${e.cnpj} para o emissor próprio (Configuração fiscal › Emissor de notas).`);
     const h = createHash('sha256').update(e.cert_pfx).digest('hex');
     let cert = CERTS.get(h);
@@ -207,6 +220,41 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
       if (CERTS.size > 200) CERTS.clear();
       CERTS.set(h, cert);
     }
+    return cert;
+  }
+
+  /** NFC-e direto na SEFAZ do estado, com o A1 e o CSC da empresa */
+  private sefaz(empresaId: string, e: Emissor, ambiente: AmbienteFocus): SefazNfce {
+    const cert = this.certificado(e);
+    const m = (e.emitente ?? {}) as Partial<EmitenteNfce>;
+    const regime = e.dados?.regime;
+    const emit: EmitenteNfce = {
+      cnpj: e.cnpj, razao: m.razao ?? '', fantasia: m.fantasia, ie: m.ie ?? '', crt: regime === 'normal' ? 3 : regime === 'mei' ? 4 : 1,
+      logradouro: m.logradouro ?? '', numero: m.numero ?? '', complemento: m.complemento, bairro: m.bairro ?? '',
+      cMun: e.dados?.codigoMunicipio ?? m.cMun ?? '', municipio: m.municipio ?? '', uf: (e.dados?.uf ?? m.uf ?? '').toUpperCase(), cep: m.cep ?? '', fone: m.fone,
+    };
+    let csc: { id: string; token: string } | undefined;
+    if (e.csc_id && e.csc_token) {
+      try { csc = { id: e.csc_id, token: decifrar(e.csc_token, 'vb-csc') }; } catch { throw new BadRequestException('Não consegui ler o CSC guardado. Salve o CSC de novo.'); }
+    }
+    return new SefazNfce(cert, ambiente, emit, csc, (caminho) => this.enderecoArquivo(empresaId, e.cnpj, ambiente, caminho),
+      async (ref) => {
+        const [n] = await this.ds.query(`SELECT resposta, envio FROM notas_fiscais WHERE empresa_id = $1 AND ref = $2`, [empresaId, ref]);
+        return n ?? null;
+      });
+  }
+
+  /** próximo número da NFC-e própria (série e contador do emissor, por ambiente) */
+  private async proximoNfceProprio(empresaId: string, e: Emissor) {
+    const col = e.ambiente === 'producao' ? 'nfce_proximo_producao' : 'nfce_proximo_homologacao';
+    const [linhas] = await this.ds.query(`UPDATE focus_emissores SET ${col} = ${col} + 1 WHERE empresa_id = $1 AND cnpj = $2 RETURNING ${col} - 1 AS numero, nfce_serie AS serie`, [empresaId, e.cnpj]);
+    const r = linhas?.[0];
+    if (!r) throw new BadRequestException('Não consegui reservar o número da NFC-e.');
+    return { numero: Number(r.numero), serie: Number(r.serie) };
+  }
+
+  private nacional(empresaId: string, e: Emissor, ambiente: AmbienteFocus): Nacional {
+    const cert = this.certificado(e);
     return new Nacional(cert, ambiente, e.cnpj, (caminho) => this.enderecoArquivo(empresaId, e.cnpj, ambiente, caminho),
       async (ref) => {
         const [n] = await this.ds.query(`SELECT resposta, envio FROM notas_fiscais WHERE empresa_id = $1 AND ref = $2`, [empresaId, ref]);
@@ -219,14 +267,14 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     const d = `${q.e}|${q.c}|${q.a}|${q.p}`;
     if (!q.e || !q.c || !q.p || !q.s || !['producao', 'homologacao'].includes(q.a ?? '') || assinarArquivo(d) !== q.s) throw new NotFoundException('Arquivo não encontrado.');
     // emissor próprio: o XML da NFS-e fica guardado com a nota; o "PDF" é a DANFSe para imprimir
-    const nac = q.p.match(/^nacional:([0-9A-Z]{50})\/(xml|pdf)$/);
+    const nac = q.p.match(/^nacional:([0-9A-Z]{44,50})\/(xml|pdf)$/);
     if (nac) {
       const [n] = await this.ds.query(`SELECT resposta FROM notas_fiscais WHERE empresa_id = $1 AND cnpj_emitente = $2 AND chave = $3 LIMIT 1`, [q.e, q.c, nac[1]]);
-      const xml = n?.resposta?.nfse_xml as string | undefined;
-      if (!xml) throw new NotFoundException('Arquivo não encontrado.');
-      return nac[2] === 'xml'
-        ? { tipo: 'application/xml', dados: Buffer.from(xml, 'utf8') }
-        : { tipo: 'text/html; charset=utf-8', dados: Buffer.from(danfseHtml(xml), 'utf8') };
+      const nfse = n?.resposta?.nfse_xml as string | undefined;
+      const nfe = n?.resposta?.nfe_xml as string | undefined;
+      if (!nfse && !nfe) throw new NotFoundException('Arquivo não encontrado.');
+      if (nac[2] === 'xml') return { tipo: 'application/xml', dados: Buffer.from((nfse ?? nfe)!, 'utf8') };
+      return { tipo: 'text/html; charset=utf-8', dados: Buffer.from(nfse ? danfseHtml(nfse) : await danfceHtml(nfe!), 'utf8') };
     }
     const [e] = await this.ds.query(`SELECT * FROM focus_emissores WHERE empresa_id = $1 AND cnpj = $2`, [q.e, q.c]);
     if (!e) throw new NotFoundException('Arquivo não encontrado.');
@@ -287,6 +335,10 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
         spedyHomologacao: fimSpedy(s?.spedy_chave_homologacao ?? null),
         spedyProducao: fimSpedy(s?.spedy_chave_producao ?? null),
         nfseProprio: !!s?.nfse_proprio,
+        nfceProprio: !!s?.nfce_proprio,
+        emitente: s?.emitente ?? {},
+        csc: s?.csc_id ? { id: s.csc_id, token: s.csc_token ? '••••' : null } : null,
+        nfce: s ? { serie: s.nfce_serie, proximoProducao: (s as unknown as Record<string, number>).nfce_proximo_producao, proximoHomologacao: (s as unknown as Record<string, number>).nfce_proximo_homologacao } : null,
         certificado: s?.cert_pfx ? { titular: s.cert_titular, validade: s.cert_validade } : null,
         dps: s ? { serie: s.dps_serie, proximoHomologacao: s.dps_proximo_homologacao, proximoProducao: s.dps_proximo_producao } : null,
         atualizadoEm: s?.atualizado_em ?? null,
@@ -301,7 +353,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     const [r] = await this.ds.query(
       `SELECT ambiente FROM focus_emissores WHERE empresa_id = $1 AND ((CASE WHEN provedor = 'spedy' THEN (CASE WHEN ambiente = 'producao' THEN spedy_chave_producao ELSE spedy_chave_homologacao END)
          ELSE (CASE WHEN ambiente = 'producao' THEN token_producao ELSE token_homologacao END) END) IS NOT NULL
-         OR (nfse_proprio AND cert_pfx IS NOT NULL)) LIMIT 1`, [u.empresaId]);
+         OR ((nfse_proprio OR nfce_proprio) AND cert_pfx IS NOT NULL)) LIMIT 1`, [u.empresaId]);
     return { ligado: !!r, ambiente: r?.ambiente ?? null };
   }
 
@@ -326,7 +378,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     const sp = dto.spedyProducao?.trim() ? cifrar(dto.spedyProducao.trim(), 'vb-spedy') : null;
     if (dto.ambiente === 'producao' && !(provedor === 'spedy' ? sp : tp)) {
       const [s] = await this.ds.query(`SELECT token_producao, spedy_chave_producao, cert_pfx FROM focus_emissores WHERE empresa_id = $1 AND cnpj = $2`, [u.empresaId, c]);
-      const soProprio = dto.nfseProprio && !!s?.cert_pfx;
+      const soProprio = (dto.nfseProprio || dto.nfceProprio) && !!s?.cert_pfx;
       if (!soProprio && !(provedor === 'spedy' ? s?.spedy_chave_producao : s?.token_producao)) throw new BadRequestException(`Para usar produção, informe a chave de produção da ${NOME_PROVEDOR[provedor]}.`);
     }
     await this.ds.query(
@@ -337,9 +389,19 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
          token_homologacao = COALESCE($4, focus_emissores.token_homologacao), token_producao = COALESCE($5, focus_emissores.token_producao),
          nfse_padrao = EXCLUDED.nfse_padrao, dados = EXCLUDED.dados, dps_serie = COALESCE($8, focus_emissores.dps_serie),
          dps_proximo_producao = COALESCE($10, focus_emissores.dps_proximo_producao), atualizado_em = now(), atualizado_por = $9,
-         nfse_proprio = COALESCE($14, focus_emissores.nfse_proprio)`,
+         nfse_proprio = COALESCE($14, focus_emissores.nfse_proprio), nfce_proprio = COALESCE($15, focus_emissores.nfce_proprio),
+         emitente = COALESCE($16::jsonb, focus_emissores.emitente), csc_id = COALESCE($17, focus_emissores.csc_id), csc_token = COALESCE($18, focus_emissores.csc_token),
+         nfce_serie = COALESCE($19, focus_emissores.nfce_serie), nfce_proximo_producao = COALESCE($20, focus_emissores.nfce_proximo_producao),
+         nfce_proximo_homologacao = COALESCE($21, focus_emissores.nfce_proximo_homologacao)`,
       [u.empresaId, c, dto.ambiente, th, tp, dto.nfsePadrao ?? 'nacional', JSON.stringify(dados), dto.dpsSerie ?? null, u.nome, dto.dpsProximoProducao ?? null, provedor, sh, sp,
-        dto.nfseProprio ?? null]);
+        dto.nfseProprio ?? null, dto.nfceProprio ?? null,
+        dto.emitente ? JSON.stringify({
+          razao: dto.emitente.razao?.trim() || undefined, fantasia: dto.emitente.fantasia?.trim() || undefined, ie: so(dto.emitente.ie) || undefined,
+          logradouro: dto.emitente.logradouro?.trim() || undefined, numero: dto.emitente.numero?.trim() || undefined, complemento: dto.emitente.complemento?.trim() || undefined,
+          bairro: dto.emitente.bairro?.trim() || undefined, municipio: dto.emitente.municipio?.trim() || undefined, cep: so(dto.emitente.cep) || undefined, fone: so(dto.emitente.fone) || undefined,
+        }) : null,
+        dto.cscId?.trim() ? so(dto.cscId) : null, dto.cscToken?.trim() ? cifrar(dto.cscToken.trim(), 'vb-csc') : null,
+        dto.nfceSerie ?? null, dto.nfceProximoProducao ?? null, dto.nfceProximoHomologacao ?? null]);
     return (await this.emissores(u)).find((x) => x.cnpj === c);
   }
 
@@ -347,16 +409,18 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     await this.exigirModulo(u);
     const { focus, e } = await this.emissor(u.empresaId, so(cnpj));
     const partes: string[] = [];
-    if (focus instanceof Nacional) {
-      await focus.testar(e.dados?.codigoMunicipio);
-    } else {
+    // sem chave da Focus/Spedy (só os emissores próprios): o teste é feito em cada um, logo abaixo
+    if (!(focus instanceof Nacional) && !(focus instanceof SefazNfce)) {
       await focus.testar();
       const nome = NOME_PROVEDOR[e.provedor ?? 'focus'];
       partes.push(`Chave aceita pela ${nome} (${e.ambiente === 'producao' ? 'produção' : `${e.provedor === 'spedy' ? 'sandbox' : 'homologação'} — notas de teste, sem valor fiscal`}).`);
     }
+    if (e.nfce_proprio) {
+      partes.push(`NFC-e própria: ${await this.sefaz(u.empresaId, e, e.ambiente).testar()}`);
+    }
     if (e.nfse_proprio) {
-      const nac = focus instanceof Nacional ? focus : this.nacional(u.empresaId, e, e.ambiente);
-      if (!(focus instanceof Nacional)) await nac.testar(e.dados?.codigoMunicipio);
+      const nac = this.nacional(u.empresaId, e, e.ambiente);
+      await nac.testar(e.dados?.codigoMunicipio);
       // a cidade do emissor precisa ser a do CNPJ (o sistema nacional recusa com E0312): confere no cadastro público
       const cad = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${e.cnpj}`, { signal: AbortSignal.timeout(8000) }).then((x) => (x.ok ? x.json() : null)).catch(() => null) as { municipio?: string; codigo_municipio_ibge?: number } | null;
       if (cad?.codigo_municipio_ibge && e.dados?.codigoMunicipio && String(cad.codigo_municipio_ibge) !== String(e.dados.codigoMunicipio)) {
@@ -366,6 +430,20 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
       partes.push(`Emissor próprio da NFS-e: certificado de ${e.cert_titular ?? 'titular'} (vale até ${e.cert_validade ? new Date(e.cert_validade).toLocaleDateString('pt-BR') : '—'}) e conexão com o sistema nacional ${e.ambiente === 'producao' ? 'de produção' : 'de testes (produção restrita)'} ok.`);
     }
     return { ok: true, ambiente: e.ambiente, mensagem: partes.join(' ') };
+  }
+
+  /** dados públicos do CNPJ (Receita, pela BrasilAPI) para preencher o emitente da NFC-e */
+  async dadosCnpj(u: UsuarioToken, cnpj: string) {
+    await this.exigirModulo(u);
+    const c = so(cnpj);
+    if (c.length !== 14) throw new BadRequestException('CNPJ inválido.');
+    const r = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${c}`, { signal: AbortSignal.timeout(10_000) }).then((x) => (x.ok ? x.json() : null)).catch(() => null) as Record<string, unknown> | null;
+    if (!r) throw new BadRequestException('Não consegui consultar o CNPJ agora. Preencha à mão.');
+    return {
+      razao: r.razao_social, fantasia: r.nome_fantasia || undefined, logradouro: [r.descricao_tipo_de_logradouro, r.logradouro].filter(Boolean).join(' '),
+      numero: r.numero, complemento: r.complemento || undefined, bairro: r.bairro, municipio: r.municipio, uf: r.uf, cep: r.cep,
+      codigoMunicipio: r.codigo_municipio_ibge ? String(r.codigo_municipio_ibge) : undefined, fone: r.ddd_telefone_1 || undefined,
+    };
   }
 
   /** guarda o certificado A1 (arquivo .pfx e senha, cifrados) para o emissor próprio */
@@ -598,8 +676,11 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
       if (doc?.length === 11) corpo.cpf_destinatario = doc;
       if (doc?.length === 14) corpo.cnpj_destinatario = doc;
       if (nome && doc) corpo.nome_destinatario = nome;
-      if (em.e.ambiente === 'producao') Object.assign(corpo, await this.proximoNumero(u.empresaId, chave, 'nfce') ?? {});
-      notas.push(await this.enviar(u.empresaId, u.nome, { tipo: 'nfce', cnpj, emissor: em, corpo, valor: alvoCons, destinatario: { nome, documento: doc }, origem: 'conta', estadiaId, parteId: dto.parteId ?? null }));
+      // NFC-e própria: numeração do emissor (série própria) e envio direto à SEFAZ
+      const viaNfce = em.e.nfce_proprio ? { e: { ...em.e, provedor: 'proprio' as never }, focus: this.sefaz(u.empresaId, em.e, em.e.ambiente) } : em;
+      if (em.e.nfce_proprio) Object.assign(corpo, await this.proximoNfceProprio(u.empresaId, em.e));
+      else if (em.e.ambiente === 'producao') Object.assign(corpo, await this.proximoNumero(u.empresaId, chave, 'nfce') ?? {});
+      notas.push(await this.enviar(u.empresaId, u.nome, { tipo: 'nfce', cnpj, emissor: viaNfce, corpo, valor: alvoCons, destinatario: { nome, documento: doc }, origem: 'conta', estadiaId, parteId: dto.parteId ?? null }));
     }
 
     if (querHosp) {
@@ -867,7 +948,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     if (n.xml_autorizado) return;
     let xml: string | null = null;
     try {
-      if (n.provedor === 'proprio') xml = (n.resposta?.nfse_xml as string) ?? null;
+      if (n.provedor === 'proprio') xml = n.resposta?.contingencia_pendente ? null : ((n.resposta?.nfse_xml ?? n.resposta?.nfe_xml) as string) ?? null;
       else if (typeof n.url_xml === 'string' && n.url_xml.startsWith('/publico/notas-arquivo')) {
         const q = Object.fromEntries(new URL(`http://x${n.url_xml}`).searchParams) as Record<string, string>;
         const a = await this.arquivoSpedy(q);
@@ -981,7 +1062,8 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
   private async focusDa(empresaId: string, n: { cnpj_emitente: string | null; ambiente: AmbienteFocus; provedor?: string | null }): Promise<Provedor> {
     const [e] = await this.ds.query(`SELECT * FROM focus_emissores WHERE empresa_id = $1 AND cnpj = $2`, [empresaId, n.cnpj_emitente]);
     if (!e) throw new BadRequestException('O emissor deste CNPJ não está mais configurado.');
-    return this.provedor(empresaId, e as Emissor, n.ambiente, n.provedor === 'spedy' ? 'spedy' : n.provedor === 'proprio' ? 'proprio' : 'focus');
+    const tipo = (n as { tipo?: string }).tipo;
+    return this.provedor(empresaId, e as Emissor, n.ambiente, n.provedor === 'spedy' ? 'spedy' : n.provedor === 'proprio' ? (tipo === 'nfce' ? 'sefaz' : 'proprio') : 'focus');
   }
 
   private async atualizarNota(empresaId: string, id: string, quem: string) {
