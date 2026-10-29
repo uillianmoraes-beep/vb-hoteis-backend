@@ -213,7 +213,7 @@ export class NotasFiscaisService implements OnModuleInit, OnModuleDestroy {
     const d = `${q.e}|${q.c}|${q.a}|${q.p}`;
     if (!q.e || !q.c || !q.p || !q.s || !['producao', 'homologacao'].includes(q.a ?? '') || assinarArquivo(d) !== q.s) throw new NotFoundException('Arquivo não encontrado.');
     // emissor próprio: o XML da NFS-e fica guardado com a nota; o "PDF" é a DANFSe para imprimir
-    const nac = q.p.match(/^nacional:(\d{50})\/(xml|pdf)$/);
+    const nac = q.p.match(/^nacional:([0-9A-Z]{50})\/(xml|pdf)$/);
     if (nac) {
       const [n] = await this.ds.query(`SELECT resposta FROM notas_fiscais WHERE empresa_id = $1 AND cnpj_emitente = $2 AND chave = $3 LIMIT 1`, [q.e, q.c, nac[1]]);
       const xml = n?.resposta?.nfse_xml as string | undefined;

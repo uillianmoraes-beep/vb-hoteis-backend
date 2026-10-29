@@ -78,12 +78,18 @@ function agoraBrasilia() {
 
 /** Id da DPS: "DPS" + município (7) + tipo de inscrição (1=CPF, 2=CNPJ) + CNPJ/CPF (14) + série (5) + número (15) */
 export function idDps(cMun: string, doc: string, serie: string | number, numero: string | number) {
-  const d = so(doc);
+  const d = String(doc ?? '').toUpperCase().replace(/[^0-9A-Z]/g, '');
   return `DPS${so(cMun).padStart(7, '0')}${d.length === 11 ? '1' : '2'}${d.padStart(14, '0')}${String(serie).padStart(5, '0')}${String(numero).padStart(15, '0')}`;
 }
 
+/**
+ * leiaute em uso em cada ambiente: o novo (reforma tributária, com finNFSe) ou o anterior.
+ * Começa no novo; se o sistema nacional recusar pelo leiaute, troca e manda de novo (e lembra).
+ */
+const LEIAUTE_NOVO: Record<AmbienteFocus, boolean> = { producao: true, homologacao: true };
+
 /** DPS v1.01 a partir da nota no formato da Focus (NFS-e nacional) */
-export function montarDps(c: J, tpAmb: 1 | 2) {
+export function montarDps(c: J, tpAmb: 1 | 2, novo = true) {
   const cnpj = so(c.cnpj_prestador);
   const cMun = so(c.codigo_municipio_emissora);
   const serie = String(c.serie_dps ?? 1);
@@ -101,7 +107,7 @@ export function montarDps(c: J, tpAmb: 1 | 2) {
   const inf =
     `<infDPS Id="${id}">` +
     el('tpAmb', tpAmb) + el('dhEmi', agoraBrasilia()) + el('verAplic', VER_APLIC) + el('serie', serie) + el('nDPS', numero) +
-    el('dCompet', c.data_competencia) + el('tpEmit', 1) + el('cLocEmi', cMun) +
+    el('dCompet', c.data_competencia) + el('tpEmit', 1) + (novo ? el('finNFSe', 0) : '') + el('cLocEmi', cMun) +
     `<prest>${el('CNPJ', cnpj)}<regTrib>${el('opSimpNac', opSimp)}${opSimp === 3 ? el('regApTribSN', c.regime_tributario_simples_nacional ?? 1) : ''}${el('regEspTrib', c.regime_especial_tributacao ?? 0)}</regTrib></prest>` +
     tomador +
     `<serv>` +
@@ -223,7 +229,7 @@ export class Nacional {
   /** a nota pronta no jeito da Focus */
   private traduzir(json: J, idDpsEnviada: string | null): RespostaFocus {
     const xml = json.nfseXmlGZipB64 ? descompactar(String(json.nfseXmlGZipB64)) : null;
-    const chave = String(json.chaveAcesso ?? (xml ? (xml.match(/Id="NFS(\d{50})"/)?.[1] ?? '') : '')) || null;
+    const chave = String(json.chaveAcesso ?? (xml ? (xml.match(/Id="NFS([0-9A-Z]{50})"/)?.[1] ?? '') : '')) || null;
     return {
       status: 'autorizado',
       mensagem_sefaz: 'NFS-e gerada pelo sistema nacional.',
@@ -253,11 +259,19 @@ export class Nacional {
 
   async emitir(tipo: CaminhoFocus, _ref: string, corpo: unknown): Promise<{ status: number; json: RespostaFocus }> {
     if (tipo !== 'nfsen') throw new ErroFocus('O emissor próprio faz só a NFS-e padrão nacional por enquanto.');
-    const { id, xml } = montarDps(corpo as J, this.tpAmb);
-    const assinado = assinar(xml, 'infDPS', this.cert);
+    let { id, xml } = montarDps(corpo as J, this.tpAmb, LEIAUTE_NOVO[this.ambiente]);
+    let assinado = assinar(xml, 'infDPS', this.cert);
     let r: { status: number; json: J };
     try {
       r = await this.chamar('POST', '/nfse', { dpsXmlGZipB64: compactar(assinado) });
+      // recusa pelo leiaute (campo finNFSe a mais ou a menos): troca de leiaute e manda de novo, uma vez
+      const msg = mensagemNacional(r.json);
+      if (r.status >= 400 && /finNFSe/.test(msg)) {
+        LEIAUTE_NOVO[this.ambiente] = !LEIAUTE_NOVO[this.ambiente];
+        ({ id, xml } = montarDps(corpo as J, this.tpAmb, LEIAUTE_NOVO[this.ambiente]));
+        assinado = assinar(xml, 'infDPS', this.cert);
+        r = await this.chamar('POST', '/nfse', { dpsXmlGZipB64: compactar(assinado) });
+      }
     } catch {
       // não sabemos se chegou: fica "processando" e a consulta pela DPS resolve
       return { status: 202, json: { status: 'processando_autorizacao', mensagem: 'Sem resposta do sistema nacional; conferindo se a nota foi gerada.', id_dps: id, dps_xml: assinado } };
@@ -325,7 +339,7 @@ export function danfseHtml(xml: string) {
   const bloco = (nome: string) => xml.match(new RegExp(`<${nome}>([\\s\\S]*?)</${nome}>`))?.[1] ?? '';
   const emit = bloco('emit');
   const toma = bloco('toma');
-  const chave = xml.match(/Id="NFS(\d{50})"/)?.[1] ?? '';
+  const chave = xml.match(/Id="NFS([0-9A-Z]{50})"/)?.[1] ?? '';
   const teste = tag(xml, 'tpAmb') === '2'; // a DPS dentro da NFS-e diz o ambiente (2 = testes)
   const linha = (r: string, v: unknown) => `<tr><th>${esc(r)}</th><td>${esc(v)}</td></tr>`;
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>DANFSe ${esc(tag(xml, 'nNFSe'))}</title>
